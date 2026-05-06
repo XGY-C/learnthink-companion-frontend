@@ -2,6 +2,7 @@
 import { useRoute } from 'vue-router'
 import { computed, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
+import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, EditPen, DataLine } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -15,23 +16,29 @@ const toggleSidebar = () => {
 
 <template>
   <div class="flex h-screen w-full overflow-hidden bg-gray-50">
-    <!-- 左侧导航 -->
+        <!-- 左侧导航（深蓝黑底 #1A1A2E，激活指示条 #4B8BFF）-->
     <div
-      class="bg-white border-r border-gray-200 flex flex-col flex-shrink-0 z-20 shadow-sm transition-all duration-300 relative"
+      class="flex flex-col flex-shrink-0 z-20 transition-all duration-300 relative"
       :class="isCollapsed ? 'w-16' : 'w-60'"
+      style="background-color: #1A1A2E;"
     >
       <!-- Logo 区域 -->
       <div
-        class="h-16 flex items-center border-b border-gray-100 overflow-hidden transition-all duration-300"
+        class="h-16 flex items-center overflow-hidden transition-all duration-300"
         :class="isCollapsed ? 'justify-center px-0' : 'px-6'"
+        style="border-bottom: 1px solid rgba(255,255,255,0.08);"
       >
         <template v-if="isCollapsed">
-          <el-icon class="text-xl text-primary"><Monitor /></el-icon>
+          <div class="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-sm">
+            <span class="text-white font-bold text-sm">LT</span>
+          </div>
         </template>
         <template v-else>
-          <h1 class="text-lg font-bold text-primary flex items-center gap-2 whitespace-nowrap">
-            <el-icon class="text-xl"><Monitor /></el-icon>
-            LearnThink
+          <h1 class="text-lg font-bold flex items-center gap-2.5 whitespace-nowrap">
+            <div class="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-sm">
+              <span class="text-white font-bold text-sm">LT</span>
+            </div>
+            <span style="color: #FFFFFF;">LearnThink</span>
           </h1>
         </template>
       </div>
@@ -40,9 +47,10 @@ const toggleSidebar = () => {
       <div class="flex-1 overflow-y-auto py-4">
         <el-menu
           :default-active="activeMenu"
-          class="border-none bg-transparent"
+          class="border-none"
           router
           :collapse="isCollapsed"
+          style="background-color: transparent;"
         >
           <el-menu-item index="/">
             <el-icon><DataBoard /></el-icon>
@@ -66,41 +74,45 @@ const toggleSidebar = () => {
           </el-menu-item>
           <el-menu-item index="/library">
             <el-icon><DataLine /></el-icon>
-            <template #title>资源库库</template>
+            <template #title>资源库</template>
           </el-menu-item>
         </el-menu>
       </div>
 
       <!-- 用户信息 -->
       <div
-        class="border-t border-gray-100 transition-all duration-300"
+        class="transition-all duration-300"
         :class="isCollapsed ? 'p-2 flex justify-center' : 'p-4'"
+        style="border-top: 1px solid rgba(255,255,255,0.08);"
       >
         <template v-if="isCollapsed">
-          <el-avatar :size="28" class="bg-primary text-white">L</el-avatar>
+          <el-avatar :size="28" style="background-color: #4B8BFF;">L</el-avatar>
         </template>
         <template v-else>
           <div class="flex items-center gap-3">
-            <el-avatar :size="32" class="bg-primary text-white">L</el-avatar>
+            <el-avatar :size="32" style="background-color: #4B8BFF;">L</el-avatar>
             <div class="flex-1 min-w-0 text-sm">
-              <p class="font-medium text-gray-800 truncate">{{ userStore.userInfo?.displayName || '测试用户' }}</p>
-                            <p class="text-gray-500 text-xs truncate">{{ userStore.userInfo?.major || '软件工程专业' }}</p>
+              <p class="font-medium truncate" style="color: #E8E8F0;">{{ userStore.userInfo?.displayName || '测试用户' }}</p>
+              <p class="text-xs truncate" style="color: #8E8EA0;">{{ userStore.userInfo?.major || '软件工程专业' }}</p>
             </div>
           </div>
         </template>
       </div>
 
       <!-- 收起/展开按钮 -->
-      <div class="border-t border-gray-100 flex justify-center">
+      <div class="flex justify-center" style="border-top: 1px solid rgba(255,255,255,0.08);">
         <el-tooltip
           :content="isCollapsed ? '展开侧边栏' : '收起侧边栏'"
           :placement="isCollapsed ? 'right' : 'top'"
         >
           <button
-            class="w-full py-2 flex items-center justify-center text-gray-400 hover:text-primary hover:bg-gray-50 transition-colors duration-200 outline-none cursor-pointer"
+            class="w-full py-2.5 flex items-center justify-center transition-all duration-200 outline-none cursor-pointer group"
+            style="color: #686880;"
             @click="toggleSidebar"
+                        @mouseenter="(e) => { (e.target as HTMLElement).style.color = '#FFFFFF' }"
+            @mouseleave="(e) => { (e.target as HTMLElement).style.color = '#686880' }"
           >
-            <el-icon class="text-base">
+            <el-icon class="text-base transition-transform duration-300 group-hover:scale-110">
               <Fold v-if="!isCollapsed" />
               <Expand v-else />
             </el-icon>
@@ -112,14 +124,43 @@ const toggleSidebar = () => {
     <!-- 右侧主体 -->
     <div class="flex-1 flex flex-col min-w-0">
       <!-- 顶部 Header -->
-      <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 z-10 shadow-sm">
-        <div class="text-gray-600 font-medium">
-          当前课程: <span class="text-gray-900 border border-gray-200 px-2 py-1 rounded bg-gray-50 text-sm ml-2">👩‍💻 现代前端工程化基础</span>
+            <header class="h-16 bg-white/80 backdrop-blur-md border-b border-gray-200 flex items-center justify-between px-6 z-10" style="box-shadow: 0 1px 3px rgba(0,0,0,0.03)">
+        <div class="flex items-center gap-3">
+          <el-icon class="text-gray-300 cursor-pointer hover:text-[#2B6FFF] transition-colors text-lg" @click="isCollapsed = !isCollapsed">
+            <Fold />
+          </el-icon>
+          <div class="text-sm text-gray-500">
+            当前课程
+            <span class="font-medium px-3 py-1.5 rounded-full text-sm ml-2 border" style="color: #5A5A72; background-color: #E8F0FE; border-color: #D6E4FF;">
+              <span class="mr-1">👩‍💻</span> 现代前端工程化基础
+            </span>
+          </div>
         </div>
-        <div class="flex items-center gap-4">
-          <el-input placeholder="搜索资源/知识点..." prefix-icon="Search" style="width: 200px" />
-          <el-button circle icon="Bell" />
-          <el-button circle icon="Setting" />
+        <div class="flex items-center gap-3">
+          <div class="relative">
+            <el-input
+              placeholder="搜索资源 / 知识点..."
+              :prefix-icon="Search"
+              style="width: 220px"
+              class="search-input"
+            />
+          </div>
+          <el-button
+            circle
+            icon="Bell"
+            class="header-icon-btn !border-0 !bg-transparent hover:!bg-gray-100"
+          >
+            <span class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white"></span>
+          </el-button>
+          <el-button
+            circle
+            icon="Setting"
+            class="header-icon-btn !border-0 !bg-transparent hover:!bg-gray-100"
+          />
+          <el-divider direction="vertical" class="!h-5 !mx-1" />
+          <el-avatar :size="32" class="cursor-pointer ring-2 ring-white shadow-sm" style="background: linear-gradient(135deg, #2B6FFF, #1A4FCC);">
+            L
+          </el-avatar>
         </div>
       </header>
 
@@ -138,5 +179,64 @@ const toggleSidebar = () => {
 }
 .bg-primary {
   background-color: var(--el-color-primary);
+}
+
+/* 侧边栏菜单美化 */
+:deep(.el-menu) {
+  border: none !important;
+}
+:deep(.el-menu-item) {
+  border-radius: 8px;
+  margin: 2px 8px;
+  padding: 0 12px !important;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+  color: #8E8EA0 !important;
+}
+:deep(.el-menu-item:hover) {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #FFFFFF !important;
+}
+:deep(.el-menu-item.is-active) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #FFFFFF !important;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 #4B8BFF;
+}
+:deep(.el-menu--collapse .el-menu-item) {
+  margin: 2px 6px;
+  padding: 0 8px !important;
+  border-radius: 6px;
+}
+:deep(.el-menu--collapse .el-menu-item.is-active) {
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 顶部搜索框美化 */
+:deep(.search-input .el-input__wrapper) {
+  background: #F5F7FA;
+  border-radius: 20px;
+  box-shadow: none !important;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+:deep(.search-input .el-input__wrapper:hover),
+:deep(.search-input .el-input__wrapper.is-focus) {
+  background: #ffffff;
+  border-color: #A3C4FF;
+  box-shadow: 0 0 0 2px rgba(43, 111, 255, 0.1) !important;
+}
+
+/* Header 图标按钮 */
+:deep(.header-icon-btn) {
+  position: relative;
+  font-size: 18px;
+  color: #8E8EA0;
+  transition: all 0.2s ease;
+}
+:deep(.header-icon-btn:hover) {
+  color: #2B6FFF !important;
+  background: #E8F0FE !important;
 }
 </style>

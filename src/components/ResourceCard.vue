@@ -1,30 +1,30 @@
 <template>
   <el-card class="resource-card h-full flex flex-col relative" :body-style="{ padding: '16px', display: 'flex', flexDirection: 'column', height: '100%', flexGrow: 1 }">
-    <div v-if="status === 'loading'" class="h-full flex flex-col justify-center items-center py-6 gap-3">
+        <div v-if="status === 'loading'" class="h-full flex flex-col justify-center items-center py-6 gap-3">
       <el-skeleton animated :rows="3" />
-      <span class="text-sm text-slate-500">等待该资源生成...</span>
+      <span class="text-sm" style="color: #8E8EA0;">等待该资源生成...</span>
     </div>
     
     <div v-else class="h-full flex flex-col flex-grow">
       <!-- Header -->
       <div class="flex justify-between items-start mb-3">
-        <h4 class="text-base font-semibold m-0 text-slate-800 line-clamp-1 flex-1">{{ title }}</h4>
+        <h4 class="text-base font-semibold m-0 line-clamp-1 flex-1" style="color: #1A1A2E;">{{ title }}</h4>
         <el-tag size="small" :type="typeTagStyle" class="ml-2 flex-shrink-0">{{ typeLabel }}</el-tag>
       </div>
       
       <!-- Meta -->
       <div class="flex items-center gap-2 mb-3 text-xs">
         <el-tag size="small" :type="confidenceStyle" effect="plain">{{ confidenceLabel }}置信度</el-tag>
-        <span class="text-slate-500 border-l border-slate-200 pl-2 cursor-pointer hover:text-primary transition-colors" @click.stop="$emit('view-sources')">
+                <span style="color: #2B6FFF; border-left: 1px solid #E8ECF0;" class="pl-2 cursor-pointer hover:text-blue-600 transition-colors" @click.stop="$emit('view-sources')">
           来源 {{ sourcesCount }}
         </span>
-        <span class="text-slate-500 border-l border-slate-200 pl-2">
+        <span class="quality-score pl-2" style="border-left: 1px solid #E8ECF0; color: #5A5A72;">
           质量 {{ qualityScore }}/100
         </span>
       </div>
       
       <!-- Brief -->
-      <p class="text-sm text-slate-600 mb-4 line-clamp-2 min-h-[40px]">{{ brief }}</p>
+      <p class="text-sm mb-4 line-clamp-2 min-h-[40px]" style="color: #5A5A72;">{{ brief }}</p>
       
       <!-- Reject Reason -->
       <div v-if="status === 'rejected'" class="bg-danger/10 text-danger p-2 rounded text-xs mb-4">
@@ -43,7 +43,7 @@
         </div>
         
         <!-- Actions -->
-        <div class="flex justify-end gap-2 border-t border-slate-100 pt-3">
+        <div class="flex justify-end gap-2 pt-3" style="border-top: 1px solid #E8ECF0;">
           <template v-if="status === 'ready'">
             <el-button size="small" @click="$emit('preview')">预览</el-button>
             <el-button size="small" plain type="info" @click="$emit('regenerate')">重生成</el-button>
@@ -56,7 +56,7 @@
     </div>
     
     <!-- Status Badge -->
-    <div v-if="status === 'ready'" class="absolute -right-1 -top-1 w-3 h-3 bg-success rounded-full border-2 border-white pointer-events-none shadow-sm" title="已就绪"></div>
+    <div v-if="status === 'ready'" class="absolute -right-1 -top-1 w-3 h-3 rounded-full border-2 border-white pointer-events-none shadow-sm" title="已就绪" style="background-color: #34C759;"></div>
   </el-card>
 </template>
 

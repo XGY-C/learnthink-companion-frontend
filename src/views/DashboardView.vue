@@ -114,8 +114,8 @@ const radarOption = computed(() => ({
         {
           value: profile.dimensions.map(d => d.value),
           name: '掌握度',
-          itemStyle: { color: '#3b82f6' },
-          areaStyle: { color: 'rgba(59, 130, 246, 0.2)' }
+                    itemStyle: { color: '#2B6FFF' },
+          areaStyle: { color: 'rgba(43, 111, 255, 0.1)' }
         }
       ]
     }
@@ -237,16 +237,18 @@ onMounted(() => {
 
 <template>
   <div class="dashboard-container h-full overflow-y-auto p-6 space-y-6">
-    <!-- 页面标题行 -->
+        <!-- 页面标题行 -->
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <el-icon size="24"><DataBoard /></el-icon>
-          学习驾驶舱
-        </h1>
-        <p class="text-sm text-gray-500 mt-1">基于多智能体画像驱动的个性化学习概览</p>
+        <h1 class="text-2xl font-bold flex items-center gap-2" style="color: #1A1A2E;">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, #2B6FFF, #1A4FCC);">
+              <el-icon size="18" color="white"><DataBoard /></el-icon>
+            </div>
+            <span>学习驾驶舱</span>
+          </h1>
+          <p class="text-sm mt-1 ml-[44px]" style="color: #8E8EA0;">基于多智能体画像驱动的个性化学习概览</p>
       </div>
-      <el-button size="small" plain :icon="RefreshRight" @click="refreshMetrics">
+      <el-button size="small" plain :icon="RefreshRight" @click="refreshMetrics" class="!rounded-full">
         刷新数据
       </el-button>
     </div>
@@ -281,13 +283,13 @@ onMounted(() => {
 
     <!-- ============ 完整驾驶舱（有画像） ============ -->
     <template v-else>
-      <!-- 1. 顶部概览条：4 个指标卡 -->
+            <!-- 1. 顶部概览条：4 个指标卡（增强版） -->
       <el-row :gutter="20">
         <el-col v-for="(metric, idx) in metrics" :key="idx" :xs="12" :sm="6" class="mb-4">
-          <el-card shadow="hover" class="metric-card" :body-style="{ padding: '20px' }">
+          <el-card shadow="never" class="metric-card group" :body-style="{ padding: '20px' }" style="border: 1px solid #E8ECF0; border-radius: 12px;">
             <div class="flex items-center gap-4">
               <div
-                class="w-12 h-12 rounded-xl flex items-center justify-center text-lg shrink-0"
+                class="w-12 h-12 rounded-xl flex items-center justify-center text-lg shrink-0 transition-all duration-300 group-hover:scale-110 group-hover:shadow-sm"
                 :class="metric.bg"
                 :style="{ color: `var(${metric.color})` }"
               >
@@ -296,12 +298,16 @@ onMounted(() => {
                 </el-icon>
               </div>
               <div class="min-w-0">
-                <p class="text-xs text-gray-500 truncate">{{ metric.label }}</p>
-                <p class="text-2xl font-bold text-gray-900 mt-0.5 flex items-baseline gap-1">
+                                <p class="text-xs truncate" style="color: #8E8EA0;">{{ metric.label }}</p>
+                <p class="text-2xl font-bold mt-0.5 flex items-baseline gap-1 animate-count-up" style="color: #1A1A2E;" :style="{ animationDelay: `${idx * 0.1}s` }">
                   {{ metric.value }}
-                  <span class="text-sm font-normal text-gray-400">{{ metric.unit }}</span>
+                  <span class="text-sm font-normal" style="color: #B8B8C8;">{{ metric.unit }}</span>
                 </p>
               </div>
+            </div>
+            <!-- 装饰性指示条 -->
+            <div class="absolute bottom-0 left-4 right-4 h-0.5 rounded-full bg-gradient-to-r from-transparent"
+              :style="{ background: `linear-gradient(90deg, transparent, var(${metric.color}), transparent)` }">
             </div>
           </el-card>
         </el-col>
@@ -310,71 +316,73 @@ onMounted(() => {
       <!-- 2. 中部两列：下一步推荐 + 画像快照 -->
       <el-row :gutter="20">
         <!-- 左：下一步推荐 -->
-        <el-col :xs="24" :lg="14" class="mb-4">
-          <el-card shadow="never" class="h-full">
-            <template #header>
-              <div class="flex items-center justify-between">
-                <span class="font-semibold text-gray-800 flex items-center gap-2">
-                  <el-icon><Aim /></el-icon>
-                  下一步学习推荐
-                </span>
-                <el-button link type="primary" size="small" @click="goToPath">
-                  查看完整路径 <el-icon><Right /></el-icon>
-                </el-button>
-              </div>
-            </template>
-
-            <div class="p-2">
-              <!-- 推荐知识点头部 -->
-              <div class="flex items-start justify-between mb-3">
-                <div>
-                  <h3 class="text-lg font-bold text-gray-900">{{ nextRecommendation.title }}</h3>
-                  <p class="text-sm text-gray-500 mt-0.5">
-                    知识点：{{ nextRecommendation.knowledgePoint }}
-                  </p>
+                <el-col :xs="24" :lg="14" class="mb-4">
+          <el-card shadow="never" class="h-full" style="border-radius: 12px; border: 1px solid #E8ECF0;">
+              <template #header>
+                <div class="flex items-center justify-between">
+                  <span class="font-semibold flex items-center gap-2" style="color: #1A1A2E;">
+                    <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #2B6FFF, #1A4FCC);">
+                      <el-icon size="14" color="white"><Aim /></el-icon>
+                    </div>
+                    下一步学习推荐
+                  </span>
+                  <el-button link type="primary" size="small" @click="goToPath" style="color: #2B6FFF;">
+                    查看完整路径 <el-icon><Right /></el-icon>
+                  </el-button>
                 </div>
-                <el-tag :type="confidenceConfig[nextRecommendation.confidence].type" size="small" effect="plain">
-                  {{ confidenceConfig[nextRecommendation.confidence].label }}置信度
-                </el-tag>
-              </div>
+              </template>
 
-              <!-- 证据行 -->
-              <div class="flex items-center gap-4 text-xs text-gray-500 mb-4 bg-slate-50 px-3 py-2 rounded-lg">
-                <span class="flex items-center gap-1">
-                  <el-icon><Document /></el-icon>
-                  来源 {{ nextRecommendation.sourcesCount }}
-                </span>
-                <span class="flex items-center gap-1">
-                  <el-icon><TrendCharts /></el-icon>
-                  质量 {{ nextRecommendation.qualityScore }}/100
-                </span>
-                <span class="flex items-center gap-1">
-                  <el-icon><Timer /></el-icon>
-                  预计 {{ nextRecommendation.estimatedMinutes }} 分钟
-                </span>
-              </div>
-
-              <!-- 为什么推荐（核心可解释性） -->
-              <div class="mb-4">
-                <p class="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
-                  <el-icon :size="14"><Aim /></el-icon>
-                  为什么推荐这个？
-                </p>
-                <div class="flex flex-wrap gap-2">
-                  <el-tag
-                    v-for="(reason, ridx) in nextRecommendation.reason"
-                    :key="ridx"
-                    size="small"
-                    type="info"
-                    effect="plain"
-                    class="text-xs max-w-full"
-                  >
-                    {{ reason }}
+              <div class="p-2">
+                <!-- 推荐知识点头部 -->
+                <div class="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 class="text-lg font-bold" style="color: #1A1A2E;">{{ nextRecommendation.title }}</h3>
+                    <p class="text-sm mt-0.5" style="color: #8E8EA0;">
+                      知识点：{{ nextRecommendation.knowledgePoint }}
+                    </p>
+                  </div>
+                  <el-tag :type="confidenceConfig[nextRecommendation.confidence].type" size="small" effect="plain">
+                    {{ confidenceConfig[nextRecommendation.confidence].label }}置信度
                   </el-tag>
                 </div>
-              </div>
 
-              <!-- 操作按钮 -->
+                <!-- 证据行：来源用蓝色链接，质量分用中性色 -->
+                <div class="flex items-center gap-4 text-xs mb-4 px-3 py-2 rounded-lg" style="color: #8E8EA0; background-color: #F5F7FA;">
+                  <span class="flex items-center gap-1" style="color: #2B6FFF;">
+                    <el-icon><Document /></el-icon>
+                    来源 {{ nextRecommendation.sourcesCount }}
+                  </span>
+                  <span class="flex items-center gap-1 quality-score">
+                    <el-icon><TrendCharts /></el-icon>
+                    质量 <span style="color: #5A5A72;">{{ nextRecommendation.qualityScore }}</span>/100
+                  </span>
+                  <span class="flex items-center gap-1">
+                    <el-icon><Timer /></el-icon>
+                    预计 {{ nextRecommendation.estimatedMinutes }} 分钟
+                  </span>
+                </div>
+
+                <!-- 为什么推荐（核心可解释性）-->
+                <div class="mb-4">
+                  <p class="text-xs font-semibold mb-2 flex items-center gap-1" style="color: #5A5A72;">
+                    <el-icon :size="14"><Aim /></el-icon>
+                    为什么推荐这个？
+                  </p>
+                  <div class="flex flex-wrap gap-2">
+                    <el-tag
+                      v-for="(reason, ridx) in nextRecommendation.reason"
+                      :key="ridx"
+                      size="small"
+                      type="info"
+                      effect="plain"
+                      class="text-xs max-w-full"
+                    >
+                      {{ reason }}
+                    </el-tag>
+                  </div>
+                </div>
+
+                            <!-- 操作按钮 -->
               <div class="flex gap-3 mt-4">
                 <el-button type="primary" @click="goToStudio(nextRecommendation.knowledgePoint)">
                   去生成资源包
@@ -386,10 +394,10 @@ onMounted(() => {
               </div>
 
               <!-- 进度条小提示 -->
-              <div class="mt-6 pt-4 border-t border-slate-100">
-                <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
+              <div class="mt-6 pt-4 border-t" style="border-color: #E8ECF0;">
+                <div class="flex items-center justify-between text-xs mb-1" style="color: #8E8EA0;">
                   <span>当前路径整体进度</span>
-                  <span class="font-semibold text-gray-700">{{ pathProgress }}%</span>
+                  <span class="font-semibold" style="color: #5A5A72;">{{ pathProgress }}%</span>
                 </div>
                 <el-progress :percentage="pathProgress" :stroke-width="6" />
               </div>
@@ -398,113 +406,115 @@ onMounted(() => {
         </el-col>
 
         <!-- 右：画像快照 -->
-        <el-col :xs="24" :lg="10" class="mb-4">
-          <el-card shadow="never" class="h-full">
-            <template #header>
-              <div class="flex items-center justify-between">
-                <span class="font-semibold text-gray-800 flex items-center gap-2">
-                  <el-icon><User /></el-icon>
-                  画像快照
-                </span>
-                <el-button link type="primary" size="small" @click="goToProfile">
-                  详细画像 <el-icon><Right /></el-icon>
-                </el-button>
-              </div>
-            </template>
-
-            <div class="space-y-4">
-              <!-- 迷你雷达图 -->
-              <div class="h-52 w-full bg-slate-50 rounded-lg p-2">
-                <v-chart class="w-full h-full" :option="radarOption" autoresize />
-              </div>
-
-              <!-- 标签云 -->
-              <div class="space-y-2.5">
-                <div>
-                  <span class="text-xs text-gray-500 block mb-1.5">
-                    <el-icon size="12" class="mr-0.5"><WarningFilled /></el-icon>
-                    薄弱项
+                <el-col :xs="24" :lg="10" class="mb-4">
+          <el-card shadow="never" class="h-full" style="border-radius: 12px; border: 1px solid #E8ECF0;">
+              <template #header>
+                <div class="flex items-center justify-between">
+                  <span class="font-semibold flex items-center gap-2" style="color: #1A1A2E;">
+                    <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #34C759, #28A745);">
+                      <el-icon size="14" color="white"><User /></el-icon>
+                    </div>
+                    画像快照
                   </span>
-                  <div class="flex flex-wrap gap-1.5">
-                    <el-tag
-                      v-for="tag in weakTags"
-                      :key="tag"
-                      type="danger"
-                      effect="plain"
-                      size="small"
-                      class="rounded"
-                    >
-                      {{ tag }}
-                    </el-tag>
+                  <el-button link type="primary" size="small" @click="goToProfile" style="color: #2B6FFF;">
+                    详细画像 <el-icon><Right /></el-icon>
+                  </el-button>
+                </div>
+              </template>
+
+              <div class="space-y-4">
+                <!-- 迷你雷达图：蓝线 #2B6FFF + 浅蓝填充 -->
+                <div class="h-52 w-full rounded-lg p-2" style="background-color: #F5F7FA;">
+                  <v-chart class="w-full h-full" :option="radarOption" autoresize />
+                </div>
+
+                <!-- 标签云：分区豁免规则，标题用中性色 -->
+                <div class="space-y-2.5">
+                  <div>
+                    <span class="text-xs block mb-1.5" style="color: #5A5A72;">
+                      <el-icon size="12" class="mr-0.5"><WarningFilled /></el-icon>
+                      薄弱项
+                    </span>
+                    <div class="flex flex-wrap gap-1.5">
+                      <el-tag
+                        v-for="tag in weakTags"
+                        :key="tag"
+                        type="danger"
+                        effect="plain"
+                        size="small"
+                        class="rounded"
+                      >
+                        {{ tag }}
+                      </el-tag>
+                    </div>
+                  </div>
+                  <div>
+                    <span class="text-xs block mb-1.5" style="color: #5A5A72;">
+                      <el-icon size="12" class="mr-0.5"><Medal /></el-icon>
+                      掌握项
+                    </span>
+                    <div class="flex flex-wrap gap-1.5">
+                      <el-tag
+                        v-for="tag in strongTags"
+                        :key="tag"
+                        type="success"
+                        effect="plain"
+                        size="small"
+                        class="rounded"
+                      >
+                        {{ tag }}
+                      </el-tag>
+                    </div>
+                  </div>
+                  <div>
+                    <span class="text-xs block mb-1.5" style="color: #5A5A72;">
+                      <el-icon size="12" class="mr-0.5"><Reading /></el-icon>
+                      兴趣方向
+                    </span>
+                    <div class="flex flex-wrap gap-1.5">
+                      <el-tag
+                        v-for="tag in interestTags"
+                        :key="tag"
+                        type="primary"
+                        effect="plain"
+                        size="small"
+                        class="rounded"
+                      >
+                        {{ tag }}
+                      </el-tag>
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <span class="text-xs text-gray-500 block mb-1.5">
-                    <el-icon size="12" class="mr-0.5"><Medal /></el-icon>
-                    掌握项
-                  </span>
-                  <div class="flex flex-wrap gap-1.5">
-                    <el-tag
-                      v-for="tag in strongTags"
-                      :key="tag"
-                      type="success"
-                      effect="plain"
-                      size="small"
-                      class="rounded"
-                    >
-                      {{ tag }}
-                    </el-tag>
-                  </div>
-                </div>
-                <div>
-                  <span class="text-xs text-gray-500 block mb-1.5">
-                    <el-icon size="12" class="mr-0.5"><Reading /></el-icon>
-                    兴趣方向
-                  </span>
-                  <div class="flex flex-wrap gap-1.5">
-                    <el-tag
-                      v-for="tag in interestTags"
-                      :key="tag"
-                      type="primary"
-                      effect="plain"
-                      size="small"
-                      class="rounded"
-                    >
-                      {{ tag }}
-                    </el-tag>
-                  </div>
-                </div>
-              </div>
 
-              <!-- 偏好与版本 -->
-              <div class="bg-slate-50 rounded-lg p-3 space-y-2 text-sm">
-                <div class="flex justify-between items-center">
-                  <span class="text-gray-500">学习节奏</span>
-                  <span class="font-medium text-gray-800">{{ profilePace }} 分钟/天</span>
+                <!-- 偏好与版本 -->
+                <div class="rounded-lg p-3 space-y-2 text-sm" style="background-color: #F5F7FA;">
+                  <div class="flex justify-between items-center">
+                    <span style="color: #8E8EA0;">学习节奏</span>
+                    <span class="font-medium" style="color: #1A1A2E;">{{ profilePace }} 分钟/天</span>
+                  </div>
+                  <div class="flex justify-between items-center">
+                    <span style="color: #8E8EA0;">内容偏好</span>
+                    <span class="font-medium" style="color: #1A1A2E;">{{ profilePreference }}</span>
+                  </div>
+                  <div class="flex justify-between items-center">
+                    <span style="color: #8E8EA0;">画像版本</span>
+                    <span class="text-xs px-2 py-0.5 rounded" style="color: #5A5A72; background-color: #FFFFFF;">{{ profileVersion }} · {{ profileUpdatedAt }}</span>
+                  </div>
                 </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-gray-500">内容偏好</span>
-                  <span class="font-medium text-gray-800">{{ profilePreference }}</span>
-                </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-gray-500">画像版本</span>
-                  <span class="text-xs text-gray-600 bg-white px-2 py-0.5 rounded">{{ profileVersion }} · {{ profileUpdatedAt }}</span>
-                </div>
-              </div>
             </div>
           </el-card>
         </el-col>
       </el-row>
 
       <!-- 3. 底部：最近资源包列表 -->
-      <el-card shadow="never">
+            <el-card shadow="never" style="border: 1px solid #E8ECF0; border-radius: 12px;">
         <template #header>
           <div class="flex items-center justify-between">
-            <span class="font-semibold text-gray-800 flex items-center gap-2">
-              <el-icon><Document /></el-icon>
+            <span class="font-semibold flex items-center gap-2" style="color: #1A1A2E;">
+              <el-icon style="color: #2B6FFF;"><Document /></el-icon>
               最近生成的资源包
             </span>
-            <el-button link type="primary" size="small" @click="goToLibrary">
+            <el-button link type="primary" size="small" @click="goToLibrary" style="color: #2B6FFF;">
               查看全部 <el-icon><Right /></el-icon>
             </el-button>
           </div>
@@ -515,7 +525,7 @@ onMounted(() => {
             <el-table-column label="资源包名称" min-width="180">
               <template #default="{ row }">
                 <div class="flex items-center gap-2">
-                  <span class="font-medium text-gray-800 cursor-pointer hover:text-primary transition-colors" @click="openPack(row)">
+                  <span class="font-medium cursor-pointer transition-colors" style="color: #1A1A2E;" @click="openPack(row)">
                     {{ row.title }}
                   </span>
                   <el-tag v-if="row.isActive" size="small" type="success" effect="dark">当前</el-tag>
@@ -525,18 +535,12 @@ onMounted(() => {
             <el-table-column prop="knowledgePoint" label="知识点" width="130" />
             <el-table-column label="资源数" width="80" align="center">
               <template #default="{ row }">
-                <span class="text-sm">{{ row.resourceCount }} 类</span>
+                <span class="text-sm" style="color: #5A5A72;">{{ row.resourceCount }} 类</span>
               </template>
             </el-table-column>
-            <el-table-column label="质量" width="100" align="center">
+            <el-table-column label="质量分" width="100" align="center">
               <template #default="{ row }">
-                <el-tag
-                  :type="row.avgQuality >= 85 ? 'success' : row.avgQuality >= 70 ? 'warning' : 'danger'"
-                  size="small"
-                  effect="plain"
-                >
-                  {{ row.avgQuality }}/100
-                </el-tag>
+                <span class="quality-score text-sm">{{ row.avgQuality }}/100</span>
               </template>
             </el-table-column>
             <el-table-column label="置信度" width="90" align="center">
@@ -552,7 +556,7 @@ onMounted(() => {
             </el-table-column>
             <el-table-column label="生成时间" width="150" align="right">
               <template #default="{ row }">
-                <span class="text-xs text-gray-500">{{ row.createdAt }}</span>
+                <span class="text-xs" style="color: #8E8EA0;">{{ row.createdAt }}</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="100" align="center" fixed="right">
@@ -575,10 +579,21 @@ onMounted(() => {
 }
 
 .metric-card {
-  transition: transform 0.2s, box-shadow 0.2s;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s ease;
 }
 .metric-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: 0 4px 16px rgba(43, 111, 255, 0.12) !important;
+}
+
+/* 渐变装饰条动画 */
+.metric-card .bg-gradient {
+  transition: opacity 0.3s ease;
+}
+.metric-card:hover .bg-gradient {
+  opacity: 1 !important;
 }
 
 :deep(.el-table th) {
@@ -588,7 +603,29 @@ onMounted(() => {
 }
 
 :deep(.el-card__header) {
-  padding: 14px 20px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--el-border-color-light);
+}
+
+:deep(.el-table th.el-table__cell) {
+  color: #5A5A72;
+}
+
+/* 卡片内容区滚动条美化 */
+:deep(.el-table__body-wrapper::-webkit-scrollbar) {
+  width: 4px;
+}
+:deep(.el-table__body-wrapper::-webkit-scrollbar-thumb) {
+  background: #e2e8f0;
+  border-radius: 2px;
+}
+
+/* 空状态引导卡片 hover */
+.empty-guide-card {
+  transition: all 0.3s ease;
+}
+.empty-guide-card:hover {
+  border-color: var(--lt-brand-lighter) !important;
+  transform: translateY(-2px);
 }
 </style>

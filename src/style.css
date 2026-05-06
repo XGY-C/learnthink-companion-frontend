@@ -1,24 +1,301 @@
 @import "tailwindcss";
+
+/* ===================================================================
+   LearnThink UI 色彩系统 — 基于 UI色彩系统设计.md v2.1
+   科技蓝 #2B6FFF + 暖心橙 #FF8C42 + AI紫 #7C5CFC
+   =================================================================== */
+
 :root {
-  --el-color-primary: #3b82f6;
-  --el-color-primary-light-3: #93c5fd;
-  --el-color-primary-light-5: #bfdbfe;
-  --el-color-primary-light-7: #dbeafe;
-  --el-color-primary-light-8: #eff6ff;
-  --el-color-primary-light-9: #f8fafc;
-  --el-color-primary-dark-2: #2563eb;
-  --el-color-success: #10b981;
-  --el-color-warning: #f59e0b;
-  --el-color-danger: #ef4444;
-  --el-bg-color: #f8fafc;
-  --el-bg-color-page: #f1f5f9;
+  /* ======================== 1. 主色系：科技蓝 ======================== */
+  --lt-brand: #2B6FFF;
+  --lt-brand-light: #6B9BFF;      /* 蓝-浅1: hover态 */
+  --lt-brand-lighter: #A3C4FF;    /* 蓝-浅2: 边框 */
+  --lt-brand-light-7: #D6E4FF;    /* 蓝-浅3: 表格行hover */
+  --lt-brand-lightest: #E8F0FE;   /* 蓝-浅4: 页面背景/卡片背景 */
+  --lt-brand-dark: #1A4FCC;       /* 蓝-深: active态 */
+  --lt-brand-disabled: #B8C8E8;   /* 蓝-禁用 */
+
+  /* ======================== 2. 第二主色：暖心橙 ======================== */
+  --lt-orange: #FF8C42;
+  --lt-orange-text: #5A3B00;      /* 橙底上的深色文字（AAA对比度7.1:1） */
+  --lt-orange-light-3: #FFB380;
+  --lt-orange-light-5: #FFD9B3;
+  --lt-orange-light-9: #FFF3E6;
+
+  /* ======================== 3. 第三主色：AI紫 ======================== */
+  --lt-ai: #7C5CFC;
+  --lt-ai-light-3: #A78BFF;
+  --lt-ai-light-5: #CBB5FF;
+  --lt-ai-light-7: #E8DFFF;
+  --lt-ai-light-9: #F5F0FF;
+  --lt-ai-dark-2: #5A3ED4;
+
+  /* ======================== 4. 语义色 ======================== */
+  --lt-success: #34C759;          /* 掌握/优质/正确 */
+  --lt-warning: #FF9F0A;          /* 进行中/待提升 */
+  --lt-danger: #FF3B30;           /* 薄弱/错误/驳回 */
+
+  /* ======================== 5. 中性色 ======================== */
+  --lt-text-primary: #1A1A2E;     /* 正文 */
+  --lt-text-secondary: #5A5A72;   /* 次要文字 */
+  --lt-text-auxiliary: #8E8EA0;   /* 辅助文字 */
+  --lt-text-placeholder: #B8B8C8; /* 占位文字 */
+  --lt-text-disabled: #C8C8D0;    /* 禁用文字 */
+  --lt-bg-page: #F5F7FA;          /* 页面背景 */
+  --lt-bg-card: #FFFFFF;          /* 卡片背景 */
+  --lt-border: #E8ECF0;          /* 边框/分割线 */
+  --lt-shadow: rgba(0, 0, 0, 0.06);
+  --lt-shadow-blue: rgba(43, 111, 255, 0.12);
+  --lt-shadow-ai: rgba(124, 92, 252, 0.15);
+
+  /* ======================== 6. Element Plus 变量覆盖 ======================== */
+  --el-color-primary: #2B6FFF;
+  --el-color-primary-light-3: #6B9BFF;
+  --el-color-primary-light-5: #A3C4FF;
+  --el-color-primary-light-7: #D6E4FF;
+  --el-color-primary-light-8: #E2ECFF;
+  --el-color-primary-light-9: #E8F0FE;
+  --el-color-primary-dark-2: #1A4FCC;
+  --el-color-primary-disabled: #B8C8E8;
+  --el-color-success: #34C759;
+  --el-color-warning: #FF9F0A;
+  --el-color-danger: #FF3B30;
+  --el-color-info: #6B7B9D;
+  --el-bg-color: #FAFAFA;
+  --el-bg-color-page: #F5F7FA;
+  --el-text-color-primary: #1A1A2E;
+  --el-text-color-regular: #5A5A72;
+  --el-text-color-secondary: #8E8EA0;
+  --el-text-color-placeholder: #B8B8C8;
+  --el-border-color: #E8ECF0;
+  --el-border-color-light: #E8ECF0;
+  --el-border-color-lighter: #F0F2F5;
   --el-border-radius-base: 8px;
-  --el-border-radius-small: 6px;
-  --el-border-radius-round: 24px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 20px;
+
+  /* ======================== 7. 几何与动效规范 ======================== */
+  /* 圆角层级 */
+  --lt-radius-none: 0px;
+  --lt-radius-sm: 4px;
+  --lt-radius-md: 8px;
+  --lt-radius-lg: 12px;
+  --lt-radius-full: 20px;
+  /* 间距体系 */
+  --lt-space-compact: 8px;
+  --lt-space-regular: 16px;
+  --lt-space-loose: 24px;
+  --lt-space-xl: 32px;
+  /* 阴影层级 */
+  --lt-shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --lt-shadow-hover: 0 4px 16px rgba(43, 111, 255, 0.12);
+  --lt-shadow-elevated: 0 8px 32px rgba(43, 111, 255, 0.18);
+  --lt-shadow-ai-hover: 0 4px 16px rgba(124, 92, 252, 0.15);
+  /* 动效 */
+  --lt-transition-base: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --lt-transition-smooth: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --lt-transition-page: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  --lt-transition-bounce: 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* 字体 */
+  --lt-font-heading: "Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --lt-font-body: "Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --lt-font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
 }
+
+/* ---- 全局样式 ---- */
 body {
   margin: 0;
-  font-family: 'Segoe UI', "Microsoft YaHei", sans-serif;
-  background-color: var(--el-bg-color-page);
+  font-family: var(--lt-font-body);
+  background-color: var(--lt-bg-page);
+  color: var(--lt-text-primary);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  line-height: 1.6;
+}
+
+/* 网页滚动条美化 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+  transition: background var(--lt-transition-base);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* ---- 工具类 ---- */
+.text-gradient {
+  background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.card-elevated {
+  box-shadow: var(--lt-shadow-card);
+  transition: box-shadow var(--lt-transition-smooth), transform var(--lt-transition-smooth);
+}
+.card-elevated:hover {
+  box-shadow: var(--lt-shadow-hover);
+  transform: translateY(-2px);
+}
+
+.glass-effect {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ---- 品牌色辅助类 ---- */
+.bg-brand-gradient {
+  background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));
+}
+
+.text-orange {
+  color: var(--lt-orange);
+}
+.bg-orange {
+  background-color: var(--lt-orange);
+}
+
+.text-ai {
+  color: var(--lt-ai);
+}
+.bg-ai {
+  background-color: var(--lt-ai);
+}
+.bg-ai-light {
+  background-color: var(--lt-ai-light-9);
+}
+
+/* ---- 橙色 Tag 文字深色规则 ---- */
+.orange-tag {
+  background-color: var(--lt-orange) !important;
+  color: var(--lt-orange-text) !important;
+  border: none !important;
+}
+
+/* ---- AI Tag 样式 ---- */
+.ai-tag {
+  background-color: var(--lt-ai) !important;
+  color: #FFFFFF !important;
+  border: none !important;
+}
+
+/* ---- AI 对话气泡样式 ---- */
+.ai-bubble {
+  background-color: var(--lt-ai-light-9);
+  border-left: 3px solid var(--lt-ai);
+  border-radius: var(--lt-radius-lg);
+  border: 1px solid var(--lt-ai-light-5);
+  border-left-width: 3px;
+}
+
+.user-bubble {
+  background-color: var(--lt-bg-card);
+  border: 1px solid var(--lt-border);
+  border-radius: var(--lt-radius-lg);
+}
+
+/* ---- 置信度胶囊映射 ---- */
+.confidence-high {
+  --el-tag-bg-color: rgba(52, 199, 89, 0.1);
+  --el-tag-text-color: #34C759;
+  --el-tag-border-color: rgba(52, 199, 89, 0.2);
+}
+.confidence-medium {
+  --el-tag-bg-color: rgba(255, 159, 10, 0.1);
+  --el-tag-text-color: #FF9F0A;
+  --el-tag-border-color: rgba(255, 159, 10, 0.2);
+}
+.confidence-low {
+  --el-tag-bg-color: rgba(255, 59, 48, 0.1);
+  --el-tag-text-color: #FF3B30;
+  --el-tag-border-color: rgba(255, 59, 48, 0.2);
+}
+
+/* ---- 质量分中性色 ---- */
+.quality-score {
+  color: var(--lt-text-secondary);
+}
+
+/* ---- 橙色 pulsate 流式光标动画 ---- */
+@keyframes cursor-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.cursor-pulse {
+  animation: cursor-pulse 800ms ease-in-out infinite;
+  background-color: var(--lt-orange);
+}
+
+/* ---- 紫色 AI 生成脉冲动画 ---- */
+@keyframes ai-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.ai-pulse {
+  animation: ai-pulse 1200ms ease-in-out infinite;
+}
+
+/* ---- 卡片阴影色温规范 ---- */
+.shadow-blue {
+  box-shadow: 0 4px 16px rgba(43, 111, 255, 0.12);
+}
+.shadow-ai {
+  box-shadow: 0 4px 16px rgba(124, 92, 252, 0.15);
+}
+
+/* ---- 页面标题通用组件样式 ---- */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+.page-header h1 {
+  font-size: 1.625rem;
+  font-weight: 700;
+  color: var(--lt-text-primary);
+  letter-spacing: -0.025em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.page-header p {
+  font-size: 0.875rem;
+  color: var(--lt-text-auxiliary);
+  margin-top: 0.25rem;
+}
+
+/* ---- 数字大小动画 ---- */
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-count-up {
+  animation: countUp 0.5s ease-out both;
+}
+
+/* ---- fade slide 过渡 ---- */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all 0.3s ease;
+}
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-12px);
 }

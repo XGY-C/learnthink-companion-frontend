@@ -4,7 +4,7 @@ import ProfilePanel from '@/components/Profile/ProfilePanel.vue'
 </script>
 
 <template>
-  <div class="flex h-screen w-full overflow-hidden bg-gray-50">
+  <div class="flex h-screen w-full overflow-hidden" style="background-color: #F5F7FA;">
     <!-- 左侧主区：画像对话 -->
     <div class="flex-1 min-w-0">
       <ProfileChat />

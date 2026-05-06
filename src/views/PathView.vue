@@ -135,8 +135,8 @@ const getTimelineIcon = (node: PathNode) => {
     <!-- 顶部状态栏 -->
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">学习路径规划</h1>
-        <p class="text-sm text-gray-500 mt-1">根据你的画像实时动态生成的学习地图</p>
+        <h1 class="text-2xl font-bold" style="color: #1A1A2E;">学习路径规划</h1>
+          <p class="text-sm mt-1" style="color: #8E8EA0;">根据你的画像实时动态生成的学习地图</p>
       </div>
       <el-button type="primary" :icon="Search" plain @click="drawerVisible = false">
         重新规划路径
@@ -144,13 +144,14 @@ const getTimelineIcon = (node: PathNode) => {
     </div>
 
     <!-- 动态调整通知卡（加分点：体现个性化与动态闭环） -->
-    <el-alert
+        <el-alert
       v-if="adjustmentNotice"
       title="路径动态调整通知"
       type="warning"
       description="检测到前置练习中「数据结构/优先队列」正确率偏低，已为您自动插入相关的复习节点，以保障 A* 算法的学习效果。"
       show-icon
-      class="mb-6 border border-warning-200"
+      class="mb-6"
+      style="border: 1px solid #FFD9B3;"
       @close="adjustmentNotice = false"
     />
 
@@ -245,8 +246,8 @@ const getTimelineIcon = (node: PathNode) => {
             <el-tag v-else-if="selectedNode.type === 'review'" type="warning">温故知新</el-tag>
             <el-tag v-else type="info">核心概念</el-tag>
           </div>
-          <p v-if="selectedNode.reason" class="text-sm text-warning-700 bg-warning-50 p-2 rounded">
-            <strong>为何生成此节点：</strong>{{ selectedNode.reason }}
+          <p v-if="selectedNode.reason" class="text-sm p-2 rounded" style="color: #5A3B00; background-color: #FFF3E6;">
+                <strong>为何生成此节点：</strong>{{ selectedNode.reason }}
           </p>
         </div>
 

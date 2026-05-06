@@ -467,30 +467,37 @@ onUnmounted(() => {
   <div class="h-full flex overflow-hidden pt-2">
     <!-- ===== 主内容区 ===== -->
     <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-      <!-- ===== 顶部信息栏 ===== -->
+      <!-- ===== 顶部信息栏（增强版） ===== -->
       <div class="flex items-center justify-between mb-4 flex-shrink-0">
         <div>
-          <h1 class="text-2xl font-bold text-gray-900">定制练习</h1>
-          <p class="text-sm text-gray-500 mt-1">
-            基于「{{ practiceMeta.knowledgePoint }}」生成 · 共 {{ practiceMeta.totalQuestions }} 题 · 预估 {{ practiceMeta.estimatedMinutes }} 分钟
-          </p>
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, #2B6FFF, #1A4FCC);">
+              <el-icon size="18" color="white"><EditPen /></el-icon>
+            </div>
+            <div>
+              <h1 class="text-2xl font-bold" style="color: #1A1A2E;">定制练习</h1>
+              <p class="text-sm mt-0.5" style="color: #8E8EA0;">
+                基于「<span style="color: #2B6FFF; font-weight: 500;">{{ practiceMeta.knowledgePoint }}</span>」生成 · 共 {{ practiceMeta.totalQuestions }} 题 · 预估 {{ practiceMeta.estimatedMinutes }} 分钟
+              </p>
+            </div>
+          </div>
         </div>
         <div class="flex items-center gap-3">
-          <el-select v-model="difficultyFilter" size="small" class="w-28" @change="currentQuestionIndex = 0">
+          <el-select v-model="difficultyFilter" size="small" class="w-28" @change="currentQuestionIndex = 0" style="--el-border-radius-base: 20px;">
             <el-option label="全部难度" value="all" />
             <el-option label="简单" value="easy" />
             <el-option label="中等" value="medium" />
             <el-option label="困难" value="hard" />
           </el-select>
-          <div class="flex items-center gap-2 text-sm bg-gray-100 px-3 py-1.5 rounded-full">
-            <el-icon><Timer /></el-icon>
-            <span class="font-mono font-medium" :class="elapsedSeconds > 1200 ? 'text-danger' : 'text-gray-700'">
+          <div class="flex items-center gap-2 text-sm px-3.5 py-1.5 rounded-full shadow-sm" style="background-color: rgba(255,255,255,0.8); backdrop-filter: blur(12px); border: 1px solid #E8ECF0;">
+            <el-icon style="color: #2B6FFF;"><Timer /></el-icon>
+            <span class="font-mono font-medium" :class="elapsedSeconds > 1200 ? '!text-red-500' : ''" style="color: #5A5A72;">
               {{ formatTime(elapsedSeconds) }}
             </span>
           </div>
           <el-tooltip content="本套练习的整体质量评分" placement="bottom">
-            <el-tag type="success" effect="plain" class="cursor-help">
-              质量 {{ practiceMeta.qualityScore }}/100
+            <el-tag type="success" effect="plain" class="cursor-help !rounded-full" style="--el-tag-bg-color: rgba(52,199,89,0.08); --el-tag-border-color: rgba(52,199,89,0.2);">
+              🏆 质量 {{ practiceMeta.qualityScore }}/100
             </el-tag>
           </el-tooltip>
         </div>
@@ -513,76 +520,125 @@ onUnmounted(() => {
       <template v-if="activeView === 'result'">
         <!-- ===== 结果页 ===== -->
         <div class="flex-1 overflow-y-auto pr-2">
-          <!-- 总结卡片 -->
-          <el-card class="mb-6 shadow-sm" shadow="never">
+          <!-- 总结卡片（增强版） -->
+          <el-card class="mb-6" shadow="never" style="border-radius: 14px; border: 1px solid #E8ECF0; overflow: hidden;">
+            <template #header>
+              <div class="flex items-center gap-2">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #34C759, #28A745);">
+                  <el-icon size="14" color="white"><Medal /></el-icon>
+                </div>
+                <span class="font-semibold" style="color: #1A1A2E;">练习成绩报告</span>
+                <el-tag size="small" :type="accuracyStatus" effect="light" class="ml-2 !rounded-full">
+                  {{ accuracyRate >= 80 ? '优秀' : accuracyRate >= 60 ? '良好' : '需加强' }}
+                </el-tag>
+              </div>
+            </template>
+
             <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-              <!-- 正确率 -->
-              <div class="flex flex-col items-center justify-center p-4">
+              <!-- 正确率（增强） -->
+              <div class="flex flex-col items-center justify-center p-6">
                 <el-progress
                   type="circle"
                   :percentage="accuracyRate"
                   :status="accuracyStatus"
-                  :width="100"
-                  :stroke-width="8"
+                  :width="110"
+                  :stroke-width="10"
                 />
                 <p class="text-sm text-gray-600 mt-3 font-medium">正确率</p>
+                <p class="text-xs text-gray-400 mt-1">{{ correctCount }}/{{ results.length }} 题</p>
               </div>
-              <!-- 统计 -->
-              <div class="flex flex-col justify-center gap-4 p-4">
-                <div class="flex items-center gap-3">
-                  <span class="w-20 text-sm text-gray-500">答对</span>
-                  <span class="text-lg font-bold text-success">{{ correctCount }} 题</span>
+              <!-- 统计（增强） -->
+              <div class="flex flex-col justify-center gap-3 p-6">
+                <div class="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+                  <div class="w-9 h-9 rounded-lg bg-green-100 flex items-center justify-center">
+                    <el-icon class="text-green-600"><CircleCheckFilled /></el-icon>
+                  </div>
+                  <div>
+                    <span class="text-sm text-gray-500">答对</span>
+                    <span class="text-xl font-bold text-green-600 ml-2">{{ correctCount }} 题</span>
+                  </div>
                 </div>
-                <div class="flex items-center gap-3">
-                  <span class="w-20 text-sm text-gray-500">答错</span>
-                  <span class="text-lg font-bold text-danger">{{ results.length - correctCount }} 题</span>
+                <div class="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+                  <div class="w-9 h-9 rounded-lg bg-red-100 flex items-center justify-center">
+                    <el-icon class="text-red-500"><CircleCloseFilled /></el-icon>
+                  </div>
+                  <div>
+                    <span class="text-sm text-gray-500">答错</span>
+                    <span class="text-xl font-bold text-red-500 ml-2">{{ results.length - correctCount }} 题</span>
+                  </div>
                 </div>
-                <div class="flex items-center gap-3">
-                  <span class="w-20 text-sm text-gray-500">用时</span>
-                  <span class="text-lg font-bold text-gray-700">{{ formatTime(elapsedSeconds) }}</span>
+                <div class="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+                  <div class="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center">
+                    <el-icon class="text-indigo-500"><Timer /></el-icon>
+                  </div>
+                  <div>
+                    <span class="text-sm text-gray-500">用时</span>
+                    <span class="text-xl font-bold text-gray-700 ml-2">{{ formatTime(elapsedSeconds) }}</span>
+                  </div>
                 </div>
               </div>
               <!-- 薄弱知识点 Top 3 -->
-              <div class="p-4">
-                <h4 class="text-sm font-semibold text-gray-800 mb-3">薄弱知识点 Top 3</h4>
-                <div v-if="wrongKnowledgePoints.length > 0" class="space-y-2">
-                  <div v-for="wk in wrongKnowledgePoints" :key="wk.kp" class="flex items-center justify-between">
+              <div class="p-6">
+                <h4 class="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-1.5">
+                  <el-icon class="text-red-500"><WarningFilled /></el-icon>
+                  薄弱知识点 Top 3
+                </h4>
+                <div v-if="wrongKnowledgePoints.length > 0" class="space-y-3">
+                  <div v-for="wk in wrongKnowledgePoints" :key="wk.kp" class="flex items-center justify-between p-2.5 rounded-lg bg-red-50/50">
                     <span class="text-sm text-gray-700">{{ wk.kp }}</span>
-                    <el-tag size="small" type="danger">{{ wk.count }}题错</el-tag>
+                    <el-tag size="small" type="danger" effect="dark" class="!rounded-full">{{ wk.count }}题错</el-tag>
                   </div>
                 </div>
-                <p v-else class="text-sm text-success">无显著薄弱点</p>
+                <p v-else class="text-sm text-green-600 bg-green-50 p-3 rounded-lg flex items-center gap-2">
+                  <el-icon><CircleCheckFilled /></el-icon>
+                  无显著薄弱点
+                </p>
               </div>
               <!-- 错因分析 Top 3 -->
-              <div class="p-4">
-                <h4 class="text-sm font-semibold text-gray-800 mb-3">主要错因分析</h4>
-                <div v-if="weakPoints.length > 0" class="space-y-2">
-                  <div v-for="wp in weakPoints" :key="wp.tag" class="flex items-center justify-between">
+              <div class="p-6">
+                <h4 class="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-1.5">
+                  <el-icon class="text-orange-500"><InfoFilled /></el-icon>
+                  主要错因分析
+                </h4>
+                <div v-if="weakPoints.length > 0" class="space-y-3">
+                  <div v-for="wp in weakPoints" :key="wp.tag" class="flex items-center justify-between p-2.5 rounded-lg bg-orange-50/50">
                     <span class="text-sm text-gray-700">{{ wp.tag }}</span>
-                    <el-tag size="small" type="warning">{{ wp.count }}次</el-tag>
+                    <el-tag size="small" type="warning" effect="dark" class="!rounded-full">{{ wp.count }}次</el-tag>
                   </div>
                 </div>
-                <p v-else class="text-sm text-success">答题质量良好</p>
+                <p v-else class="text-sm text-green-600 bg-green-50 p-3 rounded-lg flex items-center gap-2">
+                  <el-icon><CircleCheckFilled /></el-icon>
+                  答题质量良好
+                </p>
               </div>
             </div>
 
-            <!-- 建议下一步 -->
-            <el-divider class="my-4" />
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2 text-sm text-gray-600">
-                <el-icon><InfoFilled /></el-icon>
-                <span>基于本次练习结果，系统已更新学习画像与路径规划。</span>
-              </div>
-              <div class="flex gap-3">
-                <el-button @click="retry">重新练习</el-button>
-                <el-button type="primary" @click="goToStudio">巩固薄弱点 - 资源工作室</el-button>
-                <el-button type="primary" plain @click="goToPath">查看调整后的路径</el-button>
+            <!-- 建议下一步（增强） -->
+            <div class="px-6 py-4" style="background: linear-gradient(90deg, #E8F0FE, #F5F0FF); border-top: 1px solid #E8ECF0;">
+              <div class="flex items-center justify-between flex-wrap gap-3">
+                <div class="flex items-center gap-2 text-sm text-gray-600">
+                  <div class="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center">
+                    <el-icon size="12" class="text-indigo-500"><InfoFilled /></el-icon>
+                  </div>
+                  <span style="color: #5A5A72;">基于本次练习结果，系统已更新学习画像与路径规划。</span>
+                </div>
+                <div class="flex gap-2">
+                  <el-button @click="retry" class="!rounded-full">
+                    🔄 重新练习
+                  </el-button>
+                  <el-button type="primary" @click="goToStudio" class="!rounded-full">
+                    <el-icon class="mr-1"><MagicStick /></el-icon>巩固薄弱点
+                  </el-button>
+                  <el-button plain @click="goToPath" class="!rounded-full">
+                    查看调整后的路径
+                  </el-button>
+                </div>
               </div>
             </div>
           </el-card>
 
           <!-- 逐题反馈 -->
-          <h3 class="text-lg font-semibold text-gray-800 mb-4">逐题反馈</h3>
+          <h3 class="text-lg font-semibold mb-4" style="color: #1A1A2E;">逐题反馈</h3>
           <div class="space-y-4">
             <el-card
               v-for="(q, idx) in questions"
@@ -713,55 +769,60 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 当前题目卡片 -->
+          <!-- 当前题目卡片（增强版） -->
           <div
             v-if="currentQuestion"
             class="flex-1 overflow-y-auto pr-2"
           >
-            <el-card shadow="never" class="mb-4">
+            <el-card shadow="never" class="mb-4" style="border-radius: 14px; border: 1px solid #E8ECF0;">
               <!-- 题目标题行 -->
               <div class="flex items-center gap-2 mb-4">
-                <el-tag :type="currentQuestion.type === 'single' ? 'primary' : currentQuestion.type === 'fill-blank' ? 'warning' : 'info'">
-                  {{ currentQuestion.type === 'single' ? '单选题' : currentQuestion.type === 'fill-blank' ? '填空题' : '简答题' }}
+                <el-tag :type="currentQuestion.type === 'single' ? 'primary' : currentQuestion.type === 'fill-blank' ? 'warning' : 'info'" class="!rounded-full">
+                  {{ currentQuestion.type === 'single' ? '📝 单选题' : currentQuestion.type === 'fill-blank' ? '✏️ 填空题' : '📖 简答题' }}
                 </el-tag>
-                <el-tag size="small" :type="difficultyType(currentQuestion.difficulty)">
+                <el-tag size="small" :type="difficultyType(currentQuestion.difficulty)" class="!rounded-full">
                   {{ difficultyLabel(currentQuestion.difficulty) }}
                 </el-tag>
                 <!-- 个性化推送原因 -->
-                <el-tag size="small" type="info" effect="plain" class="text-xs">
+                <el-tag size="small" type="info" effect="plain" class="text-xs !rounded-full" style="--el-tag-bg-color: #F5F0FF; --el-tag-border-color: #CBB5FF; --el-tag-text-color: #7C5CFC;">
                   {{ currentQuestion.pushReason }}
                 </el-tag>
                 <!-- 质量与置信度 -->
-                <el-tag size="small" :type="confidenceType(currentQuestion.confidence)" effect="plain" class="cursor-pointer" @click="viewSources(currentQuestion)">
+                <el-tag size="small" :type="confidenceType(currentQuestion.confidence)" effect="plain" class="cursor-pointer !rounded-full" @click="viewSources(currentQuestion)">
                   置信度：{{ confidenceLabel(currentQuestion.confidence) }}
                 </el-tag>
-                <el-button link type="primary" size="small" class="ml-auto" @click="viewSources(currentQuestion)">
+                <el-button link type="primary" size="small" class="ml-auto" style="color: #2B6FFF;" @click="viewSources(currentQuestion)">
                   查看引用来源（{{ currentQuestion.sources.length }}）
                 </el-button>
               </div>
 
-              <!-- 题干 -->
-              <p class="text-lg font-medium text-gray-900 mb-6 leading-relaxed">{{ currentQuestion.stem }}</p>
+              <!-- 题干：浅蓝背景 #E8F0FE -->
+              <div class="p-4 rounded-xl mb-6 border" style="background: #E8F0FE; border-color: #D6E4FF;">
+                <p class="text-lg font-medium leading-relaxed" style="color: #1A1A2E;">{{ currentQuestion.stem }}</p>
+              </div>
 
-              <!-- 单选题选项 -->
+              <!-- 单选题选项：选中状态用蓝色 #2B6FFF -->
               <div v-if="currentQuestion.type === 'single' && currentQuestion.options" class="space-y-3 mb-4">
                 <div
                   v-for="opt in currentQuestion.options"
                   :key="opt.label"
-                  class="flex items-center p-3 rounded-lg border cursor-pointer transition-all hover:border-primary hover:bg-primary/5"
-                  :class="answerRecords[currentQuestion.id] === opt.label ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-gray-200'"
+                  class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all duration-200"
+                  :class="answerRecords[currentQuestion.id] === opt.label ? 'shadow-sm' : ''"
+                  :style="answerRecords[currentQuestion.id] === opt.label
+                    ? 'border-color: #2B6FFF; background-color: #E8F0FE;'
+                    : 'border-color: #E8ECF0;'"
                   @click="selectAnswer(currentQuestion.id, opt.label)"
                 >
-                  <el-radio
-                    :model-value="answerRecords[currentQuestion.id] === opt.label"
-                    :value="opt.label"
-                    :label="opt.label"
-                    class="mr-3"
-                    @change="selectAnswer(currentQuestion.id, opt.label)"
+                  <div
+                    class="w-7 h-7 rounded-full flex items-center justify-center mr-3 text-sm font-semibold transition-all duration-200"
+                    :class="answerRecords[currentQuestion.id] === opt.label ? 'text-white shadow-sm' : ''"
+                    :style="answerRecords[currentQuestion.id] === opt.label
+                      ? 'background-color: #2B6FFF;'
+                      : 'background-color: #F5F7FA; color: #8E8EA0;'"
                   >
-                    <span class="font-medium">{{ opt.label }}.</span>
-                  </el-radio>
-                  <span>{{ opt.text }}</span>
+                    {{ opt.label }}
+                  </div>
+                  <span style="color: #5A5A72;">{{ opt.text }}</span>
                 </div>
               </div>
 
