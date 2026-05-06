@@ -74,7 +74,18 @@
   --el-border-radius-small: 4px;
   --el-border-radius-round: 20px;
 
-  /* ======================== 7. 几何与动效规范 ======================== */
+  /* ======================== 7. 导航栏变量（v2.2 浅色导航版） ======================== */
+  --nav-bg: #FFFFFF;
+  --nav-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --nav-item-default: #5A5A72;
+  --nav-item-hover-bg: rgba(43, 111, 255, 0.06);
+  --nav-item-active: #2B6FFF;
+  --nav-item-active-bg: #E8F0FE;
+  --nav-indicator: #2B6FFF;
+  --nav-divider: #E8ECF0;
+  --nav-logo: #1A1A2E;
+
+  /* ======================== 8. 几何与动效规范 ======================== */
   /* 圆角层级 */
   --lt-radius-none: 0px;
   --lt-radius-sm: 4px;

@@ -15,30 +15,37 @@ const toggleSidebar = () => {
 </script>
 
 <template>
-  <div class="flex h-screen w-full overflow-hidden bg-gray-50">
-        <!-- 左侧导航（深蓝黑底 #1A1A2E，激活指示条 #4B8BFF）-->
+  <div class="flex h-screen w-full overflow-hidden" style="background-color: var(--lt-bg-page);">
+    <!--
+      ============================================
+      左侧导航（v2.2 浅色版）
+      背景: 纯白 #FFFFFF
+      激活态: #2B6FFF 文字 + #E8F0FE 浅蓝底 + 3px 蓝色左指示条
+      与主内容区分割: 右侧阴影
+      ============================================
+    -->
     <div
       class="flex flex-col flex-shrink-0 z-20 transition-all duration-300 relative"
       :class="isCollapsed ? 'w-16' : 'w-60'"
-      style="background-color: #1A1A2E;"
+      style="background-color: var(--nav-bg); box-shadow: var(--nav-shadow);"
     >
       <!-- Logo 区域 -->
       <div
         class="h-16 flex items-center overflow-hidden transition-all duration-300"
         :class="isCollapsed ? 'justify-center px-0' : 'px-6'"
-        style="border-bottom: 1px solid rgba(255,255,255,0.08);"
+        style="border-bottom: 1px solid var(--nav-divider);"
       >
         <template v-if="isCollapsed">
-          <div class="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-sm">
+          <div class="w-8 h-8 rounded-lg" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark)); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
             <span class="text-white font-bold text-sm">LT</span>
           </div>
         </template>
         <template v-else>
-          <h1 class="text-lg font-bold flex items-center gap-2.5 whitespace-nowrap">
-            <div class="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-sm">
+          <h1 class="text-lg font-bold flex items-center gap-2.5 whitespace-nowrap" style="color: var(--nav-logo);">
+            <div class="w-8 h-8 rounded-lg" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark)); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
               <span class="text-white font-bold text-sm">LT</span>
             </div>
-            <span style="color: #FFFFFF;">LearnThink</span>
+            <span>LearnThink</span>
           </h1>
         </template>
       </div>
@@ -83,34 +90,34 @@ const toggleSidebar = () => {
       <div
         class="transition-all duration-300"
         :class="isCollapsed ? 'p-2 flex justify-center' : 'p-4'"
-        style="border-top: 1px solid rgba(255,255,255,0.08);"
+        style="border-top: 1px solid var(--nav-divider);"
       >
         <template v-if="isCollapsed">
-          <el-avatar :size="28" style="background-color: #4B8BFF;">L</el-avatar>
+          <el-avatar :size="28" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">L</el-avatar>
         </template>
         <template v-else>
           <div class="flex items-center gap-3">
-            <el-avatar :size="32" style="background-color: #4B8BFF;">L</el-avatar>
+            <el-avatar :size="32" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">L</el-avatar>
             <div class="flex-1 min-w-0 text-sm">
-              <p class="font-medium truncate" style="color: #E8E8F0;">{{ userStore.userInfo?.displayName || '测试用户' }}</p>
-              <p class="text-xs truncate" style="color: #8E8EA0;">{{ userStore.userInfo?.major || '软件工程专业' }}</p>
+              <p class="font-medium truncate" style="color: var(--lt-text-primary);">{{ userStore.userInfo?.displayName || '测试用户' }}</p>
+              <p class="text-xs truncate" style="color: var(--lt-text-auxiliary);">{{ userStore.userInfo?.major || '软件工程专业' }}</p>
             </div>
           </div>
         </template>
       </div>
 
       <!-- 收起/展开按钮 -->
-      <div class="flex justify-center" style="border-top: 1px solid rgba(255,255,255,0.08);">
+      <div style="border-top: 1px solid var(--nav-divider);">
         <el-tooltip
           :content="isCollapsed ? '展开侧边栏' : '收起侧边栏'"
           :placement="isCollapsed ? 'right' : 'top'"
         >
           <button
             class="w-full py-2.5 flex items-center justify-center transition-all duration-200 outline-none cursor-pointer group"
-            style="color: #686880;"
+            style="color: var(--lt-text-auxiliary);"
             @click="toggleSidebar"
-                        @mouseenter="(e) => { (e.target as HTMLElement).style.color = '#FFFFFF' }"
-            @mouseleave="(e) => { (e.target as HTMLElement).style.color = '#686880' }"
+            @mouseenter="(e) => { (e.target as HTMLElement).style.color = 'var(--lt-brand)' }"
+            @mouseleave="(e) => { (e.target as HTMLElement).style.color = 'var(--lt-text-auxiliary)' }"
           >
             <el-icon class="text-base transition-transform duration-300 group-hover:scale-110">
               <Fold v-if="!isCollapsed" />
@@ -124,7 +131,7 @@ const toggleSidebar = () => {
     <!-- 右侧主体 -->
     <div class="flex-1 flex flex-col min-w-0">
       <!-- 顶部 Header -->
-            <header class="h-16 bg-white/80 backdrop-blur-md border-b border-gray-200 flex items-center justify-between px-6 z-10" style="box-shadow: 0 1px 3px rgba(0,0,0,0.03)">
+      <header class="h-16 flex items-center justify-between px-6 z-10" style="background-color: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border-bottom: 1px solid var(--lt-border); box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
         <div class="flex items-center gap-3">
           <el-icon class="text-gray-300 cursor-pointer hover:text-[#2B6FFF] transition-colors text-lg" @click="isCollapsed = !isCollapsed">
             <Fold />
@@ -181,7 +188,14 @@ const toggleSidebar = () => {
   background-color: var(--el-color-primary);
 }
 
-/* 侧边栏菜单美化 */
+/*
+  ============================================
+  v2.2 浅色导航栏菜单样式
+  默认: #5A5A72 文字
+  hover: rgba(43,111,255,0.06) 浅蓝底
+  激活: #2B6FFF 文字 + #E8F0FE 浅蓝底 + 3px 左指示条
+  ============================================
+*/
 :deep(.el-menu) {
   border: none !important;
 }
@@ -189,19 +203,19 @@ const toggleSidebar = () => {
   border-radius: 8px;
   margin: 2px 8px;
   padding: 0 12px !important;
-  transition: all 0.2s ease;
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
   font-size: 0.9rem;
-  color: #8E8EA0 !important;
+  color: var(--nav-item-default) !important;
 }
 :deep(.el-menu-item:hover) {
-  background: rgba(255, 255, 255, 0.06) !important;
-  color: #FFFFFF !important;
+  background-color: var(--nav-item-hover-bg) !important;
+  color: var(--lt-brand) !important;
 }
 :deep(.el-menu-item.is-active) {
-  background: rgba(255, 255, 255, 0.08) !important;
-  color: #FFFFFF !important;
+  background-color: var(--nav-item-active-bg) !important;
+  color: var(--nav-item-active) !important;
   font-weight: 600;
-  box-shadow: inset 3px 0 0 #4B8BFF;
+  box-shadow: inset 3px 0 0 var(--nav-indicator);
 }
 :deep(.el-menu--collapse .el-menu-item) {
   margin: 2px 6px;
@@ -210,12 +224,12 @@ const toggleSidebar = () => {
 }
 :deep(.el-menu--collapse .el-menu-item.is-active) {
   box-shadow: none;
-  background: rgba(255, 255, 255, 0.08) !important;
+  background-color: var(--nav-item-active-bg) !important;
 }
 
 /* 顶部搜索框美化 */
 :deep(.search-input .el-input__wrapper) {
-  background: #F5F7FA;
+  background: var(--lt-bg-page);
   border-radius: 20px;
   box-shadow: none !important;
   transition: all 0.2s ease;
@@ -224,7 +238,7 @@ const toggleSidebar = () => {
 :deep(.search-input .el-input__wrapper:hover),
 :deep(.search-input .el-input__wrapper.is-focus) {
   background: #ffffff;
-  border-color: #A3C4FF;
+  border-color: var(--lt-brand-lighter);
   box-shadow: 0 0 0 2px rgba(43, 111, 255, 0.1) !important;
 }
 
@@ -232,11 +246,11 @@ const toggleSidebar = () => {
 :deep(.header-icon-btn) {
   position: relative;
   font-size: 18px;
-  color: #8E8EA0;
+  color: var(--lt-text-auxiliary);
   transition: all 0.2s ease;
 }
 :deep(.header-icon-btn:hover) {
-  color: #2B6FFF !important;
-  background: #E8F0FE !important;
+  color: var(--lt-brand) !important;
+  background: var(--lt-brand-lightest) !important;
 }
 </style>

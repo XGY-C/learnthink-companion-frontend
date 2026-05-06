@@ -239,14 +239,14 @@ onMounted(() => {
   <div class="dashboard-container h-full overflow-y-auto p-6 space-y-6">
         <!-- 页面标题行 -->
     <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold flex items-center gap-2" style="color: #1A1A2E;">
-            <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, #2B6FFF, #1A4FCC);">
+            <div>
+        <h1 class="text-2xl font-bold flex items-center gap-2" style="color: var(--lt-text-primary);">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
               <el-icon size="18" color="white"><DataBoard /></el-icon>
             </div>
             <span>学习驾驶舱</span>
           </h1>
-          <p class="text-sm mt-1 ml-[44px]" style="color: #8E8EA0;">基于多智能体画像驱动的个性化学习概览</p>
+          <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">基于多智能体画像驱动的个性化学习概览</p>
       </div>
       <el-button size="small" plain :icon="RefreshRight" @click="refreshMetrics" class="!rounded-full">
         刷新数据
@@ -286,7 +286,7 @@ onMounted(() => {
             <!-- 1. 顶部概览条：4 个指标卡（增强版） -->
       <el-row :gutter="20">
         <el-col v-for="(metric, idx) in metrics" :key="idx" :xs="12" :sm="6" class="mb-4">
-          <el-card shadow="never" class="metric-card group" :body-style="{ padding: '20px' }" style="border: 1px solid #E8ECF0; border-radius: 12px;">
+          <el-card shadow="never" class="metric-card group" :body-style="{ padding: '20px' }" style="border: 1px solid var(--lt-border); border-radius: 12px;">
             <div class="flex items-center gap-4">
               <div
                 class="w-12 h-12 rounded-xl flex items-center justify-center text-lg shrink-0 transition-all duration-300 group-hover:scale-110 group-hover:shadow-sm"
@@ -298,10 +298,10 @@ onMounted(() => {
                 </el-icon>
               </div>
               <div class="min-w-0">
-                                <p class="text-xs truncate" style="color: #8E8EA0;">{{ metric.label }}</p>
-                <p class="text-2xl font-bold mt-0.5 flex items-baseline gap-1 animate-count-up" style="color: #1A1A2E;" :style="{ animationDelay: `${idx * 0.1}s` }">
+                                                                <p class="text-xs truncate" style="color: var(--lt-text-auxiliary);">{{ metric.label }}</p>
+                <p class="text-2xl font-bold mt-0.5 flex items-baseline gap-1 animate-count-up" style="color: var(--lt-text-primary);" :style="{ animationDelay: `${idx * 0.1}s` }">
                   {{ metric.value }}
-                  <span class="text-sm font-normal" style="color: #B8B8C8;">{{ metric.unit }}</span>
+                  <span class="text-sm font-normal" style="color: var(--lt-text-placeholder);">{{ metric.unit }}</span>
                 </p>
               </div>
             </div>
@@ -316,28 +316,28 @@ onMounted(() => {
       <!-- 2. 中部两列：下一步推荐 + 画像快照 -->
       <el-row :gutter="20">
         <!-- 左：下一步推荐 -->
-                <el-col :xs="24" :lg="14" class="mb-4">
-          <el-card shadow="never" class="h-full" style="border-radius: 12px; border: 1px solid #E8ECF0;">
+                                <el-col :xs="24" :lg="14" class="mb-4">
+          <el-card shadow="never" class="h-full" style="border-radius: 12px; border: 1px solid var(--lt-border);">
               <template #header>
                 <div class="flex items-center justify-between">
-                  <span class="font-semibold flex items-center gap-2" style="color: #1A1A2E;">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #2B6FFF, #1A4FCC);">
+                  <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
+                    <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
                       <el-icon size="14" color="white"><Aim /></el-icon>
                     </div>
                     下一步学习推荐
                   </span>
-                  <el-button link type="primary" size="small" @click="goToPath" style="color: #2B6FFF;">
+                  <el-button link type="primary" size="small" @click="goToPath" style="color: var(--lt-brand);">
                     查看完整路径 <el-icon><Right /></el-icon>
                   </el-button>
                 </div>
               </template>
 
               <div class="p-2">
-                <!-- 推荐知识点头部 -->
+                                <!-- 推荐知识点头部 -->
                 <div class="flex items-start justify-between mb-3">
                   <div>
-                    <h3 class="text-lg font-bold" style="color: #1A1A2E;">{{ nextRecommendation.title }}</h3>
-                    <p class="text-sm mt-0.5" style="color: #8E8EA0;">
+                    <h3 class="text-lg font-bold" style="color: var(--lt-text-primary);">{{ nextRecommendation.title }}</h3>
+                    <p class="text-sm mt-0.5" style="color: var(--lt-text-auxiliary);">
                       知识点：{{ nextRecommendation.knowledgePoint }}
                     </p>
                   </div>
@@ -346,15 +346,15 @@ onMounted(() => {
                   </el-tag>
                 </div>
 
-                <!-- 证据行：来源用蓝色链接，质量分用中性色 -->
-                <div class="flex items-center gap-4 text-xs mb-4 px-3 py-2 rounded-lg" style="color: #8E8EA0; background-color: #F5F7FA;">
-                  <span class="flex items-center gap-1" style="color: #2B6FFF;">
+                                <!-- 证据行：来源用蓝色链接，质量分用中性色 -->
+                <div class="flex items-center gap-4 text-xs mb-4 px-3 py-2 rounded-lg" style="color: var(--lt-text-auxiliary); background-color: var(--lt-bg-page);">
+                  <span class="flex items-center gap-1" style="color: var(--lt-brand);">
                     <el-icon><Document /></el-icon>
                     来源 {{ nextRecommendation.sourcesCount }}
                   </span>
                   <span class="flex items-center gap-1 quality-score">
                     <el-icon><TrendCharts /></el-icon>
-                    质量 <span style="color: #5A5A72;">{{ nextRecommendation.qualityScore }}</span>/100
+                    质量 <span style="color: var(--lt-text-secondary);">{{ nextRecommendation.qualityScore }}</span>/100
                   </span>
                   <span class="flex items-center gap-1">
                     <el-icon><Timer /></el-icon>
@@ -362,9 +362,9 @@ onMounted(() => {
                   </span>
                 </div>
 
-                <!-- 为什么推荐（核心可解释性）-->
+                                <!-- 为什么推荐（核心可解释性）-->
                 <div class="mb-4">
-                  <p class="text-xs font-semibold mb-2 flex items-center gap-1" style="color: #5A5A72;">
+                  <p class="text-xs font-semibold mb-2 flex items-center gap-1" style="color: var(--lt-text-secondary);">
                     <el-icon :size="14"><Aim /></el-icon>
                     为什么推荐这个？
                   </p>
@@ -394,10 +394,10 @@ onMounted(() => {
               </div>
 
               <!-- 进度条小提示 -->
-              <div class="mt-6 pt-4 border-t" style="border-color: #E8ECF0;">
-                <div class="flex items-center justify-between text-xs mb-1" style="color: #8E8EA0;">
+                            <div class="mt-6 pt-4 border-t" style="border-color: var(--lt-border);">
+                <div class="flex items-center justify-between text-xs mb-1" style="color: var(--lt-text-auxiliary);">
                   <span>当前路径整体进度</span>
-                  <span class="font-semibold" style="color: #5A5A72;">{{ pathProgress }}%</span>
+                  <span class="font-semibold" style="color: var(--lt-text-secondary);">{{ pathProgress }}%</span>
                 </div>
                 <el-progress :percentage="pathProgress" :stroke-width="6" />
               </div>
@@ -406,32 +406,32 @@ onMounted(() => {
         </el-col>
 
         <!-- 右：画像快照 -->
-                <el-col :xs="24" :lg="10" class="mb-4">
-          <el-card shadow="never" class="h-full" style="border-radius: 12px; border: 1px solid #E8ECF0;">
+                                <el-col :xs="24" :lg="10" class="mb-4">
+          <el-card shadow="never" class="h-full" style="border-radius: 12px; border: 1px solid var(--lt-border);">
               <template #header>
                 <div class="flex items-center justify-between">
-                  <span class="font-semibold flex items-center gap-2" style="color: #1A1A2E;">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #34C759, #28A745);">
+                  <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
+                    <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--lt-success), #28A745);">
                       <el-icon size="14" color="white"><User /></el-icon>
                     </div>
                     画像快照
                   </span>
-                  <el-button link type="primary" size="small" @click="goToProfile" style="color: #2B6FFF;">
+                  <el-button link type="primary" size="small" @click="goToProfile" style="color: var(--lt-brand);">
                     详细画像 <el-icon><Right /></el-icon>
                   </el-button>
                 </div>
               </template>
 
               <div class="space-y-4">
-                <!-- 迷你雷达图：蓝线 #2B6FFF + 浅蓝填充 -->
-                <div class="h-52 w-full rounded-lg p-2" style="background-color: #F5F7FA;">
+                                <!-- 迷你雷达图：蓝线 #2B6FFF + 浅蓝填充 -->
+                <div class="h-52 w-full rounded-lg p-2" style="background-color: var(--lt-bg-page);">
                   <v-chart class="w-full h-full" :option="radarOption" autoresize />
                 </div>
 
-                <!-- 标签云：分区豁免规则，标题用中性色 -->
+                                <!-- 标签云：分区豁免规则，标题用中性色 -->
                 <div class="space-y-2.5">
                   <div>
-                    <span class="text-xs block mb-1.5" style="color: #5A5A72;">
+                    <span class="text-xs block mb-1.5" style="color: var(--lt-text-secondary);">
                       <el-icon size="12" class="mr-0.5"><WarningFilled /></el-icon>
                       薄弱项
                     </span>
@@ -449,7 +449,7 @@ onMounted(() => {
                     </div>
                   </div>
                   <div>
-                    <span class="text-xs block mb-1.5" style="color: #5A5A72;">
+                    <span class="text-xs block mb-1.5" style="color: var(--lt-text-secondary);">
                       <el-icon size="12" class="mr-0.5"><Medal /></el-icon>
                       掌握项
                     </span>
@@ -467,7 +467,7 @@ onMounted(() => {
                     </div>
                   </div>
                   <div>
-                    <span class="text-xs block mb-1.5" style="color: #5A5A72;">
+                    <span class="text-xs block mb-1.5" style="color: var(--lt-text-secondary);">
                       <el-icon size="12" class="mr-0.5"><Reading /></el-icon>
                       兴趣方向
                     </span>
@@ -487,18 +487,18 @@ onMounted(() => {
                 </div>
 
                 <!-- 偏好与版本 -->
-                <div class="rounded-lg p-3 space-y-2 text-sm" style="background-color: #F5F7FA;">
+                <div class="rounded-lg p-3 space-y-2 text-sm" style="background-color: var(--lt-bg-page);">
                   <div class="flex justify-between items-center">
-                    <span style="color: #8E8EA0;">学习节奏</span>
-                    <span class="font-medium" style="color: #1A1A2E;">{{ profilePace }} 分钟/天</span>
+                    <span style="color: var(--lt-text-auxiliary);">学习节奏</span>
+                    <span class="font-medium" style="color: var(--lt-text-primary);">{{ profilePace }} 分钟/天</span>
                   </div>
                   <div class="flex justify-between items-center">
-                    <span style="color: #8E8EA0;">内容偏好</span>
-                    <span class="font-medium" style="color: #1A1A2E;">{{ profilePreference }}</span>
+                    <span style="color: var(--lt-text-auxiliary);">内容偏好</span>
+                    <span class="font-medium" style="color: var(--lt-text-primary);">{{ profilePreference }}</span>
                   </div>
                   <div class="flex justify-between items-center">
-                    <span style="color: #8E8EA0;">画像版本</span>
-                    <span class="text-xs px-2 py-0.5 rounded" style="color: #5A5A72; background-color: #FFFFFF;">{{ profileVersion }} · {{ profileUpdatedAt }}</span>
+                    <span style="color: var(--lt-text-auxiliary);">画像版本</span>
+                    <span class="text-xs px-2 py-0.5 rounded" style="color: var(--lt-text-secondary); background-color: var(--lt-bg-card);">{{ profileVersion }} · {{ profileUpdatedAt }}</span>
                   </div>
                 </div>
             </div>
@@ -506,15 +506,15 @@ onMounted(() => {
         </el-col>
       </el-row>
 
-      <!-- 3. 底部：最近资源包列表 -->
-            <el-card shadow="never" style="border: 1px solid #E8ECF0; border-radius: 12px;">
+            <!-- 3. 底部：最近资源包列表 -->
+            <el-card shadow="never" style="border: 1px solid var(--lt-border); border-radius: 12px;">
         <template #header>
           <div class="flex items-center justify-between">
-            <span class="font-semibold flex items-center gap-2" style="color: #1A1A2E;">
-              <el-icon style="color: #2B6FFF;"><Document /></el-icon>
+            <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
+              <el-icon style="color: var(--lt-brand);"><Document /></el-icon>
               最近生成的资源包
             </span>
-            <el-button link type="primary" size="small" @click="goToLibrary" style="color: #2B6FFF;">
+            <el-button link type="primary" size="small" @click="goToLibrary" style="color: var(--lt-brand);">
               查看全部 <el-icon><Right /></el-icon>
             </el-button>
           </div>
@@ -524,8 +524,8 @@ onMounted(() => {
           <el-table :data="recentPacks" style="width: 100%" stripe>
             <el-table-column label="资源包名称" min-width="180">
               <template #default="{ row }">
-                <div class="flex items-center gap-2">
-                  <span class="font-medium cursor-pointer transition-colors" style="color: #1A1A2E;" @click="openPack(row)">
+                                <div class="flex items-center gap-2">
+                  <span class="font-medium cursor-pointer transition-colors" style="color: var(--lt-text-primary);" @click="openPack(row)">
                     {{ row.title }}
                   </span>
                   <el-tag v-if="row.isActive" size="small" type="success" effect="dark">当前</el-tag>
@@ -533,9 +533,9 @@ onMounted(() => {
               </template>
             </el-table-column>
             <el-table-column prop="knowledgePoint" label="知识点" width="130" />
-            <el-table-column label="资源数" width="80" align="center">
+                        <el-table-column label="资源数" width="80" align="center">
               <template #default="{ row }">
-                <span class="text-sm" style="color: #5A5A72;">{{ row.resourceCount }} 类</span>
+                <span class="text-sm" style="color: var(--lt-text-secondary);">{{ row.resourceCount }} 类</span>
               </template>
             </el-table-column>
             <el-table-column label="质量分" width="100" align="center">
@@ -554,9 +554,9 @@ onMounted(() => {
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="生成时间" width="150" align="right">
+                        <el-table-column label="生成时间" width="150" align="right">
               <template #default="{ row }">
-                <span class="text-xs" style="color: #8E8EA0;">{{ row.createdAt }}</span>
+                <span class="text-xs" style="color: var(--lt-text-auxiliary);">{{ row.createdAt }}</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="100" align="center" fixed="right">
@@ -608,16 +608,7 @@ onMounted(() => {
 }
 
 :deep(.el-table th.el-table__cell) {
-  color: #5A5A72;
-}
-
-/* 卡片内容区滚动条美化 */
-:deep(.el-table__body-wrapper::-webkit-scrollbar) {
-  width: 4px;
-}
-:deep(.el-table__body-wrapper::-webkit-scrollbar-thumb) {
-  background: #e2e8f0;
-  border-radius: 2px;
+  color: var(--lt-text-secondary);
 }
 
 /* 空状态引导卡片 hover */
