@@ -1,22 +1,21 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import * as echarts from 'echarts/core'
 import { RadarChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
+import { useProfileStore } from '@/stores/profile'
 
 echarts.use([RadarChart, CanvasRenderer])
 
+const profile = useProfileStore()
+
 const radarOption = computed(() => ({
   radar: {
-    indicator: [
-      { name: '代码能力', max: 100 },
-      { name: '架构设计', max: 100 },
-      { name: '算法基础', max: 100 },
-      { name: '产品思维', max: 100 },
-      { name: '工程规范', max: 100 },
-      { name: '测试素养', max: 100 }
-    ],
+    indicator: profile.dimensions.map(d => ({
+      name: d.name,
+      max: 100
+    })),
     radius: '65%',
     center: ['50%', '50%'],
     axisName: {
@@ -35,7 +34,7 @@ const radarOption = computed(() => ({
       type: 'radar',
       data: [
         {
-          value: [70, 45, 60, 85, 30, 50],
+          value: profile.dimensions.map(d => d.value),
           name: '掌握度',
           itemStyle: { color: '#3b82f6' },
           areaStyle: { color: 'rgba(59, 130, 246, 0.2)' }
@@ -50,7 +49,10 @@ const radarOption = computed(() => ({
   <div class="h-full flex flex-col bg-white border-l border-gray-200">
     <div class="p-4 border-b border-gray-200">
       <h2 class="text-lg font-medium text-gray-800">学习画像概览</h2>
-      <p class="text-xs text-gray-500 mt-1">最后更新: 刚刚</p>
+      <div class="flex items-center justify-between mt-1">
+        <p class="text-xs text-gray-500">最后更新: {{ profile.updatedAt }}</p>
+        <el-tag size="small" type="info" effect="plain">{{ profile.profileVersion }}</el-tag>
+      </div>
     </div>
     
     <div class="flex-1 overflow-y-auto p-4 space-y-6">
@@ -69,14 +71,45 @@ const radarOption = computed(() => ({
           <div>
             <span class="text-xs text-gray-500 block mb-1">主要薄弱项</span>
             <div class="flex flex-wrap gap-2">
-              <el-tag type="danger" effect="plain" class="rounded">工程规范</el-tag>
-              <el-tag type="danger" effect="plain" class="rounded">架构设计</el-tag>
+              <el-tag
+                v-for="tag in profile.tags.weakness"
+                :key="tag"
+                type="danger"
+                effect="plain"
+                class="rounded"
+              >
+                {{ tag }}
+              </el-tag>
+              <span v-if="profile.tags.weakness.length === 0" class="text-xs text-success">暂无</span>
             </div>
           </div>
           <div>
             <span class="text-xs text-gray-500 block mb-1">突出优势</span>
             <div class="flex flex-wrap gap-2">
-              <el-tag type="success" effect="plain" class="rounded">产品思维</el-tag>
+              <el-tag
+                v-for="tag in profile.tags.mastered"
+                :key="tag"
+                type="success"
+                effect="plain"
+                class="rounded"
+              >
+                {{ tag }}
+              </el-tag>
+              <span v-if="profile.tags.mastered.length === 0" class="text-xs text-gray-400">暂无</span>
+            </div>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 block mb-1">兴趣方向</span>
+            <div class="flex flex-wrap gap-2">
+              <el-tag
+                v-for="tag in profile.tags.interest"
+                :key="tag"
+                type="primary"
+                effect="plain"
+                class="rounded"
+              >
+                {{ tag }}
+              </el-tag>
             </div>
           </div>
         </div>
@@ -88,11 +121,11 @@ const radarOption = computed(() => ({
         <div class="space-y-2 text-sm text-gray-600 bg-slate-50 p-3 rounded-lg">
           <div class="flex justify-between">
             <span>推荐节奏</span>
-            <span class="font-medium text-gray-800">15分钟/天 (速览为主)</span>
+            <span class="font-medium text-gray-800">{{ profile.pace }}分钟/天 (速览为主)</span>
           </div>
           <div class="flex justify-between">
             <span>实操要求</span>
-            <span class="font-medium text-gray-800">高 (代码案例优先)</span>
+            <span class="font-medium text-gray-800">高 ({{ profile.preference }})</span>
           </div>
         </div>
       </div>

@@ -1,8 +1,20 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { useProfileStore } from '@/stores/profile'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+const profile = useProfileStore()
 
 const inputMessage = ref('')
-const messages = ref([
+interface ChatMessage {
+  role: 'assistant' | 'user'
+  text: string
+  isTyping?: boolean
+}
+
+const messages = ref<ChatMessage[]>([
   {
     role: 'assistant',
     text: '你好！我是你的专属学习智能导师。要为你量身定制学习路径，我需要先了解一下你的专业背景、当前的学习目标，以及每天能抽出的学习时间。'
@@ -13,19 +25,57 @@ const messages = ref([
   },
   {
     role: 'assistant',
-    text: '收到！看来你的目标非常明确，侧重于**工程化规范**和**前端架构**。既然每天只有半小时，我会为你推送**高浓度的实操案例**与**速览版知识点**。\\n已为你更新能力雷达图与偏好标签。你可以随时在这里继续更新你的情况，或者直接进入工作室生成属于你的前端工程资源包。'
+    text: '收到！看来你的目标非常明确，侧重于**工程化规范**和**前端架构**。既然每天只有半小时，我会为你推送**高浓度的实操案例**与**速览版知识点**。\n\n已为你更新能力雷达图与偏好标签。你可以随时在这里继续更新你的情况，或者直接进入工作室生成属于你的前端工程资源包。'
   }
 ])
 
+/** 模拟流式打字效果 */
+const typeText = (fullText: string, callback?: () => void) => {
+  const msg: ChatMessage = { role: 'assistant', text: '', isTyping: true }
+  messages.value.push(msg)
+  let idx = 0
+  const interval = setInterval(() => {
+    if (idx < fullText.length) {
+      msg.text += fullText[idx]
+      idx++
+    } else {
+      clearInterval(interval)
+      msg.isTyping = false
+      callback?.()
+    }
+  }, 20)
+}
+
 const sendMessage = () => {
   if (!inputMessage.value.trim()) return
-  messages.value.push({ role: 'user', text: '模拟发送：' + inputMessage.value })
+  const userMsg = inputMessage.value.trim()
+  messages.value.push({ role: 'user', text: userMsg })
   inputMessage.value = ''
-  
-  // 模拟助手回复
+
   setTimeout(() => {
-    messages.value.push({ role: 'assistant', text: '（正在根据新对话持续更新画像...）' })
-  }, 800)
+    // 更新画像（模拟对话分析）
+    profile.updateFromDialog([userMsg])
+
+    let reply = ''
+    if (/薄弱|不足|不会|差/.test(userMsg)) {
+      reply = '已记录你的薄弱点反馈。根据你提到的内容，我更新了能力雷达图中对应维度，并调整了学习路径中的前置节点优先级。'
+      ElMessage.info('画像已更新：薄弱项识别完成')
+    } else if (/兴趣|想学|喜欢/.test(userMsg)) {
+      reply = '收到你的兴趣方向！已为你在画像中标记新的兴趣标签，后续资源推荐将优先覆盖这些领域。'
+      ElMessage.success('画像已更新：兴趣标签 +1')
+    } else if (/时间|每天|节奏/.test(userMsg)) {
+      reply = '已根据你的时间安排调整了学习节奏。后续生成的资源将以适配你当前节奏的版本为主，同时保留深入版供有余力时学习。'
+      ElMessage.success('画像已更新：学习节奏调整')
+    } else {
+      reply = '已收到你的补充信息，正在综合分析并更新画像维度。能力雷达图与偏好标签已同步更新。'
+    }
+
+    typeText(reply)
+  }, 600)
+}
+
+const goToStudio = () => {
+  router.push('/studio')
 }
 </script>
 
@@ -37,7 +87,9 @@ const sendMessage = () => {
         <p class="text-sm text-gray-500 mt-1">越聊越懂你，资源推送越懂你</p>
       </div>
       <div>
-        <el-button type="primary" class="shadow-sm">进入资源工作室 &rarr;</el-button>
+        <el-button type="primary" class="shadow-sm" @click="goToStudio">
+          进入资源工作室 &rarr;
+        </el-button>
       </div>
     </div>
 
@@ -46,11 +98,15 @@ const sendMessage = () => {
         class="flex"
         :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
       >
-        <div class="max-w-2xl px-4 py-3 rounded-2xl shadow-sm text-sm"
+                <div class="max-w-2xl px-4 py-3 rounded-2xl shadow-sm text-sm leading-relaxed"
           :class="msg.role === 'user' ? 'bg-primary text-white rounded-br-none' : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none'"
-          style="line-height: 1.6"
         >
-          {{ msg.text }}
+          <template v-if="msg.isTyping">
+            {{ msg.text }}<span class="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5" />
+          </template>
+          <template v-else>
+            {{ msg.text }}
+          </template>
         </div>
       </div>
     </div>

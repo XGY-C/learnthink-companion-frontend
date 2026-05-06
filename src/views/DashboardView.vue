@@ -22,8 +22,12 @@ import {
   User,
   MagicStick
 } from '@element-plus/icons-vue'
+import { useProfileStore } from '@/stores/profile'
+import { usePathStore } from '@/stores/path'
 
 const router = useRouter()
+const profile = useProfileStore()
+const pathStore = usePathStore()
 
 echarts.use([RadarChart, CanvasRenderer])
 
@@ -68,28 +72,22 @@ const metrics = computed(() => [
   }
 ])
 
-// ===== 画像模拟数据 =====
-const profilePace = ref(15)
-const profilePreference = ref('代码实操优先')
+// ===== 画像数据（来自 Profile Store） =====
+const profilePace = computed(() => parseInt(profile.pace) || 15)
+const profilePreference = computed(() => profile.preference)
 
-const weakTags = ref<string[]>(['工程规范', '架构设计', '测试素养'])
-const strongTags = ref<string[]>(['产品思维', '算法基础'])
-const interestTags = ref<string[]>(['前端工程化', 'Vue 生态', '性能优化'])
+const weakTags = computed(() => profile.tags.weakness)
+const strongTags = computed(() => profile.tags.mastered)
+const interestTags = computed(() => profile.tags.interest)
 
-/** 雷达图 6 维数据 */
-const radarValues = ref([70, 45, 60, 85, 30, 50])
-const radarIndicators = [
-  { name: '代码能力', max: 100 },
-  { name: '架构设计', max: 100 },
-  { name: '算法基础', max: 100 },
-  { name: '产品思维', max: 100 },
-  { name: '工程规范', max: 100 },
-  { name: '测试素养', max: 100 }
-]
+/** 雷达图数据 */
+const radarIndicators = computed(() =>
+  profile.dimensions.map(d => ({ name: d.name, max: 100 }))
+)
 
 const radarOption = computed(() => ({
   radar: {
-    indicator: radarIndicators,
+    indicator: radarIndicators.value,
     radius: '65%',
     center: ['50%', '50%'],
     axisName: {
@@ -114,7 +112,7 @@ const radarOption = computed(() => ({
       type: 'radar',
       data: [
         {
-          value: radarValues.value,
+          value: profile.dimensions.map(d => d.value),
           name: '掌握度',
           itemStyle: { color: '#3b82f6' },
           areaStyle: { color: 'rgba(59, 130, 246, 0.2)' }
@@ -124,8 +122,8 @@ const radarOption = computed(() => ({
   ]
 }))
 
-const profileVersion = ref('v1.2')
-const profileUpdatedAt = ref('2026-05-05 14:30')
+const profileVersion = computed(() => profile.profileVersion)
+const profileUpdatedAt = computed(() => profile.updatedAt)
 
 // ===== 下一步推荐 =====
 const nextRecommendation = computed(() => ({
@@ -144,7 +142,12 @@ const nextRecommendation = computed(() => ({
 }))
 
 // ===== 路径进度 =====
-const pathProgress = ref(32)
+const pathProgress = computed(() => {
+  const allNodes = pathStore.nodes.length
+  if (allNodes === 0) return 0
+  const mastered = pathStore.nodes.filter(n => n.status === 'mastered').length
+  return Math.round((mastered / allNodes) * 100)
+})
 
 // ===== 最近资源包列表 =====
 interface RecentPack {

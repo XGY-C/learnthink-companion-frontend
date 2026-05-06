@@ -218,53 +218,43 @@
           </div>
         </div>
 
-        <!-- 内容体：根据类型渲染 -->
-        <div class="min-h-[200px]">
-          <div v-if="currentPreview.type === 'mindmap'" class="flex items-center justify-center h-64 bg-slate-50 rounded border border-dashed border-slate-200">
-            <div class="text-center">
-              <el-icon class="text-3xl text-slate-300 mb-2"><Share /></el-icon>
-              <p class="text-sm text-slate-400">思维导图预览（Markmap 集成区）</p>
-              <p class="text-xs text-slate-400 mt-1">缩放/拖拽/节点折叠</p>
+                <!-- 内容体：根据类型渲染 -->
+          <div class="min-h-[200px]">
+            <!-- 思维导图 -->
+            <div v-if="currentPreview.type === 'mindmap'" class="h-96 border border-slate-200 rounded-lg overflow-hidden">
+              <MindmapViewer
+                :content="previewMode === 'brief' ? currentPreview.brief || '# 暂无内容' : currentPreview.deepContent || currentPreview.brief || '# 暂无内容'"
+              />
+            </div>
+            <!-- 练习题：用 Markdown 展示 -->
+            <div v-else-if="currentPreview.type === 'quiz'" class="space-y-4">
+              <MarkdownViewer
+                :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
+                :showToc="false"
+              />
+            </div>
+            <!-- 代码案例：代码块高亮 -->
+            <div v-else-if="currentPreview.type === 'code'" class="border border-slate-200 rounded-lg overflow-hidden">
+              <MarkdownViewer
+                :content="'```python\n' + (previewMode === 'brief' ? currentPreview.brief || '' : currentPreview.deepContent || currentPreview.brief || '') + '\n```'"
+                :showToc="false"
+              />
+            </div>
+            <!-- 视频脚本：Markdown 渲染 -->
+            <div v-else-if="currentPreview.type === 'video_script'" class="">
+              <MarkdownViewer
+                :content="'## 视频脚本\n\n' + (previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容')"
+                :showToc="false"
+              />
+            </div>
+            <!-- 默认（doc/reading 等）：完整 Markdown 渲染 -->
+            <div v-else class="">
+              <MarkdownViewer
+                :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
+                :showToc="previewMode === 'deep'"
+              />
             </div>
           </div>
-          <div v-else-if="currentPreview.type === 'quiz'" class="space-y-4">
-            <p class="text-sm text-slate-600 bg-slate-50 p-4 rounded">
-              {{ previewMode === 'brief' ? currentPreview.brief : currentPreview.deepContent || currentPreview.brief }}
-            </p>
-            <div class="bg-white border border-slate-200 rounded-lg p-4">
-              <h5 class="text-sm font-medium mb-3">模拟题目示例</h5>
-              <p class="text-sm text-slate-700 mb-3">1. A* 搜索算法中，启发函数 h(n) 需要满足什么条件才能保证最优性？</p>
-              <div class="space-y-2 ml-4">
-                <div class="text-sm">A. 可采纳性（Admissible）</div>
-                <div class="text-sm">B. 一致性（Consistent）</div>
-                <div class="text-sm">C. 两者都需要</div>
-                <div class="text-sm text-success font-medium">✓ 正确答案: C</div>
-              </div>
-            </div>
-          </div>
-          <div v-else-if="currentPreview.type === 'code'" class="bg-slate-800 text-slate-200 p-4 rounded-lg font-mono text-sm">
-            <div class="flex items-center gap-2 mb-3 text-xs text-slate-400">
-              <span class="bg-slate-700 px-2 py-0.5 rounded">python</span>
-              <span>示例代码片段</span>
-            </div>
-            <pre class="m-0 whitespace-pre-wrap">{{ previewMode === 'brief' ? `def heuristic(a, b):
-    # 曼哈顿距离
-    return abs(a.x - b.x) + abs(a.y - b.y)` : `def heuristic(a, b):
-    # 曼哈顿距离（满足可采纳性）
-    return abs(a.x - b.x) + abs(a.y - b.y)
-
-# A* 主循环
-while open_set:
-    current = min(open_set, key=lambda n: f_score[n])
-    if current == goal:
-        return reconstruct_path(came_from, current)
-    open_set.remove(current)
-    closed_set.add(current)` }}</pre>
-          </div>
-          <div v-else class="p-4 bg-slate-50 rounded text-slate-700 font-mono text-sm leading-relaxed whitespace-pre-wrap">
-            {{ previewMode === 'brief' ? currentPreview.brief : currentPreview.deepContent || currentPreview.brief }}
-          </div>
-        </div>
 
         <!-- 证据来源（内嵌折叠版） -->
         <div v-if="currentPreview.sources && currentPreview.sources.length > 0" class="mt-6 pt-4 border-t border-slate-100">
@@ -325,6 +315,8 @@ import {
 import type { ResourcePack, ResourceItem } from '@/types'
 import ResourceCard from '@/components/ResourceCard.vue'
 import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
+import MarkdownViewer from '@/components/MarkdownViewer.vue'
+import MindmapViewer from '@/components/MindmapViewer.vue'
 
 const router = useRouter()
 
