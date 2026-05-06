@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import { computed, ref } from 'vue'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
+const userStore = useUserStore()
 const activeMenu = computed(() => route.path)
 const isCollapsed = ref(false)
 
@@ -81,8 +83,8 @@ const toggleSidebar = () => {
           <div class="flex items-center gap-3">
             <el-avatar :size="32" class="bg-primary text-white">L</el-avatar>
             <div class="flex-1 min-w-0 text-sm">
-              <p class="font-medium text-gray-800 truncate">测试用户</p>
-              <p class="text-gray-500 text-xs truncate">软件工程专业</p>
+              <p class="font-medium text-gray-800 truncate">{{ userStore.userInfo?.displayName || '测试用户' }}</p>
+                            <p class="text-gray-500 text-xs truncate">{{ userStore.userInfo?.major || '软件工程专业' }}</p>
             </div>
           </div>
         </template>

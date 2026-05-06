@@ -80,8 +80,23 @@
           </div>
         </div>
         
-        <div class="p-4 bg-slate-50 rounded text-slate-700 font-mono text-sm leading-relaxed whitespace-pre-wrap">
-          {{ previewMode === 'brief' ? currentPreview.brief : currentPreview.deepContent || '详细内容假数据\n这里会根据类型挂载 Markdown / 思维导图 / 代码编辑器等组件。' }}
+                <!-- 按资源类型渲染 -->
+        <div v-if="currentPreview.type === 'mindmap'" class="h-96 border border-slate-200 rounded-lg overflow-hidden">
+          <MindmapViewer
+            :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
+          />
+        </div>
+        <div v-else-if="currentPreview.type === 'code'" class="bg-slate-50 rounded-lg overflow-hidden">
+          <MarkdownViewer
+            :content="'```python\n' + (previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容') + '\n```'"
+            :showToc="false"
+          />
+        </div>
+        <div v-else class="">
+          <MarkdownViewer
+            :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
+            :showToc="previewMode === 'deep'"
+          />
         </div>
       </div>
     </el-dialog>
@@ -96,6 +111,8 @@ import { MagicStick } from '@element-plus/icons-vue'
 import PipelineStepper from '../components/PipelineStepper.vue'
 import ResourceCard from '../components/ResourceCard.vue'
 import EvidenceDrawer from '../components/EvidenceDrawer.vue'
+import MarkdownViewer from '../components/MarkdownViewer.vue'
+import MindmapViewer from '../components/MindmapViewer.vue'
 
 const form = reactive({
   course: 'cs101',
