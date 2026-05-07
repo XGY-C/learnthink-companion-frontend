@@ -1,19 +1,24 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { User, Lock, Message, Avatar } from '@element-plus/icons-vue'
 import LottieAnimation from '@/components/LottieAnimation.vue'
+import InteractiveParticles from '@/components/InteractiveParticles.vue'
 import aiPulseLottie from '@/assets/lottie/ai-pulse.json'
 import aiSpinnerLottie from '@/assets/lottie/ai-spinner.json'
 import bgParticlesLottie from '@/assets/lottie/bg-particles.json'
 import aiCoreLottie from '@/assets/lottie/ai-core.json'
-import successTransitionLottie from '@/assets/lottie/success-transition.json'
+
 // 从 LottieFiles 官方 CDN 加载免费动画（运行时浏览器请求）
 const aiAssistantLottieUrl = 'https://assets2.lottiefiles.com/packages/lf20_tivyci5s.json'
 import shieldLockLottie from '@/assets/lottie/shield-lock.json'
 import checkBounceLottie from '@/assets/lottie/check-bounce.json'
 import inputGlowLottie from '@/assets/lottie/input-glow.json'
+import chatPulseLottie from '@/assets/lottie/chat-pulse-v2.json'
+import agentNetworkLottie from '@/assets/lottie/agent-network-v2.json'
+import trustShieldLottie from '@/assets/lottie/trust-shield-v2.json'
+import qualityLoopLottie from '@/assets/lottie/quality-loop-v2.json'
 
 const router = useRouter()
 const route = useRoute()
@@ -21,10 +26,50 @@ const userStore = useUserStore()
 
 // 状态：login | register
 const activeTab = ref<'login' | 'register'>('login')
-const isTransitioning = ref(false) // 全屏转场状态
+
 
 // 动效降级检测
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+// 鼠标视差
+const cardRef = ref<HTMLElement | null>(null)
+const parallaxStyle = ref({ transform: 'perspective(1000px) rotateX(0deg) rotateY(0deg)' })
+const isDesktop = ref(window.innerWidth >= 768)
+
+const handleMouseMove = (e: MouseEvent) => {
+  if (prefersReducedMotion || !cardRef.value || !isDesktop.value) return
+  const rect = cardRef.value.getBoundingClientRect()
+  const centerX = rect.left + rect.width / 2
+  const centerY = rect.top + rect.height / 2
+  const deltaX = (e.clientX - centerX) / rect.width
+  const deltaY = (e.clientY - centerY) / rect.height
+  const rotateY = deltaX * 4   // 最大 ±4°
+  const rotateX = -deltaY * 4
+  parallaxStyle.value = {
+    transform: `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`
+  }
+}
+
+const handleMouseLeave = () => {
+  if (prefersReducedMotion || !isDesktop.value) return
+  parallaxStyle.value = { transform: 'perspective(1000px) rotateX(0deg) rotateY(0deg)' }
+}
+
+// 背景鼠标响应（用于后续扩展交互）
+const handleBgMouseMove = (e: MouseEvent) => {
+  // 可用于驱动背景渐变跟随鼠标轻微偏转
+  // 留作扩展
+}
+
+// 响应式监听窗口尺寸
+let resizeTimer: ReturnType<typeof setTimeout> | undefined
+const checkDesktop = () => {
+  isDesktop.value = window.innerWidth >= 768
+}
+window.addEventListener('resize', () => {
+  if (resizeTimer) clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(checkDesktop, 200)
+})
 
 // 登录表单
 const loginForm = ref({
@@ -65,13 +110,50 @@ const registerUsernameValid = ref(false)
 const registerPasswordValid = ref(false)
 const registerConfirmValid = ref(false)
 
-// 轮播索引
+// 知识元素数据
+const knowledgeChars = [
+  { char: '学', x: '8%', y: '22%', size: '42px', delay: '0s', duration: '28s' },
+  { char: '思', x: '85%', y: '15%', size: '36px', delay: '-5s', duration: '32s' },
+  { char: '知', x: '72%', y: '70%', size: '48px', delay: '-12s', duration: '26s' },
+  { char: '行', x: '15%', y: '78%', size: '32px', delay: '-8s', duration: '30s' },
+  { char: '智', x: '50%', y: '8%', size: '40px', delay: '-3s', duration: '35s' },
+  { char: 'K', x: '92%', y: '45%', size: '30px', delay: '-10s', duration: '24s' },
+]
+
+// 知识图谱连接线数据（节点坐标百分比）
+const graphNodes = [
+  { x: '28%', y: '55%', label: '' },
+  { x: '38%', y: '48%', label: '' },
+  { x: '34%', y: '65%', label: '' },
+  { x: '48%', y: '52%', label: '' },
+  { x: '45%', y: '68%', label: '' },
+]
+
+// ========================================
+// 轮播 — 卖点展示（动画 + 标题 + 描述）
+// ========================================
 const currentBanner = ref(0)
 const banners = [
-  '对话建画像：自动构建学习画像（演示≥6维）',
-  '多智能体协同：流程可视化生成资源包（演示≥5类）',
-  '证据可追溯：来源与置信度可见',
-  '质量闭环：审校/评分/重生成（演示）'
+  {
+    title: '对话即画像',
+    subtitle: '每一次对话都在丰富你的学习轮廓',
+    lottie: agentNetworkLottie
+  },
+  {
+    title: '智能体协同',
+    subtitle: '多智能体无缝协作，让知识生成清晰可控',
+    lottie: chatPulseLottie
+  },
+  {
+    title: '可信可追溯',
+    subtitle: '每一份结果，来源与置信度都清晰可见',
+    lottie: trustShieldLottie
+  },
+  {
+    title: '质量闭环',
+    subtitle: '从生成到优化，不断逼近最佳答案',
+    lottie: qualityLoopLottie
+  }
 ]
 
 // 定时轮播（动效降级时不轮播）
@@ -87,7 +169,15 @@ const startBannerLoop = () => {
 const stopBannerLoop = () => {
   if (bannerTimer !== undefined) clearInterval(bannerTimer)
 }
-startBannerLoop()
+
+// 手动点击时重置定时器，让用户有完整阅读时间
+const goToBanner = (idx: number) => {
+  currentBanner.value = idx
+  startBannerLoop()
+}
+
+onMounted(() => startBannerLoop())
+onUnmounted(() => stopBannerLoop())
 
 // 切换面板（左右滑动切换）
 const switchTab = async (tab: 'login' | 'register') => {
@@ -133,20 +223,13 @@ const handleLogin = () => {
   loginUsernameValid.value = true
   loginPasswordValid.value = true
   
-  loginLoading.value = true
-  setTimeout(() => {
     const success = userStore.login(loginForm.value.username, loginForm.value.password)
-    if (success) {
-      isTransitioning.value = true
-      setTimeout(() => {
-        const redirect = route.query.redirect as string
-        router.push(redirect || '/')
-      }, 1500)
-    } else {
-      loginError.value = '账号或密码不正确'
-      loginLoading.value = false
-    }
-  }, 1000)
+  if (success) {
+    const redirect = route.query.redirect as string
+    router.push(redirect || '/')
+  } else {
+    loginError.value = '账号或密码不正确'
+  }
 }
 
 const handleRegister = () => {
@@ -175,24 +258,33 @@ const handleRegister = () => {
   registerPasswordValid.value = true
   registerConfirmValid.value = true
   
-  registerLoading.value = true
-  setTimeout(() => {
-    userStore.login(registerForm.value.username, registerForm.value.password)
-    isTransitioning.value = true
-    setTimeout(() => {
-      router.push('/profile')
-    }, 1500)
-  }, 1000)
+      userStore.login(registerForm.value.username, registerForm.value.password)
+  router.push('/profile')
 }
 </script>
 
 <template>
-  <div class="min-h-screen w-full flex items-center justify-center relative overflow-hidden font-sans" style="background: linear-gradient(135deg, var(--lt-brand-lightest), var(--lt-bg-card), var(--lt-ai-light-9));">
-    <!-- 背景光效装饰 -->
-    <div class="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] rounded-full blur-[120px] pointer-events-none" style="background-color: var(--lt-shadow-blue);"></div>
-    <div class="absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full blur-[120px] pointer-events-none" style="background-color: var(--lt-shadow-ai);"></div>
+  <div class="min-h-screen w-full flex items-center justify-center relative overflow-hidden font-sans animated-gradient"
+       @mousemove="handleBgMouseMove">
+    <!-- 背景光效装饰 — 极光流光动效 -->
+    <div class="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] rounded-full blur-[120px] pointer-events-none aurora-1" style="background-color: var(--lt-shadow-blue);"></div>
+    <div class="absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full blur-[120px] pointer-events-none aurora-2" style="background-color: var(--lt-shadow-ai);"></div>
+    <div class="absolute top-[40%] left-[30%] w-[35%] h-[35%] rounded-full blur-[100px] pointer-events-none aurora-3" style="background-color: var(--lt-ai-light-3); opacity: 0.15;"></div>
 
-    <div class="w-full max-w-[1040px] min-h-[640px] flex mx-4 backdrop-blur-xl border overflow-hidden relative z-10" style="background-color: var(--lt-bg-card); border-radius: var(--lt-radius-lg, 28px); box-shadow: var(--lt-shadow-elevated, 0 24px 60px -12px rgba(0,0,0,0.08)); border-color: var(--lt-border);">
+        <!-- 交互式 Canvas 粒子网络 -->
+    <InteractiveParticles />
+
+    <!-- 微井网格背景 -->
+    <div class="absolute inset-0 z-0 pointer-events-none opacity-[0.04]"
+         style="background-image: linear-gradient(rgba(43,111,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(43,111,255,0.5) 1px, transparent 1px); background-size: 60px 60px;">
+    </div>
+
+    <div ref="cardRef"
+         class="w-full max-w-[1040px] min-h-[640px] flex mx-4 backdrop-blur-xl border overflow-hidden relative z-10 card-breathing"
+         style="background-color: var(--lt-bg-card); border-radius: var(--lt-radius-lg, 28px); box-shadow: var(--lt-shadow-elevated, 0 24px 60px -12px rgba(0,0,0,0.08)); border-color: var(--lt-border);"
+         :style="[parallaxStyle, { transition: 'transform 0.15s ease-out' }]"
+         @mousemove="handleMouseMove"
+         @mouseleave="handleMouseLeave">
       
       <!-- 左侧：品牌 AI 舞台空间 -->
       <div class="hidden md:flex w-[46%] relative overflow-hidden flex-col justify-between p-12 text-white">
@@ -229,20 +321,36 @@ const handleRegister = () => {
           <p class="text-lg text-blue-50/90 font-light tracking-wide leading-relaxed">基于学习画像驱动，<br/>为你打造专属的多智能体学习助手。</p>
         </div>
         
-        <div class="relative z-10 w-full mb-4">
-          <transition name="slide-up" mode="out-in">
-            <div :key="currentBanner" class="text-white/95 text-xl font-medium mb-8 leading-snug drop-shadow-sm h-14 flex items-end">
-              {{ banners[currentBanner] }}
+                <div class="relative z-10 w-full mb-4 flex flex-col">
+          <!-- 轮播内容区 -->
+          <transition name="banner-fade" mode="out-in">
+            <div :key="currentBanner" class="flex flex-col items-center justify-center">
+              <!-- 主题动画 -->
+              <div class="w-[100px] h-[100px] mb-4 opacity-85 drop-shadow-lg">
+                <LottieAnimation
+                  :animationData="banners[currentBanner].lottie"
+                  width="100%"
+                  height="100%"
+                />
+              </div>
+              <!-- 标题 -->
+              <h3 class="text-white text-xl font-bold tracking-tight mb-2 drop-shadow-sm">
+                {{ banners[currentBanner].title }}
+              </h3>
+              <!-- 描述文案 -->
+              <p class="text-white/80 text-sm font-light tracking-wide leading-relaxed text-center max-w-[260px]">
+                {{ banners[currentBanner].subtitle }}
+              </p>
             </div>
           </transition>
           <!-- 优雅的指示器 -->
-          <div class="flex gap-2.5">
+          <div class="flex gap-2.5 mt-4 justify-center">
             <button 
               v-for="(_, idx) in banners" 
               :key="idx" 
-              class="h-1.5 rounded-full transition-all duration-500 ease-out"
+              class="h-1.5 rounded-full transition-all duration-500 ease-out cursor-pointer"
               :class="currentBanner === idx ? 'w-8 bg-white shadow-[0_0_8px_rgba(255,255,255,0.6)]' : 'w-2 bg-white/30 hover:bg-white/50'"
-              @click="currentBanner = idx"
+              @click="goToBanner(idx)"
             ></button>
           </div>
         </div>
@@ -484,35 +592,184 @@ const handleRegister = () => {
         </div>
       </div>
       
+  </div>
+
+        <!-- 知识元素：漂浮字符（极淡潜意识层） -->
+    <div v-for="(item, idx) in knowledgeChars" :key="'char-'+idx"
+         class="absolute z-0 pointer-events-none select-none floating-knowledge-char"
+         :style="{
+           left: item.x,
+           top: item.y,
+           fontSize: item.size,
+           animationDelay: item.delay,
+           animationDuration: item.duration,
+           color: idx < 5 ? 'var(--lt-brand)' : 'var(--lt-ai)',
+                      opacity: 0.09
+         }">
+      {{ item.char }}
     </div>
 
-        <!-- 成功后的全屏沉浸式转场（Lottie 驱动） -->
-    <transition name="fade-scale">
-      <div v-show="isTransitioning" class="fixed inset-0 z-50 flex items-center justify-center pointer-events-none" style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px);">
-        <div class="flex flex-col items-center">
-          <div class="w-56 h-56 mb-4">
-            <LottieAnimation :animationData="successTransitionLottie" width="100%" height="100%" :loop="false" />
-          </div>
-          <h2 class="text-xl font-bold tracking-wider" style="color: var(--lt-brand);">正在激活您的专属智能体...</h2>
-        </div>
-      </div>
-    </transition>
+    <!-- 知识元素：迷你知识图谱 SVG -->
+    <svg class="absolute inset-0 z-0 pointer-events-none select-none"
+         style="opacity: 0.09; width: 100%; height: 100%;"
+         viewBox="0 0 100 100" preserveAspectRatio="none">
+      <!-- 边（连接线） -->
+      <line x1="28" y1="55" x2="38" y2="48" stroke="var(--lt-brand)" stroke-width="0.3" opacity="0.5">
+        <animate attributeName="opacity" values="0.3;0.7;0.3" dur="6s" repeatCount="indefinite" begin="0s" />
+      </line>
+      <line x1="28" y1="55" x2="34" y2="65" stroke="var(--lt-brand)" stroke-width="0.3" opacity="0.5">
+        <animate attributeName="opacity" values="0.3;0.7;0.3" dur="5s" repeatCount="indefinite" begin="-1s" />
+      </line>
+      <line x1="38" y1="48" x2="48" y2="52" stroke="var(--lt-ai)" stroke-width="0.3" opacity="0.5">
+        <animate attributeName="opacity" values="0.3;0.7;0.3" dur="7s" repeatCount="indefinite" begin="-2s" />
+      </line>
+      <line x1="34" y1="65" x2="45" y2="68" stroke="var(--lt-ai)" stroke-width="0.3" opacity="0.5">
+        <animate attributeName="opacity" values="0.3;0.7;0.3" dur="4s" repeatCount="indefinite" begin="-3s" />
+      </line>
+      <line x1="48" y1="52" x2="45" y2="68" stroke="var(--lt-brand)" stroke-width="0.3" opacity="0.5">
+        <animate attributeName="opacity" values="0.3;0.7;0.3" dur="6.5s" repeatCount="indefinite" begin="-1.5s" />
+      </line>
+      <!-- 节点（圆点） -->
+      <circle cx="28" cy="55" r="0.8" fill="var(--lt-brand)">
+        <animate attributeName="r" values="0.6;1.2;0.6" dur="4s" repeatCount="indefinite" begin="0s" />
+        <animate attributeName="opacity" values="0.4;1;0.4" dur="4s" repeatCount="indefinite" begin="0s" />
+      </circle>
+      <circle cx="38" cy="48" r="0.8" fill="var(--lt-brand)">
+        <animate attributeName="r" values="0.6;1.2;0.6" dur="5s" repeatCount="indefinite" begin="-1s" />
+        <animate attributeName="opacity" values="0.4;1;0.4" dur="5s" repeatCount="indefinite" begin="-1s" />
+      </circle>
+      <circle cx="34" cy="65" r="0.8" fill="var(--lt-ai)">
+        <animate attributeName="r" values="0.6;1.2;0.6" dur="3.5s" repeatCount="indefinite" begin="-0.5s" />
+        <animate attributeName="opacity" values="0.4;1;0.4" dur="3.5s" repeatCount="indefinite" begin="-0.5s" />
+      </circle>
+      <circle cx="48" cy="52" r="0.8" fill="var(--lt-ai)">
+        <animate attributeName="r" values="0.6;1.2;0.6" dur="6s" repeatCount="indefinite" begin="-2s" />
+        <animate attributeName="opacity" values="0.4;1;0.4" dur="6s" repeatCount="indefinite" begin="-2s" />
+      </circle>
+      <circle cx="45" cy="68" r="0.8" fill="var(--lt-brand)">
+        <animate attributeName="r" values="0.6;1.2;0.6" dur="4.5s" repeatCount="indefinite" begin="-3s" />
+        <animate attributeName="opacity" values="0.4;1;0.4" dur="4.5s" repeatCount="indefinite" begin="-3s" />
+      </circle>
+    </svg>
+
   </div>
 </template>
 
 <style scoped>
-/* 转场动效 - 全屏沉浸转场 */
-.fade-scale-enter-active,
-.fade-scale-leave-active {
-  transition: all 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+/* ========================
+/* 动态渐变背景流动 */
+/* ======================== */
+@keyframes gradient-flow {
+  0% { background-position: 0% 50%; }
+  25% { background-position: 100% 0%; }
+  50% { background-position: 100% 100%; }
+  75% { background-position: 0% 100%; }
+  100% { background-position: 0% 50%; }
 }
-.fade-scale-enter-from {
-  opacity: 0;
-  transform: scale(1.05);
+
+.animated-gradient {
+  background: linear-gradient(
+    135deg,
+    var(--lt-brand-lightest) 0%,
+    var(--lt-bg-card) 25%,
+    var(--lt-ai-light-9) 50%,
+    var(--lt-brand-light-7) 75%,
+    var(--lt-ai-light-7) 100%
+  ) !important;
+  background-size: 300% 300% !important;
+  animation: gradient-flow 25s ease-in-out infinite;
 }
-.fade-scale-leave-to {
-  opacity: 0;
-  transform: scale(0.95);
+
+/* ======================== */
+/* 极光流光动效 */
+/* ======================== */
+@keyframes aurora-drift-1 {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.6; }
+  33% { transform: translate(4%, 3%) scale(1.08); opacity: 0.8; }
+  66% { transform: translate(-2%, -2%) scale(0.95); opacity: 0.5; }
+  100% { transform: translate(2%, -1%) scale(1.03); opacity: 0.7; }
+}
+@keyframes aurora-drift-2 {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.6; }
+  33% { transform: translate(-4%, -3%) scale(1.06); opacity: 0.8; }
+  66% { transform: translate(3%, 2%) scale(0.95); opacity: 0.5; }
+  100% { transform: translate(-2%, 1%) scale(1.02); opacity: 0.7; }
+}
+@keyframes aurora-drift-3 {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.10; }
+  50% { transform: translate(-3%, 4%) scale(1.12); opacity: 0.20; }
+  100% { transform: translate(2%, -2%) scale(0.95); opacity: 0.12; }
+}
+
+.aurora-1 {
+  will-change: transform;
+  animation: aurora-drift-1 14s ease-in-out infinite alternate;
+}
+.aurora-2 {
+  will-change: transform;
+  animation: aurora-drift-2 18s ease-in-out infinite alternate;
+}
+.aurora-3 {
+  will-change: transform;
+  animation: aurora-drift-3 12s ease-in-out infinite alternate;
+}
+
+/* ======================== */
+/* 知识字符漂浮动效 */
+/* ======================== */
+@keyframes float-knowledge {
+  0% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  20% { transform: translate(18px, -22px) rotate(4deg) scale(1.04); }
+  40% { transform: translate(-12px, -10px) rotate(-3deg) scale(0.97); }
+  60% { transform: translate(8px, 16px) rotate(2deg) scale(1.02); }
+  80% { transform: translate(-16px, 8px) rotate(-2deg) scale(0.98); }
+  100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+}
+
+.floating-knowledge-char {
+  will-change: transform;
+  animation: float-knowledge 30s ease-in-out infinite;
+  text-shadow: 0 0 30px currentColor, 0 0 70px currentColor, 0 0 140px currentColor;
+}
+
+/* ======================== */
+/* 浮动几何体动效 */
+/* ======================== */
+@keyframes float-ring {
+  0%, 100% { transform: translateY(0) rotate(0deg) scale(1); opacity: 0.12; }
+  33% { transform: translateY(-12px) rotate(120deg) scale(1.04); opacity: 0.18; }
+  66% { transform: translateY(6px) rotate(240deg) scale(0.97); opacity: 0.10; }
+}
+@keyframes float-hex {
+  0%, 100% { transform: translateY(0) rotate(0deg) scale(1); opacity: 0.10; }
+  50% { transform: translateY(-16px) rotate(-180deg) scale(1.06); opacity: 0.16; }
+}
+
+.floating-ring {
+  will-change: transform;
+  animation: float-ring 20s ease-in-out infinite;
+}
+.floating-hex {
+  will-change: transform;
+  animation: float-hex 15s ease-in-out infinite;
+}
+
+/* ======================== */
+/* 卡片呼吸光晕 */
+/* ======================== */
+@keyframes card-shadow-breathe {
+  0%, 100% {
+    box-shadow: var(--lt-shadow-elevated, 0 24px 60px -12px rgba(0,0,0,0.08));
+    border-color: var(--lt-border);
+  }
+  50% {
+    box-shadow: 0 24px 64px -8px rgba(43,111,255,0.14), 0 0 0 1px rgba(43,111,255,0.04);
+    border-color: rgba(43,111,255,0.08);
+  }
+}
+
+.card-breathing {
+  animation: card-shadow-breathe 4s ease-in-out infinite;
 }
 
 /* 左侧动效 */
@@ -521,17 +778,18 @@ const handleRegister = () => {
   50% { opacity: 0.7; transform: scale(1.05); }
 }
 
-.slide-up-enter-active,
-.slide-up-leave-active {
-  transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+/* 轮播淡入淡出过渡 */
+.banner-fade-enter-active,
+.banner-fade-leave-active {
+  transition: opacity 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.slide-up-enter-from {
+.banner-fade-enter-from {
   opacity: 0;
-  transform: translateY(12px);
+  transform: translateY(10px) scale(0.96);
 }
-.slide-up-leave-to {
+.banner-fade-leave-to {
   opacity: 0;
-  transform: translateY(-12px);
+  transform: translateY(-10px) scale(0.96);
 }
 
 /* ======================== */
@@ -650,32 +908,58 @@ const handleRegister = () => {
     transition-duration: 0ms !important;
   }
 
-  /* 轮播只保留淡入，不位移 */
-  .slide-up-enter-active,
-  .slide-up-leave-active {
+    /* 轮播只保留淡入，不位移 */
+  .banner-fade-enter-active,
+  .banner-fade-leave-active {
     transition: opacity 0.2s ease !important;
+    transform: none !important;
   }
-  .slide-up-enter-from {
+  .banner-fade-enter-from {
     opacity: 0;
     transform: none;
   }
-  .slide-up-leave-to {
+  .banner-fade-leave-to {
     opacity: 0;
     transform: none;
   }
 
-  /* 全屏转场禁用缩放 */
-  .fade-scale-enter-active,
-  .fade-scale-leave-active {
-    transition: opacity 0.3s ease !important;
-  }
-  .fade-scale-enter-from {
-    opacity: 0;
-    transform: none;
-  }
-  .fade-scale-leave-to {
-    opacity: 0;
-    transform: none;
-  }
+    /* 动态渐变停止 */
+    .animated-gradient {
+      animation: none !important;
+      background: linear-gradient(135deg, var(--lt-brand-lightest), var(--lt-bg-card), var(--lt-ai-light-9)) !important;
+      background-size: 100% 100% !important;
+    }
+
+    /* 卡片呼吸停止 + 无视差 */
+    .card-breathing {
+      animation: none !important;
+      box-shadow: var(--lt-shadow-elevated) !important;
+      border-color: var(--lt-border) !important;
+      transform: none !important;
+    }
+
+    /* 知识字符固定 */
+    .floating-knowledge-char {
+            animation: none !important;
+      opacity: 0.06 !important;
+    }
+
+    /* 极光固定居中不飘移 */
+    .aurora-1, .aurora-2, .aurora-3 {
+      will-change: auto;
+      animation: none !important;
+      opacity: 0.5 !important;
+      transform: none !important;
+    }
+
+    /* 几何体固定 */
+    .floating-ring, .floating-hex {
+      will-change: auto;
+      animation: none !important;
+      opacity: 0.08 !important;
+      transform: none !important;
+    }
+
+  
 }
 </style>

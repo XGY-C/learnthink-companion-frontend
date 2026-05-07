@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '@/components/Layout/MainLayout.vue'
+import DashboardView from '@/views/DashboardView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -13,10 +14,10 @@ const router = createRouter({
       path: '/',
       component: MainLayout,
       children: [
-        {
+                {
           path: '',
           name: 'dashboard',
-          component: () => import('@/views/DashboardView.vue')
+          component: DashboardView
         },
         {
           path: 'profile',
