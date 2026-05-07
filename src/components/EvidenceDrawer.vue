@@ -6,16 +6,16 @@
     direction="rtl"
   >
     <div class="px-2">
-      <div v-if="!sources || sources.length === 0" class="text-center text-slate-500 py-10">
+            <div v-if="!sources || sources.length === 0" class="text-center py-10" style="color: #8E8EA0;">
         无可用来源信息
       </div>
       <div v-else class="space-y-4">
-        <div v-for="(source, index) in sources" :key="index" class="bg-slate-50 border border-slate-200 rounded p-4">
+        <div v-for="(source, index) in sources" :key="index" class="rounded p-4" style="background-color: #F5F7FA; border: 1px solid #E8ECF0;">
           <div class="flex justify-between items-start mb-2">
-            <h5 class="text-sm font-medium m-0 flex-1">{{ source.title }}</h5>
+            <h5 class="text-sm font-medium m-0 flex-1" style="color: #1A1A2E;">{{ source.title }}</h5>
             <el-tag size="small" type="info" class="ml-2 shrink-0">{{ source.locator }}</el-tag>
           </div>
-          <p class="text-sm text-slate-600 bg-white p-3 rounded border border-slate-200 font-serif leading-relaxed mb-2">
+          <p class="text-sm p-3 rounded font-serif leading-relaxed mb-2" style="color: #5A5A72; background-color: #FFFFFF; border: 1px solid #E8ECF0;">
             "{{ source.quote }}"
           </p>
           <div class="flex justify-between items-center mt-2">

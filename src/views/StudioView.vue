@@ -1,7 +1,15 @@
 <template>
   <div class="studio-view p-6">
-    <div class="flex justify-between items-center mb-6">
-      <h2 class="text-2xl font-bold text-slate-800 m-0">资源生成工作室</h2>
+        <div class="flex justify-between items-center mb-6">
+            <div>
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
+            <el-icon size="18" color="white"><MagicStick /></el-icon>
+          </div>
+          <h2 class="text-2xl font-bold m-0" style="color: var(--lt-text-primary);">资源生成工作室</h2>
+        </div>
+        <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">基于多智能体协同，根据个人画像定制化生成学习资源</p>
+      </div>
       <el-button type="primary" :disabled="isGenerating" @click="startGenerate">开始生成资源包</el-button>
     </div>
 
@@ -54,11 +62,11 @@
       />
     </div>
 
-    <!-- Empty State prior to generation -->
-    <div v-else class="text-center py-20 bg-white rounded-lg border border-slate-200 border-dashed">
-      <el-icon class="text-4xl text-slate-300 mb-4"><MagicStick /></el-icon>
-      <h3 class="text-lg font-medium text-slate-600 mb-2">配置选项以生成专属学习资源</h3>
-      <p class="text-sm text-slate-400">基于多智能体协同，根据您的个人画像提供定制化讲解与练习。</p>
+        <!-- Empty State prior to generation -->
+        <div v-else class="text-center py-20 rounded-lg border border-dashed" style="background-color: var(--lt-bg-card); border-color: var(--lt-brand-lighter);">
+          <el-icon class="text-4xl mb-4" style="color: var(--lt-brand-lighter);"><MagicStick /></el-icon>
+          <h3 class="text-lg font-medium mb-2" style="color: var(--lt-text-secondary);">配置选项以生成专属学习资源</h3>
+          <p class="text-sm" style="color: var(--lt-text-placeholder);">基于多智能体协同，根据您的个人画像提供定制化讲解与练习。</p>
     </div>
 
     <!-- Detail Dialog (Simplified Preview) -->

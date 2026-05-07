@@ -81,10 +81,10 @@ const goToStudio = () => {
 
 <template>
   <div class="flex flex-col h-full bg-slate-50">
-    <div class="p-5 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm z-10">
+        <div class="p-5 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm z-10">
       <div>
-        <h1 class="text-xl font-bold text-gray-800">对话建画像</h1>
-        <p class="text-sm text-gray-500 mt-1">越聊越懂你，资源推送越懂你</p>
+        <h1 class="text-xl font-bold" style="color: #1A1A2E;">对话建画像</h1>
+        <p class="text-sm mt-1" style="color: #8E8EA0;">越聊越懂你，资源推送越懂你</p>
       </div>
       <div>
         <el-button type="primary" class="shadow-sm" @click="goToStudio">
@@ -98,15 +98,35 @@ const goToStudio = () => {
         class="flex"
         :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
       >
-                <div class="max-w-2xl px-4 py-3 rounded-2xl shadow-sm text-sm leading-relaxed"
-          :class="msg.role === 'user' ? 'bg-primary text-white rounded-br-none' : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none'"
+                        <!-- AI 气泡：紫色底 #F5F0FF + 左侧紫色竖条 #7C5CFC + AI 标签 -->
+        <div v-if="msg.role === 'assistant'"
+          class="max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed"
+          style="border-radius: 12px; border: 1px solid #CBB5FF; border-left: 3px solid #7C5CFC; background-color: #F5F0FF;"
         >
           <template v-if="msg.isTyping">
-            {{ msg.text }}<span class="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5" />
+            {{ msg.text }}<span class="inline-block w-1.5 h-4 ml-0.5" style="background-color: #FF8C42; animation: cursor-pulse 800ms ease-in-out infinite;" />
           </template>
           <template v-else>
             {{ msg.text }}
           </template>
+          <div class="inline-flex items-center gap-1 mt-1.5 text-xs" style="color: #7C5CFC;">
+            🤖 AI
+          </div>
+        </div>
+        <!-- 用户气泡：白底 + 灰色边框 #E8ECF0 -->
+        <div v-else
+          class="max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed"
+          style="border-radius: 12px; border: 1px solid #E8ECF0; background-color: #FFFFFF;"
+        >
+          <template v-if="msg.isTyping">
+            {{ msg.text }}<span class="inline-block w-1.5 h-4 ml-0.5" style="background-color: #FF8C42; animation: cursor-pulse 800ms ease-in-out infinite;" />
+          </template>
+          <template v-else>
+            {{ msg.text }}
+          </template>
+          <div class="inline-flex items-center gap-1 mt-1.5 text-xs" style="color: #8E8EA0;">
+            🙋 我
+          </div>
         </div>
       </div>
     </div>

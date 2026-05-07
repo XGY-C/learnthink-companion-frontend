@@ -19,8 +19,8 @@
     </div>
 
     <!-- 搜索与筛选区域 -->
-    <el-card class="mb-6 shadow-sm" :body-style="{ padding: '16px 20px' }">
-      <div class="flex items-center gap-4 flex-wrap">
+    <el-card class="mb-6 shadow-sm" :body-style="{ padding: '16px 20px' }" style="border: 1px solid #E8ECF0;">
+          <div class="flex items-center gap-4 flex-wrap">
         <el-input
           v-model="searchQuery"
           placeholder="搜索资源包（标题/知识点）..."
@@ -46,10 +46,10 @@
     <!-- 空状态：未搜索到结果 -->
     <div v-if="filteredPacks.length === 0 && !loading" class="text-center py-16">
       <el-empty v-if="searchQuery || confidenceFilter" description="未找到匹配的资源包" />
-      <div v-else class="bg-white rounded-lg border border-slate-200 border-dashed p-16 mx-auto max-w-lg">
-        <el-icon class="text-5xl text-slate-300 mb-4"><FolderOpened /></el-icon>
-        <h3 class="text-lg font-medium text-slate-600 mb-2">资源库为空</h3>
-        <p class="text-sm text-slate-400 mb-6">先去资源工作室生成您的第一个学习资源包吧！</p>
+            <div v-else class="bg-white rounded-lg p-16 mx-auto max-w-lg" style="border: 1px dashed #A3C4FF;">
+        <el-icon class="text-5xl mb-4" style="color: #A3C4FF;"><FolderOpened /></el-icon>
+        <h3 class="text-lg font-medium mb-2" style="color: #5A5A72;">资源库为空</h3>
+        <p class="text-sm mb-6" style="color: #B8B8C8;">先去资源工作室生成您的第一个学习资源包吧！</p>
         <el-button type="primary" size="large" @click="$router.push('/studio')">
           <el-icon class="mr-1"><MagicStick /></el-icon>前往工作室
         </el-button>
@@ -148,9 +148,9 @@
                 <span class="text-slate-600">{{ pack.pushReason }}</span>
               </div>
 
-              <!-- 底部操作区：仅在展开时显示 -->
+                            <!-- 底部操作区：仅在展开时显示 -->
               <Transition name="expand">
-                <div v-if="activePackId === pack.id" class="mt-4 pt-4 border-t border-slate-100">
+                <div v-if="activePackId === pack.id" class="mt-4 pt-4" style="border-top: 1px solid #E8ECF0;">
                   <!-- 资源卡片网格 -->
                   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
                     <ResourceCard
@@ -209,8 +209,8 @@
             <el-tag size="small" :type="previewConfidenceStyle" effect="plain">
               {{ previewConfidenceLabel }}置信度
             </el-tag>
-            <span class="text-slate-500">
-              质量分 <strong class="text-primary">{{ currentPreview.qualityScore }}</strong>/100
+            <span style="color: #8E8EA0;">
+              质量分 <strong style="color: #2B6FFF;">{{ currentPreview.qualityScore }}</strong>/100
             </span>
             <el-button link type="primary" size="small" @click="viewSources(currentPreview)">
               查看引用证据
@@ -256,23 +256,23 @@
             </div>
           </div>
 
-        <!-- 证据来源（内嵌折叠版） -->
-        <div v-if="currentPreview.sources && currentPreview.sources.length > 0" class="mt-6 pt-4 border-t border-slate-100">
+                <!-- 证据来源（内嵌折叠版） -->
+        <div v-if="currentPreview.sources && currentPreview.sources.length > 0" class="mt-6 pt-4" style="border-top: 1px solid #E8ECF0;">
           <div class="flex items-center gap-2 mb-3">
-            <el-icon class="text-primary"><Reading /></el-icon>
-            <span class="text-sm font-medium">引用来源 ({{ currentPreview.sources.length }})</span>
+            <el-icon style="color: #2B6FFF;"><Reading /></el-icon>
+            <span class="text-sm font-medium" style="color: #1A1A2E;">引用来源 ({{ currentPreview.sources.length }})</span>
           </div>
           <div class="space-y-2">
             <div
               v-for="(source, idx) in currentPreview.sources"
               :key="idx"
-              class="bg-slate-50 border border-slate-200 rounded p-3 text-sm"
+              class="rounded p-3 text-sm" style="background-color: #F5F7FA; border: 1px solid #E8ECF0;"
             >
               <div class="flex justify-between items-start mb-1">
-                <span class="font-medium text-slate-700">{{ source.title }}</span>
+                <span class="font-medium" style="color: #5A5A72;">{{ source.title }}</span>
                 <el-tag size="small" type="info">{{ source.locator }}</el-tag>
               </div>
-              <p class="text-slate-500 text-xs italic m-0">"{{ source.quote }}"</p>
+              <p class="text-xs italic m-0" style="color: #8E8EA0;">"{{ source.quote }}"</p>
             </div>
           </div>
         </div>
@@ -731,13 +731,13 @@ const deletePack = (pack: ResourcePack) => {
 }
 
 .resource-pack-card {
-  border: 1px solid var(--el-border-color-light);
+    border: 1px solid #E8ECF0;
   border-radius: 10px;
   transition: all 0.2s ease;
 }
 
 .resource-pack-card:hover {
-  border-color: var(--el-color-primary-light-3);
+  border-color: #A3C4FF;
 }
 
 .resource-pack-card:active {
