@@ -87,11 +87,68 @@ const registerForm = ref({
   email: '',
   password: '',
   confirmPassword: '',
+  verificationCode: '',
   agreement: false
 })
 const registerLoading = ref(false)
 const registerError = ref('')
-const registerFieldErrors = ref({ username: '', email: '', password: '', confirmPassword: '' })
+const registerFieldErrors = ref({ username: '', email: '', password: '', confirmPassword: '', verificationCode: '' })
+
+// 邮箱验证码相关
+const codeSending = ref(false)
+const codeSent = ref(false)
+const countdown = ref(0)
+let countdownTimer: ReturnType<typeof setInterval> | undefined
+
+const startCountdown = () => {
+  countdown.value = 60
+  codeSent.value = true
+  if (countdownTimer) clearInterval(countdownTimer)
+  countdownTimer = setInterval(() => {
+    countdown.value--
+    if (countdown.value <= 0) {
+      clearInterval(countdownTimer)
+      countdownTimer = undefined
+      codeSent.value = false
+    }
+  }, 1000)
+}
+
+const sendVerificationCode = async () => {
+  if (!registerForm.value.email) {
+    registerFieldErrors.value.email = '请先输入邮箱地址'
+    return
+  }
+  // 简单邮箱格式校验
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(registerForm.value.email)) {
+    registerFieldErrors.value.email = '邮箱格式不正确'
+    return
+  }
+  registerFieldErrors.value.email = ''
+  
+  codeSending.value = true
+  try {
+    const res = await fetch('/api/auth/send-verification-code', { 
+      method: 'POST', 
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify({ email: registerForm.value.email }) 
+    })
+    const data = await res.json()
+    if (res.ok && (data.code === 0 || data.code === 200)) {
+      startCountdown()
+    } else {
+      registerFieldErrors.value.email = data.message || '验证码发送失败'
+    }
+  } catch (e) {
+    registerFieldErrors.value.email = '验证码发送失败，请重试'
+  } finally {
+    codeSending.value = false
+  }
+}
 
 // 输入框引用（焦点管理）
 const loginUsernameRef = ref<InstanceType<any> | null>(null)
@@ -188,7 +245,7 @@ const switchTab = async (tab: 'login' | 'register') => {
   loginError.value = ''
   registerError.value = ''
   loginFieldErrors.value = { username: '', password: '' }
-  registerFieldErrors.value = { username: '', email: '', password: '', confirmPassword: '' }
+  registerFieldErrors.value = { username: '', email: '', password: '', confirmPassword: '', verificationCode: '' }
   
   // 切换后焦点自动落到新 panel 首个输入框
   await nextTick()
@@ -199,17 +256,18 @@ const switchTab = async (tab: 'login' | 'register') => {
   }
 }
 
-// 密码校验规则：8-32位，包含字母与数字
+// 密码校验规则：8-32位，包含大写字母、小写字母与数字
 const validatePassword = (password: string): string => {
   if (!password) return '请输入密码'
-  if (password.length < 8) return '密码至少 8 位'
+  if (password.length < 8) return '密码至少 8 个字符'
   if (password.length > 32) return '密码不超过 32 位'
-  if (!/[a-zA-Z]/.test(password)) return '需同时包含字母和数字'
-  if (!/[0-9]/.test(password)) return '需同时包含字母和数字'
+  if (!/[a-z]/.test(password)) return '需包含小写字母'
+  if (!/[A-Z]/.test(password)) return '需包含大写字母'
+  if (!/[0-9]/.test(password)) return '需包含数字'
   return ''
 }
 
-const handleLogin = () => {
+const handleLogin = async () => {
   // 内联校验
   const errors = { username: '', password: '' }
   if (!loginForm.value.username) errors.username = '请输入账号'
@@ -219,12 +277,14 @@ const handleLogin = () => {
   
   if (errors.username || errors.password) return
   
-    // 模拟校验通过动画触发
-  loginUsernameValid.value = true
-  loginPasswordValid.value = true
-  
-    const success = userStore.login(loginForm.value.username, loginForm.value.password)
+  loginLoading.value = true
+  const success = await userStore.login(loginForm.value.username, loginForm.value.password)
+  loginLoading.value = false
+
   if (success) {
+    // 模拟校验通过动画触发
+    loginUsernameValid.value = true
+    loginPasswordValid.value = true
     const redirect = route.query.redirect as string
     router.push(redirect || '/')
   } else {
@@ -232,10 +292,19 @@ const handleLogin = () => {
   }
 }
 
-const handleRegister = () => {
-  // 内联校验
-  const errors = { username: '', email: '', password: '', confirmPassword: '' }
-  if (!registerForm.value.username) errors.username = '请输入用户名'
+const handleRegister = async () => {
+    // 内联校验
+  const errors: Record<string, string> = { username: '', email: '', password: '', confirmPassword: '', verificationCode: '' }
+    if (!registerForm.value.username) errors.username = '请输入用户名'
+  
+  if (!registerForm.value.email) {
+    errors.email = '请输入邮箱地址'
+  } else {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(registerForm.value.email)) {
+      errors.email = '邮箱格式不正确'
+    }
+  }
   
   const pwdErr = validatePassword(registerForm.value.password)
   if (pwdErr) errors.password = pwdErr
@@ -247,19 +316,51 @@ const handleRegister = () => {
   registerFieldErrors.value = errors
   registerError.value = ''
   
-  if (!registerForm.value.agreement) {
+    if (!registerForm.value.agreement) {
     registerError.value = '请阅读并同意相关协议'
+  }
+  
+  // 校验验证码
+  if (!registerForm.value.verificationCode) {
+    errors.verificationCode = '请输入验证码'
+  } else if (registerForm.value.verificationCode.length !== 6) {
+    errors.verificationCode = '验证码长度应为6位'
   }
   
   if (Object.values(errors).some(Boolean) || registerError.value) return
   
-    // 模拟校验通过动画触发
-  registerUsernameValid.value = true
-  registerPasswordValid.value = true
-  registerConfirmValid.value = true
-  
-      userStore.login(registerForm.value.username, registerForm.value.password)
-  router.push('/profile')
+  registerLoading.value = true
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify({
+        username: registerForm.value.username,
+        email: registerForm.value.email,
+        password: registerForm.value.password,
+        verificationCode: registerForm.value.verificationCode
+      })
+    })
+    const data = await res.json()
+    if (res.ok && (data.code === 0 || data.code === 200)) {
+      // 模拟校验通过动画触发
+      registerUsernameValid.value = true
+      registerPasswordValid.value = true
+      registerConfirmValid.value = true
+      
+      await userStore.login(registerForm.value.username, registerForm.value.password)
+      router.push('/profile')
+    } else {
+      registerError.value = data.message || '注册失败'
+    }
+  } catch (e) {
+    registerError.value = '网络错误，请重试'
+  } finally {
+    registerLoading.value = false
+  }
 }
 </script>
 
@@ -280,7 +381,7 @@ const handleRegister = () => {
     </div>
 
     <div ref="cardRef"
-         class="w-full max-w-[1040px] min-h-[640px] flex mx-4 backdrop-blur-xl border overflow-hidden relative z-10 card-breathing"
+         class="w-full max-w-[1040px] min-h-[640px] flex mx-4 backdrop-blur-sm border overflow-hidden relative z-10 card-breathing"
          style="background-color: var(--lt-bg-card); border-radius: var(--lt-radius-lg, 28px); box-shadow: var(--lt-shadow-elevated, 0 24px 60px -12px rgba(0,0,0,0.08)); border-color: var(--lt-border);"
          :style="[parallaxStyle, { transition: 'transform 0.15s ease-out' }]"
          @mousemove="handleMouseMove"
@@ -510,21 +611,34 @@ const handleRegister = () => {
 
                   <el-form-item class="mb-4">
                     <el-input v-model="registerForm.email"
-                              placeholder="邮箱地址 (可选)"
+                                                            placeholder="邮箱地址"
                               size="large"
                               :prefix-icon="Message"
                               clearable
                               class="premium-input h-[46px]"
-                              aria-label="邮箱地址" />
+                              aria-label="邮箱地址">
+                        <template #append>
+                          <el-button
+                            :disabled="codeSending || codeSent"
+                            @click="sendVerificationCode"
+                            size="default"
+                            class="send-code-btn"
+                          >
+                            <template v-if="codeSending">发送中…</template>
+                            <template v-else-if="codeSent">{{ countdown }}s</template>
+                            <template v-else>发送验证码</template>
+                          </el-button>
+                        </template>
+                      </el-input>
                   </el-form-item>
 
-                                    <!-- 密码安全守护小盾牌 -->
+                                                                        <!-- 密码安全守护小盾牌 -->
                   <div class="relative">
                     <div v-if="registerPasswordFocused && !registerFieldErrors.password" 
                          class="absolute -right-8 top-1/2 -translate-y-1/2 w-7 h-7 z-10 pointer-events-none">
                       <LottieAnimation :animationData="shieldLockLottie" width="100%" height="100%" />
                     </div>
-                                        <el-form-item class="mb-4" :error="registerFieldErrors.password || ''">
+                                        <el-form-item class="mb-1" :error="registerFieldErrors.password || ''">
                       <div class="relative w-full">
                         <!-- 校验通过对勾 -->
                         <div v-if="registerPasswordValid && !registerFieldErrors.password" 
@@ -533,7 +647,7 @@ const handleRegister = () => {
                         </div>
                         <el-input v-model="registerForm.password"
                                   type="password"
-                                  placeholder="密码 (至少8位，包含字母与数字)"
+                                  placeholder="密码 (至少8位，包含大小写字母与数字)"
                                   size="large"
                                   show-password
                                   :prefix-icon="Lock"
@@ -544,9 +658,15 @@ const handleRegister = () => {
                                   @blur="registerPasswordFocused = false" />
                       </div>
                     </el-form-item>
+                    <!-- 密码强度提示 -->
+                    <div class="mb-4 px-1">
+                      <p class="text-xs leading-relaxed" style="color: var(--lt-text-auxiliary);">
+                        密码至少 8 个字符，包含大、小写字母和数字
+                      </p>
+                    </div>
                   </div>
 
-                                                                        <el-form-item class="mb-2" :error="registerFieldErrors.confirmPassword || ''">
+                                                                                                                                                <el-form-item class="mb-2" :error="registerFieldErrors.confirmPassword || ''">
                     <div class="relative w-full">
                       <!-- 校验通过对勾 -->
                       <div v-if="registerConfirmValid && !registerFieldErrors.confirmPassword" 
@@ -561,6 +681,18 @@ const handleRegister = () => {
                                 :prefix-icon="Lock"
                                 class="premium-input h-[46px]"
                                 aria-label="确认密码" />
+                    </div>
+                  </el-form-item>
+
+                  <!-- 验证码 -->
+                  <el-form-item class="mb-4" :error="registerFieldErrors.verificationCode || ''">
+                    <div class="relative w-full">
+                      <el-input v-model="registerForm.verificationCode"
+                                placeholder="邮箱验证码"
+                                size="large"
+                                maxlength="6"
+                                class="premium-input h-[46px]"
+                                aria-label="邮箱验证码" />
                     </div>
                   </el-form-item>
 
@@ -859,6 +991,45 @@ const handleRegister = () => {
 :deep(.btn-gradient[disabled]) {
   opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none !important;
+}
+
+/* ======================== */
+/* 发送验证码按钮 */
+/* ======================== */
+:deep(.send-code-btn) {
+  border: none !important;
+  background: linear-gradient(135deg, var(--lt-brand) 0%, var(--lt-brand-dark) 100%) !important;
+  color: #fff !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  border-radius: 0 12px 12px 0 !important;
+  height: 46px !important;
+  padding: 0 16px !important;
+  white-space: nowrap;
+  transition: all 0.3s ease !important;
+}
+
+:deep(.send-code-btn:hover) {
+  box-shadow: 0 4px 12px var(--lt-shadow-blue) !important;
+  opacity: 0.92;
+}
+
+:deep(.send-code-btn:active) {
+  opacity: 0.85;
+}
+
+:deep(.send-code-btn.is-disabled) {
+  background: var(--lt-brand-disabled) !important;
+  color: #fff !important;
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* El-Input 搭配 append slot 时去除内边框合并缝隙 */
+:deep(.el-input-group__append) {
+  background-color: transparent !important;
+  border: none !important;
   box-shadow: none !important;
 }
 

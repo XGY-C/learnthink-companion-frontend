@@ -174,7 +174,13 @@ const toggleSidebar = () => {
       <!-- 页面内容容器 -->
       <main class="flex-1 overflow-hidden relative">
         <!-- 路由匹配到的具体视图（如画像对话页/工作室页） -->
-        <router-view />
+        <router-view v-slot="{ Component, route }">
+          <transition name="page">
+            <div class="page-view" :key="route.fullPath">
+              <component :is="Component" />
+            </div>
+          </transition>
+        </router-view>
       </main>
     </div>
   </div>

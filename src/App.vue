@@ -4,9 +4,9 @@
 <template>
   <el-config-provider>
     <div class="app-router-wrap">
-      <router-view v-slot="{ Component, route }">
-        <transition name="page">
-          <div class="page-view" :key="route.fullPath">
+      <router-view v-slot="{ Component }">
+        <transition name="page" mode="out-in">
+          <div class="page-view">
             <component :is="Component" />
           </div>
         </transition>
