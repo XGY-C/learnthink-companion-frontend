@@ -2,7 +2,7 @@
 import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { User, Lock, Message, Avatar } from '@element-plus/icons-vue'
+import { Lock, Message, Avatar } from '@element-plus/icons-vue'
 import LottieAnimation from '@/components/LottieAnimation.vue'
 import InteractiveParticles from '@/components/InteractiveParticles.vue'
 import aiPulseLottie from '@/assets/lottie/ai-pulse.json'
@@ -56,7 +56,7 @@ const handleMouseLeave = () => {
 }
 
 // 背景鼠标响应（用于后续扩展交互）
-const handleBgMouseMove = (e: MouseEvent) => {
+const handleBgMouseMove = () => {
   // 可用于驱动背景渐变跟随鼠标轻微偏转
   // 留作扩展
 }
@@ -73,13 +73,13 @@ window.addEventListener('resize', () => {
 
 // 登录表单
 const loginForm = ref({
-  username: '',
+  email: '',
   password: '',
   remember: false
 })
 const loginLoading = ref(false)
 const loginError = ref('')           // 表单级错误（鉴权失败/网络错误）
-const loginFieldErrors = ref({ username: '', password: '' })  // 字段级错误
+const loginFieldErrors = ref({ email: '', password: '' })  // 字段级错误
 
 // 注册表单
 const registerForm = ref({
@@ -151,17 +151,15 @@ const sendVerificationCode = async () => {
 }
 
 // 输入框引用（焦点管理）
-const loginUsernameRef = ref<InstanceType<any> | null>(null)
-const loginPasswordRef = ref<InstanceType<any> | null>(null)
+const loginEmailRef = ref<InstanceType<any> | null>(null)
 const registerUsernameRef = ref<InstanceType<any> | null>(null)
-const registerPasswordRef = ref<InstanceType<any> | null>(null)
 
 // 密码框聚焦状态（控制 shield-lock 动画显示）
 const loginPasswordFocused = ref(false)
 const registerPasswordFocused = ref(false)
 
 // 校验通过状态（控制 check-bounce 动画）
-const loginUsernameValid = ref(false)
+const loginEmailValid = ref(false)
 const loginPasswordValid = ref(false)
 const registerUsernameValid = ref(false)
 const registerPasswordValid = ref(false)
@@ -175,15 +173,6 @@ const knowledgeChars = [
   { char: '行', x: '15%', y: '78%', size: '32px', delay: '-8s', duration: '30s' },
   { char: '智', x: '50%', y: '8%', size: '40px', delay: '-3s', duration: '35s' },
   { char: 'K', x: '92%', y: '45%', size: '30px', delay: '-10s', duration: '24s' },
-]
-
-// 知识图谱连接线数据（节点坐标百分比）
-const graphNodes = [
-  { x: '28%', y: '55%', label: '' },
-  { x: '38%', y: '48%', label: '' },
-  { x: '34%', y: '65%', label: '' },
-  { x: '48%', y: '52%', label: '' },
-  { x: '45%', y: '68%', label: '' },
 ]
 
 // ========================================
@@ -244,16 +233,23 @@ const switchTab = async (tab: 'login' | 'register') => {
   // 切换时清空另一 panel 的错误提示
   loginError.value = ''
   registerError.value = ''
-  loginFieldErrors.value = { username: '', password: '' }
+  loginFieldErrors.value = { email: '', password: '' }
   registerFieldErrors.value = { username: '', email: '', password: '', confirmPassword: '', verificationCode: '' }
   
   // 切换后焦点自动落到新 panel 首个输入框
   await nextTick()
   if (tab === 'login') {
-    loginUsernameRef.value?.focus()
+    loginEmailRef.value?.focus()
   } else {
     registerUsernameRef.value?.focus()
   }
+}
+
+const validateEmail = (email: string): string => {
+  if (!email) return '请输入邮箱地址'
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(email)) return '邮箱格式不正确'
+  return ''
 }
 
 // 密码校验规则：8-32位，包含大写字母、小写字母与数字
@@ -269,32 +265,32 @@ const validatePassword = (password: string): string => {
 
 const handleLogin = async () => {
   // 内联校验
-  const errors = { username: '', password: '' }
-  if (!loginForm.value.username) errors.username = '请输入账号'
+  const errors = { email: '', password: '' }
+  errors.email = validateEmail(loginForm.value.email)
   if (!loginForm.value.password) errors.password = '请输入密码'
   loginFieldErrors.value = errors
   loginError.value = ''
   
-  if (errors.username || errors.password) return
+  if (errors.email || errors.password) return
   
   loginLoading.value = true
-  const success = await userStore.login(loginForm.value.username, loginForm.value.password)
+  const success = await userStore.login(loginForm.value.email, loginForm.value.password)
   loginLoading.value = false
 
   if (success) {
     // 模拟校验通过动画触发
-    loginUsernameValid.value = true
+    loginEmailValid.value = true
     loginPasswordValid.value = true
     const redirect = route.query.redirect as string
     router.push(redirect || '/')
   } else {
-    loginError.value = '账号或密码不正确'
+    loginError.value = '邮箱或密码不正确'
   }
 }
 
 const handleRegister = async () => {
     // 内联校验
-  const errors: Record<string, string> = { username: '', email: '', password: '', confirmPassword: '', verificationCode: '' }
+  const errors = { username: '', email: '', password: '', confirmPassword: '', verificationCode: '' }
     if (!registerForm.value.username) errors.username = '请输入用户名'
   
   if (!registerForm.value.email) {
@@ -351,7 +347,7 @@ const handleRegister = async () => {
       registerPasswordValid.value = true
       registerConfirmValid.value = true
       
-      await userStore.login(registerForm.value.username, registerForm.value.password)
+      await userStore.login(registerForm.value.email, registerForm.value.password)
       router.push('/profile')
     } else {
       registerError.value = data.message || '注册失败'
@@ -474,10 +470,10 @@ const handleRegister = async () => {
             
             <button class="flex-1 py-2 text-sm font-semibold transition-colors duration-300 relative z-10 rounded-xl"
               :style="{ color: activeTab === 'login' ? 'var(--lt-brand)' : 'var(--lt-text-secondary)' }"
-              @click="activeTab = 'login'">登 录</button>
+              @click="switchTab('login')">登 录</button>
             <button class="flex-1 py-2 text-sm font-semibold transition-colors duration-300 relative z-10 rounded-xl"
               :style="{ color: activeTab === 'register' ? 'var(--lt-brand)' : 'var(--lt-text-secondary)' }"
-              @click="activeTab = 'register'">注 册</button>
+              @click="switchTab('register')">注 册</button>
           </div>
         </div>
 
@@ -507,21 +503,21 @@ const handleRegister = async () => {
                 </div>
 
                                 <el-form @submit.prevent="handleLogin">
-                                  <el-form-item class="mb-4" :error="loginFieldErrors.username || ''">
+                                  <el-form-item class="mb-4" :error="loginFieldErrors.email || ''">
                                     <div class="relative w-full">
                                       <!-- 校验通过对勾 -->
-                                      <div v-if="loginUsernameValid && !loginFieldErrors.username" 
+                                      <div v-if="loginEmailValid && !loginFieldErrors.email" 
                                            class="absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 z-10 pointer-events-none">
                                         <LottieAnimation :animationData="checkBounceLottie" width="100%" height="100%" :loop="false" />
                                       </div>
-                                      <el-input v-model="loginForm.username"
-                                                placeholder="用户名 / 邮箱"
+                                      <el-input v-model="loginForm.email"
+                                                placeholder="邮箱地址"
                                                 size="large"
-                                                :prefix-icon="User"
+                                                :prefix-icon="Message"
                                                 clearable
                                                 class="premium-input h-[46px]"
-                                                ref="loginUsernameRef"
-                                                aria-label="用户名或邮箱" />
+                                                ref="loginEmailRef"
+                                                aria-label="邮箱地址" />
                                     </div>
                                   </el-form-item>
 
@@ -546,7 +542,6 @@ const handleRegister = async () => {
                                   :prefix-icon="Lock"
                                   class="premium-input h-[46px]"
                                   aria-label="密码"
-                                  ref="loginPasswordRef"
                                   @focus="loginPasswordFocused = true"
                                   @blur="loginPasswordFocused = false" />
                       </div>
@@ -653,7 +648,6 @@ const handleRegister = async () => {
                                   :prefix-icon="Lock"
                                   class="premium-input h-[46px]"
                                   aria-label="密码"
-                                  ref="registerPasswordRef"
                                   @focus="registerPasswordFocused = true"
                                   @blur="registerPasswordFocused = false" />
                       </div>

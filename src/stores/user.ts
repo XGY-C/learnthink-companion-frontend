@@ -16,7 +16,7 @@ export const useUserStore = defineStore('user', () => {
 
   const isLoggedIn = computed(() => !!token.value)
 
-  async function login(username: string, password: string): Promise<boolean> {
+  async function login(email: string, password: string): Promise<boolean> {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -24,7 +24,7 @@ export const useUserStore = defineStore('user', () => {
           'Content-Type': 'application/json',
           'X-Requested-With': 'XMLHttpRequest'
         },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ email, password })
       })
       const data = await res.json()
       if (res.ok && (data.code === 0 || data.code === 200)) {
