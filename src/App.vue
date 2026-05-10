@@ -1,4 +1,18 @@
 <script setup lang="ts">
+import { useNotificationStore } from '@/stores/notification'
+import { useRouter } from 'vue-router'
+
+const notification = useNotificationStore()
+const router = useRouter()
+
+function handleNotificationClick(item: any) {
+  if (item.packId) {
+    router.push(`/studio?pack_id=${item.packId}`)
+  } else if (item.taskId) {
+    router.push(`/studio?task_id=${item.taskId}`)
+  }
+  notification.remove(item.id)
+}
 </script>
 
 <template>
@@ -12,6 +26,35 @@
         </transition>
       </router-view>
     </div>
+
+    <!-- 全局通知栈 -->
+    <TransitionGroup
+      name="notif-stack"
+      tag="div"
+      class="notification-stack"
+    >
+      <div
+        v-for="item in notification.visibleNotifications"
+        :key="item.id"
+        class="notification-toast"
+        :class="`notif-${item.type}`"
+        @click="handleNotificationClick(item)"
+      >
+        <!-- 左边框指示器 -->
+        <div class="notif-indicator" :class="item.type === 'success' ? 'bg-green-500' : 'bg-red-500'" />
+        <div class="notif-body">
+          <div class="notif-header">
+            <span class="notif-icon">{{ item.type === 'success' ? '🎉' : '⚠️' }}</span>
+            <span class="notif-title">{{ item.title }}</span>
+            <button class="notif-close" @click.stop="notification.remove(item.id)">✕</button>
+          </div>
+          <p class="notif-message">{{ item.message }}</p>
+          <div v-if="item.resourceTypes" class="notif-tags">
+            <span v-for="t in item.resourceTypes" :key="t" class="notif-tag">{{ t }}</span>
+          </div>
+        </div>
+      </div>
+    </TransitionGroup>
   </el-config-provider>
 </template>
 
@@ -32,7 +75,6 @@ body {
   background-color: var(--lt-bg-page, #f5f7fb);
 }
 
-/* 路由容器：固定视口高度，防止过渡时两个页面上下堆叠 */
 .app-router-wrap {
   position: relative;
   width: 100%;
@@ -40,7 +82,6 @@ body {
   overflow: hidden;
 }
 
-/* 每个页面固定为全屏 + 绝对定位，让多个页面重叠而非上下排列 */
 .page-view {
   position: absolute;
   top: 0;
@@ -49,7 +90,6 @@ body {
   height: 100%;
 }
 
-/* 页面切换过渡动画 */
 .page-enter-active {
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
@@ -63,5 +103,106 @@ body {
 .page-leave-to {
   opacity: 0;
   transform: translateY(-4px) scale(0.995);
+}
+
+/* 全局通知栈 */
+.notification-stack {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.notification-toast {
+  width: 360px;
+  display: flex;
+  background: var(--lt-bg-card);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  pointer-events: auto;
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+}
+.notification-toast:hover {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.notif-indicator {
+  width: 4px;
+  flex-shrink: 0;
+}
+
+.notif-body {
+  flex: 1;
+  padding: 16px;
+  min-width: 0;
+}
+
+.notif-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.notif-icon { font-size: 16px; }
+
+.notif-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lt-text-primary);
+  flex: 1;
+}
+
+.notif-close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--lt-text-auxiliary);
+  font-size: 14px;
+  padding: 2px;
+}
+.notif-close:hover { color: var(--lt-text-secondary); }
+
+.notif-message {
+  font-size: 13px;
+  color: var(--lt-text-secondary);
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
+.notif-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.notif-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(43, 111, 255, 0.06);
+  color: var(--lt-brand);
+}
+
+/* 通知动画 */
+.notif-stack-enter-active {
+  transition: all 0.3s ease-out;
+}
+.notif-stack-leave-active {
+  transition: all 0.2s ease-in;
+}
+.notif-stack-enter-from {
+  opacity: 0;
+  transform: translateX(120%);
+}
+.notif-stack-leave-to {
+  opacity: 0;
+  transform: translateX(120%);
 }
 </style>

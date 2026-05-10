@@ -9,16 +9,15 @@ import aiPulseLottie from '@/assets/lottie/ai-pulse.json'
 import aiSpinnerLottie from '@/assets/lottie/ai-spinner.json'
 import bgParticlesLottie from '@/assets/lottie/bg-particles.json'
 import aiCoreLottie from '@/assets/lottie/ai-core.json'
-
-// 从 LottieFiles 官方 CDN 加载免费动画（运行时浏览器请求）
-const aiAssistantLottieUrl = 'https://assets2.lottiefiles.com/packages/lf20_tivyci5s.json'
-import shieldLockLottie from '@/assets/lottie/shield-lock.json'
+import aiAssistantLottie from '@/assets/lottie/ai-assistant.json'
+import cyberSecurityLottie from '@/assets/lottie/cyber-security.json'
 import checkBounceLottie from '@/assets/lottie/check-bounce.json'
 import inputGlowLottie from '@/assets/lottie/input-glow.json'
 import chatPulseLottie from '@/assets/lottie/chat-pulse-v2.json'
 import agentNetworkLottie from '@/assets/lottie/agent-network-v2.json'
 import trustShieldLottie from '@/assets/lottie/trust-shield-v2.json'
 import qualityLoopLottie from '@/assets/lottie/quality-loop-v2.json'
+import { apiFetch } from '@/utils/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -129,16 +128,13 @@ const sendVerificationCode = async () => {
   
   codeSending.value = true
   try {
-    const res = await fetch('/api/auth/send-verification-code', { 
-      method: 'POST', 
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: JSON.stringify({ email: registerForm.value.email }) 
+    const data = await apiFetch<Record<string, unknown>>('/auth/send-verification-code', {
+      method: 'POST',
+      body: { email: registerForm.value.email },
+      skipAuth: true
     })
-    const data = await res.json()
-    if (res.ok && (data.code === 0 || data.code === 200)) {
+
+    if (data.code === 0 || data.code === 200) {
       startCountdown()
     } else {
       registerFieldErrors.value.email = data.message || '验证码发送失败'
@@ -181,8 +177,8 @@ const knowledgeChars = [
 const currentBanner = ref(0)
 const banners = [
   {
-    title: '对话即画像',
-    subtitle: '每一次对话都在丰富你的学习轮廓',
+    title: '学习即画像',
+    subtitle: '在学习对话中画像自动积累，无需填表',
     lottie: agentNetworkLottie
   },
   {
@@ -327,28 +323,25 @@ const handleRegister = async () => {
   
   registerLoading.value = true
   try {
-    const res = await fetch('/api/auth/register', {
+    const data = await apiFetch<{ accessToken: string; refreshToken?: string; user: unknown }>('/auth/register', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: JSON.stringify({
+      body: {
         username: registerForm.value.username,
         email: registerForm.value.email,
         password: registerForm.value.password,
         verificationCode: registerForm.value.verificationCode
-      })
+      },
+      skipAuth: true
     })
-    const data = await res.json()
-    if (res.ok && (data.code === 0 || data.code === 200)) {
+
+    if (data.code === 0 || data.code === 200) {
       // 模拟校验通过动画触发
       registerUsernameValid.value = true
       registerPasswordValid.value = true
       registerConfirmValid.value = true
       
       await userStore.login(registerForm.value.email, registerForm.value.password)
-      router.push('/profile')
+      router.push('/chat')
     } else {
       registerError.value = data.message || '注册失败'
     }
@@ -373,7 +366,7 @@ const handleRegister = async () => {
 
     <!-- 微井网格背景 -->
     <div class="absolute inset-0 z-0 pointer-events-none opacity-[0.04]"
-         style="background-image: linear-gradient(rgba(43,111,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(43,111,255,0.5) 1px, transparent 1px); background-size: 60px 60px;">
+         style="background-mage: linear-gradient(rgba(43,111,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(43,111,255,0.5) 1px, transparent 1px); background-size: 60px 60px;">
     </div>
 
     <div ref="cardRef"
@@ -409,7 +402,7 @@ const handleRegister = async () => {
           </div>
                     <!-- 浮动 AI 小助手（LottieFiles 官方动画） -->
           <div class="absolute bottom-6 right-4 w-20 h-20 z-10 opacity-50 pointer-events-none drop-shadow-lg">
-          <LottieAnimation :path="aiAssistantLottieUrl" width="100%" height="100%" />
+          <LottieAnimation :animationData="aiAssistantLottie" width="100%" height="100%" />
           </div>
           <h1 class="text-4xl font-extrabold tracking-tight mb-4 flex items-center gap-2">
             LearnThink
@@ -456,8 +449,9 @@ const handleRegister = async () => {
       <!-- 右侧：表单侧 (绝对定位解决溢出和排版问题) -->
       <div class="w-full md:w-[54%] relative flex flex-col" style="background-color: var(--lt-bg-card);">
         
-        <!-- 移动端顶部 -->
+                <!-- 移动端顶部 -->
         <div class="md:hidden flex flex-col items-center pt-10 pb-2 z-20 relative">
+          <img src="/logo.svg" alt="LearnThink Logo" class="w-10 h-10 mb-2" />
           <h1 class="text-2xl font-bold" style="color: var(--lt-text-primary);">LearnThink <span style="color: var(--lt-brand);">AI</span></h1>
         </div>
 
@@ -524,10 +518,10 @@ const handleRegister = async () => {
                                     <!-- 密码安全守护小盾牌 -->
                   <div class="relative">
                     <div v-if="loginPasswordFocused && !loginFieldErrors.password" 
-                         class="absolute -right-8 top-1/2 -translate-y-1/2 w-7 h-7 z-10 pointer-events-none">
-                      <LottieAnimation :animationData="shieldLockLottie" width="100%" height="100%" />
-                    </div>
-                                        <el-form-item class="mb-2" :error="loginFieldErrors.password || ''">
+                         class="absolute -right-16 top-1/2 -translate-y-1/2 w-16 h-16 z-10 pointer-events-none">
+                                               <LottieAnimation :animationData="cyberSecurityLottie" width="100%" height="100%" />
+                                             </div>
+                                                                 <el-form-item class="mb-2" :error="loginFieldErrors.password || ''">
                       <div class="relative w-full">
                         <!-- 校验通过对勾 -->
                         <div v-if="loginPasswordValid && !loginFieldErrors.password" 
@@ -575,7 +569,7 @@ const handleRegister = async () => {
               <div class="w-full max-w-[340px]">
                                 <div class="mb-6 text-center">
                                     <h2 class="text-2xl font-bold tracking-tight mb-2" style="color: var(--lt-text-primary);">创建你的学思伴行账号</h2>
-                                    <p class="text-sm" style="color: var(--lt-text-secondary);">2 分钟完成注册，开始对话建画像</p>
+                                    <p class="text-sm" style="color: var(--lt-text-secondary);">开始你的 AI 学习之旅</p>
                                   </div>
 
                 <!-- 表单级错误提示 -->
@@ -628,12 +622,12 @@ const handleRegister = async () => {
                   </el-form-item>
 
                                                                         <!-- 密码安全守护小盾牌 -->
-                  <div class="relative">
+                                    <div class="relative">
                     <div v-if="registerPasswordFocused && !registerFieldErrors.password" 
-                         class="absolute -right-8 top-1/2 -translate-y-1/2 w-7 h-7 z-10 pointer-events-none">
-                      <LottieAnimation :animationData="shieldLockLottie" width="100%" height="100%" />
-                    </div>
-                                        <el-form-item class="mb-1" :error="registerFieldErrors.password || ''">
+                         class="absolute -right-16 top-1/2 -translate-y-1/2 w-16 h-16 z-10 pointer-events-none">
+                                               <LottieAnimation :animationData="cyberSecurityLottie" width="100%" height="100%" />
+                                             </div>
+                                                                 <el-form-item class="mb-1" :error="registerFieldErrors.password || ''">
                       <div class="relative w-full">
                         <!-- 校验通过对勾 -->
                         <div v-if="registerPasswordValid && !registerFieldErrors.password" 
@@ -652,13 +646,13 @@ const handleRegister = async () => {
                                   @blur="registerPasswordFocused = false" />
                       </div>
                     </el-form-item>
+                  </div>
                     <!-- 密码强度提示 -->
                     <div class="mb-4 px-1">
                       <p class="text-xs leading-relaxed" style="color: var(--lt-text-auxiliary);">
                         密码至少 8 个字符，包含大、小写字母和数字
                       </p>
                     </div>
-                  </div>
 
                                                                                                                                                 <el-form-item class="mb-2" :error="registerFieldErrors.confirmPassword || ''">
                     <div class="relative w-full">

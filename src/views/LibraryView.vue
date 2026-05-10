@@ -308,11 +308,10 @@ import {
   VideoPlay,
   Link,
   Delete,
-  Share,
   Reading,
   DataBoard,
 } from '@element-plus/icons-vue'
-import type { ResourcePack, ResourceItem } from '@/types'
+import type { ResourcePack } from '@/types'
 import ResourceCard from '@/components/ResourceCard.vue'
 import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
@@ -643,7 +642,7 @@ const packIconClass = (pack: ResourcePack) => {
   return 'bg-danger/10 text-danger'
 }
 
-const packIcon = (pack: ResourcePack) => {
+const packIcon = (_pack: ResourcePack) => {
   return markRaw(DataBoard)
 }
 
@@ -676,7 +675,7 @@ const resourceTypeLabel = (type: string) => {
   return map[type] || type
 }
 
-const previewResource = (res: any, pack: ResourcePack) => {
+const previewResource = (res: any, _pack: ResourcePack) => {
   currentPreview.value = res
   previewMode.value = 'brief'
   previewVisible.value = true
@@ -692,8 +691,8 @@ const viewSources = (res: any) => {
   }
 }
 
-const regenerateResource = (res: any, pack: ResourcePack) => {
-  res.status = 'loading'
+const regenerateResource = (res: any, _pack: ResourcePack) => {
+  res.status = 'pending'
   ElMessage.info(`正在重新生成「${res.title}」...`)
   setTimeout(() => {
     res.status = 'ready'

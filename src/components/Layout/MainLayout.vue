@@ -2,10 +2,13 @@
 import { useRoute } from 'vue-router'
 import { computed, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, EditPen, DataLine } from '@element-plus/icons-vue'
+import { useProfileStore } from '@/stores/profile'
+import type { CourseInfo } from '@/stores/profile'
+import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, EditPen, DataLine, ArrowDown } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const userStore = useUserStore()
+const profileStore = useProfileStore()
 const activeMenu = computed(() => route.path)
 const isCollapsed = ref(false)
 
@@ -29,23 +32,19 @@ const toggleSidebar = () => {
       :class="isCollapsed ? 'w-16' : 'w-60'"
       style="background-color: var(--nav-bg); box-shadow: var(--nav-shadow);"
     >
-      <!-- Logo 区域 -->
+            <!-- Logo 区域 -->
       <div
         class="h-16 flex items-center overflow-hidden transition-all duration-300"
         :class="isCollapsed ? 'justify-center px-0' : 'px-6'"
         style="border-bottom: 1px solid var(--nav-divider);"
       >
         <template v-if="isCollapsed">
-          <div class="w-8 h-8 rounded-lg" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark)); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <span class="text-white font-bold text-sm">LT</span>
-          </div>
+          <img src="/logo.svg" alt="Logo" class="w-9 h-9 object-contain" />
         </template>
         <template v-else>
-          <h1 class="text-lg font-bold flex items-center gap-2.5 whitespace-nowrap" style="color: var(--nav-logo);">
-            <div class="w-8 h-8 rounded-lg" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark)); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-              <span class="text-white font-bold text-sm">LT</span>
-            </div>
-            <span>LearnThink</span>
+          <h1 class="text-xl font-bold flex items-center gap-2.5 whitespace-nowrap">
+            <img src="/logo.svg" alt="Logo" class="w-9 h-9 object-contain" />
+            <span class="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 via-blue-500 to-orange-400 tracking-wide" style="font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;">学思伴行</span>
           </h1>
         </template>
       </div>
@@ -63,9 +62,9 @@ const toggleSidebar = () => {
             <el-icon><DataBoard /></el-icon>
             <template #title>驾驶舱 (Dashboard)</template>
           </el-menu-item>
-          <el-menu-item index="/profile">
-            <el-icon><User /></el-icon>
-            <template #title>画像对话</template>
+          <el-menu-item index="/chat">
+            <el-icon><ChatLineRound /></el-icon>
+            <template #title>AI 学习助手</template>
           </el-menu-item>
           <el-menu-item index="/studio">
             <el-icon><MagicStick /></el-icon>
@@ -136,11 +135,24 @@ const toggleSidebar = () => {
           <el-icon class="text-gray-300 cursor-pointer hover:text-[#2B6FFF] transition-colors text-lg" @click="isCollapsed = !isCollapsed">
             <Fold />
           </el-icon>
-          <div class="text-sm text-gray-500">
+          <div class="text-sm text-gray-500 flex items-center gap-1">
             当前课程
-            <span class="font-medium px-3 py-1.5 rounded-full text-sm ml-2 border" style="color: #5A5A72; background-color: #E8F0FE; border-color: #D6E4FF;">
-              <span class="mr-1">👩‍💻</span> 现代前端工程化基础
-            </span>
+            <el-dropdown trigger="click" @command="(course: CourseInfo) => profileStore.switchCourse(course)">
+              <span class="font-medium px-3 py-1.5 rounded-full text-sm ml-2 border cursor-pointer select-none hover:shadow-sm transition-all"
+                style="color: #5A5A72; background-color: #E8F0FE; border-color: #D6E4FF;">
+                <span class="mr-1">{{ profileStore.activeCourse.emoji }}</span>
+                {{ profileStore.activeCourse.name }}
+                <el-icon :size="10" class="ml-0.5 text-gray-400"><ArrowDown /></el-icon>
+              </span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="c in profileStore.courses" :key="c.id" :command="c"
+                    :class="{ 'is-active': c.id === profileStore.activeCourseId }">
+                    <span class="mr-1">{{ c.emoji }}</span>{{ c.name }}
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
         <div class="flex items-center gap-3">
@@ -165,7 +177,7 @@ const toggleSidebar = () => {
             class="header-icon-btn !border-0 !bg-transparent hover:!bg-gray-100"
           />
           <el-divider direction="vertical" class="!h-5 !mx-1" />
-          <el-avatar :size="32" class="cursor-pointer ring-2 ring-white shadow-sm" style="background: linear-gradient(135deg, #2B6FFF, #1A4FCC);">
+          <el-avatar :size="32" class="cursor-pointer ring-2 ring-white shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
             L
           </el-avatar>
         </div>

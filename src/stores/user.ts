@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { apiFetch } from '@/utils/api'
 
 export interface UserInfo {
   id: string
@@ -18,22 +19,22 @@ export const useUserStore = defineStore('user', () => {
 
   async function login(email: string, password: string): Promise<boolean> {
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        body: JSON.stringify({ email, password })
-      })
-      const data = await res.json()
-      if (res.ok && (data.code === 0 || data.code === 200)) {
-        token.value = data.data.accessToken
-        localStorage.setItem('token', token.value)
-        if (data.data.refreshToken) {
-          localStorage.setItem('refreshToken', data.data.refreshToken)
+      const result = await apiFetch<{ accessToken: string; refreshToken?: string; user: UserInfo }>(
+        '/auth/login',
+        {
+          method: 'POST',
+          body: { email, password },
+          skipAuth: true
         }
-        userInfo.value = data.data.user
+      )
+
+      if (result.code === 0 || result.code === 200) {
+        token.value = result.data.accessToken
+        localStorage.setItem('token', token.value)
+        if (result.data.refreshToken) {
+          localStorage.setItem('refreshToken', result.data.refreshToken)
+        }
+        userInfo.value = result.data.user
         localStorage.setItem('userInfo', JSON.stringify(userInfo.value))
         return true
       }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { getConfidenceConfig, CONFIDENCE_CONFIG } from '@/constants'
 import * as echarts from 'echarts/core'
 import { RadarChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -17,7 +18,6 @@ import {
   Aim,
   TrendCharts,
   Reading,
-  EditPen,
   DataBoard,
   User,
   MagicStick
@@ -43,32 +43,32 @@ const metrics = computed(() => [
     value: profilePace.value,
     unit: '分钟/天',
     icon: Timer,
-    color: '--el-color-primary',
-    bg: 'bg-primary/10'
+    color: 'var(--lt-brand)',
+    bg: 'rgba(43, 111, 255, 0.08)'
   },
   {
     label: '薄弱知识点',
     value: weakTags.value.length,
     unit: '个需加强',
     icon: WarningFilled,
-    color: '--el-color-danger',
-    bg: 'bg-danger/10'
+    color: 'var(--lt-danger)',
+    bg: 'rgba(255, 59, 48, 0.08)'
   },
   {
     label: '最近生成资源包',
     value: recentPacks.value.length,
     unit: '个',
     icon: Document,
-    color: '--el-color-success',
-    bg: 'bg-success/10'
+    color: 'var(--lt-success)',
+    bg: 'rgba(52, 199, 89, 0.08)'
   },
   {
     label: '当前路径完成度',
     value: pathProgress.value,
     unit: '%',
     icon: Medal,
-    color: '--el-color-warning',
-    bg: 'bg-warning/10'
+    color: 'var(--lt-warning)',
+    bg: 'rgba(255, 159, 10, 0.08)'
   }
 ])
 
@@ -194,22 +194,15 @@ const recentPacks = ref<RecentPack[]>([
   }
 ])
 
-/** 置信度样式映射 */
-const confidenceConfig = {
-  high: { type: 'success' as const, label: '高' },
-  medium: { type: 'warning' as const, label: '中' },
-  low: { type: 'danger' as const, label: '低' }
-}
-
 // ===== 空状态：引导创建画像 =====
 const emptyGuideSteps = [
-  { icon: '💬', title: '对话建画像', desc: '与智能导师对话，2分钟建立6维学习画像', action: '去对话', route: '/profile' },
+  { icon: '💬', title: 'AI 学习助手', desc: '与 AI 导师随便聊聊，画像在学习对话中无感积累', action: '去对话', route: '/chat' },
   { icon: '🔧', title: '生成资源包', desc: '基于画像自动生成≥5类个性化资源', action: '去工作室', route: '/studio' },
   { icon: '📈', title: '学习路径', desc: '获取动态调整的学习规划与练习反馈', action: '去路径', route: '/path' }
 ]
 
 // ===== 交互方法 =====
-const goToProfile = () => router.push('/profile')
+const goToChat = () => router.push('/chat')
 const goToStudio = (topic?: string) => {
   if (topic) {
     router.push({ name: 'studio', query: { topic } })
@@ -219,7 +212,6 @@ const goToStudio = (topic?: string) => {
 }
 const goToPath = () => router.push('/path')
 const goToLibrary = () => router.push('/library')
-const goToPractice = () => router.push('/practice')
 
 const openPack = (pack: RecentPack) => {
   router.push({ name: 'library', query: { packId: pack.id } })
@@ -256,25 +248,25 @@ onMounted(() => {
     <!-- ============ 空状态（无画像时展示） ============ -->
     <template v-if="!hasProfile">
       <el-card class="text-center py-16" shadow="hover">
-        <el-icon class="text-5xl text-primary mb-4"><User /></el-icon>
-        <h2 class="text-xl font-bold text-gray-800 mb-2">开始你的个性化学习之旅</h2>
-        <p class="text-gray-500 mb-8 max-w-lg mx-auto">
+        <el-icon class="text-5xl mb-4" style="color: var(--lt-brand);"><User /></el-icon>
+        <h2 class="text-xl font-bold mb-2" style="color: var(--lt-text-primary);">开始你的个性化学习之旅</h2>
+        <p class="mb-8 max-w-lg mx-auto" style="color: var(--lt-text-auxiliary);">
           系统尚未建立你的学习画像。与智能导师进行 2 分钟对话，即可解锁个性化资源推荐、学习路径规划与精准练习。
         </p>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mx-auto mb-8">
           <div
             v-for="(step, idx) in emptyGuideSteps"
             :key="idx"
-            class="bg-slate-50 rounded-xl p-6 border border-slate-200 hover:border-primary/30 hover:shadow-md transition-all cursor-pointer"
+            class="empty-guide-card rounded-xl p-6 border transition-all cursor-pointer" style="background-color: var(--lt-bg-page); border-color: var(--lt-border);"
             @click="router.push(step.route)"
           >
             <div class="text-3xl mb-3">{{ step.icon }}</div>
-            <h3 class="font-semibold text-gray-800 mb-1">{{ step.title }}</h3>
-            <p class="text-xs text-gray-500 mb-4">{{ step.desc }}</p>
+            <h3 class="font-semibold mb-1" style="color: var(--lt-text-primary);">{{ step.title }}</h3>
+            <p class="text-xs mb-4" style="color: var(--lt-text-auxiliary);">{{ step.desc }}</p>
             <el-button size="small" type="primary" plain>{{ step.action }}</el-button>
           </div>
         </div>
-        <el-button type="primary" size="large" class="px-8" @click="goToProfile">
+        <el-button type="primary" size="large" class="px-8" @click="goToChat">
           开始对话建画像
           <el-icon class="ml-1"><Right /></el-icon>
         </el-button>
@@ -290,8 +282,7 @@ onMounted(() => {
             <div class="flex items-center gap-4">
               <div
                 class="w-12 h-12 rounded-xl flex items-center justify-center text-lg shrink-0 transition-all duration-300 group-hover:scale-110 group-hover:shadow-sm"
-                :class="metric.bg"
-                :style="{ color: `var(${metric.color})` }"
+                :style="{ color: metric.color, backgroundColor: metric.bg }"
               >
                 <el-icon :size="22">
                   <component :is="metric.icon" />
@@ -307,7 +298,7 @@ onMounted(() => {
             </div>
             <!-- 装饰性指示条 -->
             <div class="absolute bottom-0 left-4 right-4 h-0.5 rounded-full bg-gradient-to-r from-transparent"
-              :style="{ background: `linear-gradient(90deg, transparent, var(${metric.color}), transparent)` }">
+              :style="{ background: `linear-gradient(90deg, transparent, ${metric.color}, transparent)` }">
             </div>
           </el-card>
         </el-col>
@@ -341,8 +332,8 @@ onMounted(() => {
                       知识点：{{ nextRecommendation.knowledgePoint }}
                     </p>
                   </div>
-                  <el-tag :type="confidenceConfig[nextRecommendation.confidence].type" size="small" effect="plain">
-                    {{ confidenceConfig[nextRecommendation.confidence].label }}置信度
+                  <el-tag :type="CONFIDENCE_CONFIG[nextRecommendation.confidence].type" size="small" effect="plain">
+                    {{ CONFIDENCE_CONFIG[nextRecommendation.confidence].label }}置信度
                   </el-tag>
                 </div>
 
@@ -416,7 +407,7 @@ onMounted(() => {
                     </div>
                     画像快照
                   </span>
-                  <el-button link type="primary" size="small" @click="goToProfile" style="color: var(--lt-brand);">
+                  <el-button link type="primary" size="small" @click="goToChat" style="color: var(--lt-brand);">
                     详细画像 <el-icon><Right /></el-icon>
                   </el-button>
                 </div>
@@ -546,11 +537,11 @@ onMounted(() => {
             <el-table-column label="置信度" width="90" align="center">
               <template #default="{ row }">
                 <el-tag
-                  :type="confidenceConfig[row.avgConfidence].type"
+                  :type="getConfidenceConfig(row.avgConfidence).type"
                   size="small"
                   effect="plain"
                 >
-                  {{ confidenceConfig[row.avgConfidence].label }}
+                  {{ getConfidenceConfig(row.avgConfidence).label }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -617,6 +608,7 @@ onMounted(() => {
 }
 .empty-guide-card:hover {
   border-color: var(--lt-brand-lighter) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   transform: translateY(-2px);
 }
 </style>

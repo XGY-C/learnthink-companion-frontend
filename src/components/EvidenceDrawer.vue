@@ -6,20 +6,20 @@
     direction="rtl"
   >
     <div class="px-2">
-            <div v-if="!sources || sources.length === 0" class="text-center py-10" style="color: #8E8EA0;">
+            <div v-if="!sources || sources.length === 0" class="text-center py-10" style="color: var(--lt-text-auxiliary);">
         无可用来源信息
       </div>
       <div v-else class="space-y-4">
-        <div v-for="(source, index) in sources" :key="index" class="rounded p-4" style="background-color: #F5F7FA; border: 1px solid #E8ECF0;">
+        <div v-for="(source, index) in sources" :key="index" class="rounded p-4" style="background-color: var(--lt-bg-page); border: 1px solid var(--lt-border);">
           <div class="flex justify-between items-start mb-2">
-            <h5 class="text-sm font-medium m-0 flex-1" style="color: #1A1A2E;">{{ source.title }}</h5>
+            <h5 class="text-sm font-medium m-0 flex-1" style="color: var(--lt-text-primary);">{{ source.title }}</h5>
             <el-tag size="small" type="info" class="ml-2 shrink-0">{{ source.locator }}</el-tag>
           </div>
-          <p class="text-sm p-3 rounded font-serif leading-relaxed mb-2" style="color: #5A5A72; background-color: #FFFFFF; border: 1px solid #E8ECF0;">
+          <p class="text-sm p-3 rounded font-serif leading-relaxed mb-2" style="color: var(--lt-text-secondary); background-color: var(--lt-bg-card); border: 1px solid var(--lt-border);">
             "{{ source.quote }}"
           </p>
           <div class="flex justify-between items-center mt-2">
-            <span v-if="source.relevance" class="text-xs px-2 py-0.5 rounded" :class="relevanceClass(source.relevance)">
+            <span v-if="source.relevance" class="text-xs px-2 py-0.5 rounded" :style="relevanceStyle(source.relevance)">
               关联度: {{ source.relevance }}
             </span>
             <el-button link type="primary" size="small" @click="copyQuote(source.quote)">复制引用</el-button>
@@ -50,10 +50,10 @@ const copyQuote = (text: string) => {
   })
 }
 
-const relevanceClass = (rel: string) => {
-  if (rel === 'high') return 'bg-success/10 text-success'
-  if (rel === 'medium') return 'bg-warning/10 text-warning'
-  return 'bg-danger/10 text-danger'
+const relevanceStyle = (rel: string) => {
+  if (rel === 'high') return { backgroundColor: 'rgba(52, 199, 89, 0.1)', color: 'var(--lt-success)' }
+  if (rel === 'medium') return { backgroundColor: 'rgba(255, 159, 10, 0.1)', color: 'var(--lt-warning)' }
+  return { backgroundColor: 'rgba(255, 59, 48, 0.1)', color: 'var(--lt-danger)' }
 }
 
 defineExpose({

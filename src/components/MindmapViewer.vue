@@ -17,7 +17,6 @@ const props = withDefaults(defineProps<{
 })
 
 const containerRef = ref<HTMLElement | null>(null)
-let markmapInstance: Markmap | null = null
 
 // ===== 从 Markdown 或 JSON 渲染思维导图 =====
 const renderMindmap = async () => {
@@ -41,7 +40,7 @@ const renderMindmap = async () => {
 
     await nextTick()
 
-    markmapInstance = Markmap.create(containerRef.value, {
+    Markmap.create(containerRef.value, {
       zoom: true,
       pan: true,
       autoFit: true,
@@ -51,19 +50,11 @@ const renderMindmap = async () => {
       spacingVertical: 10,
       spacingHorizontal: 60,
       duration: 500,
-      style: {
-        '.markmap-foreign': {
-          'font-size': '13px',
-          'line-height': '1.5'
-        },
-        '.markmap-foreign p': {
-          margin: '0',
-          'font-weight': '400'
-        },
-        '.markmap-foreign strong': {
-          'font-weight': '600'
-        }
-      }
+      style: (_id: string) => `
+        .markmap-foreign { font-size: 13px; line-height: 1.5; }
+        .markmap-foreign p { margin: 0; font-weight: 400; }
+        .markmap-foreign strong { font-weight: 600; }
+      `
     }, data)
 
   } catch (err) {
@@ -90,7 +81,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  markmapInstance = null
 })
 </script>
 
