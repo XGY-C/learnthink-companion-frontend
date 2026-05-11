@@ -30,6 +30,8 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 
 const props = withDefaults(defineProps<{
   content: string
@@ -44,6 +46,37 @@ const activeHeadingId = ref('')
 // ===== Markdown 转 HTML =====
 const mdToHtml = (md: string): string => {
   let html = md
+  const mathPlaceholders: { placeholder: string; html: string }[] = []
+
+  // ── 数学公式保护（在 markdown 处理前提取，避免 _ ^ 等被误解析）──
+  // 块级公式 $$...$$ 和 \[...\]
+  html = html.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
+    const displayHtml = katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })
+    const ph = `%%MATH_${mathPlaceholders.length}%%`
+    mathPlaceholders.push({ placeholder: ph, html: displayHtml })
+    return ph
+  })
+  html = html.replace(/\\\[([\s\S]*?)\\\]/g, (match, formula) => {
+    const displayHtml = katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })
+    const ph = `%%MATH_${mathPlaceholders.length}%%`
+    mathPlaceholders.push({ placeholder: ph, html: displayHtml })
+    return ph
+  })
+  // 行内公式 $...$ 和 \(...\)（不跨行，排除纯数字如 $100）
+  html = html.replace(/\$(.+?)\$/g, (match, formula) => {
+    if (/^\d+(\.\d+)?$/.test(formula.trim())) return match
+    const inlineHtml = katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false })
+    const ph = `%%MATH_${mathPlaceholders.length}%%`
+    mathPlaceholders.push({ placeholder: ph, html: inlineHtml })
+    return ph
+  })
+  html = html.replace(/\\\((.+?)\\\)/g, (match, formula) => {
+    const inlineHtml = katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false })
+    const ph = `%%MATH_${mathPlaceholders.length}%%`
+    mathPlaceholders.push({ placeholder: ph, html: inlineHtml })
+    return ph
+  })
+
 
   // 代码块（必须优先处理，防止内部内容被其他规则匹配）
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
@@ -54,6 +87,17 @@ const mdToHtml = (md: string): string => {
 
   // 行内代码
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
+
+  // 表格（必须在标题和段落之前处理）
+  html = html.replace(/^\|(.+)\|\n\|[-| :]+\|\n((?:^\|.+\|\n?)+)/gm, (match, headerRow, bodyRows) => {
+    const hCells = headerRow.split('|').map(c => c.trim()).filter(c => c)
+    let tbl = '<table><thead><tr>' + hCells.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>'
+    bodyRows.trim().split('\n').forEach(row => {
+      const cells = row.split('|').map(c => c.trim()).filter(c => c)
+      tbl += '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>'
+    })
+    return tbl + '</tbody></table>'
+  })
 
   // 标题（生成 id 用于锚点）
   html = html.replace(/^#### (.+)$/gm, (_, text) => {
@@ -78,8 +122,11 @@ const mdToHtml = (md: string): string => {
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
 
-  // 无序列表
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>')
+  // 分割线（必须在列表之前，避免 --- 被吃掉）
+  html = html.replace(/^---$/gm, '<hr />')
+
+  // 无序列表（兼容 - / -- 标记，有无空格均可；--- 已被上面处理）
+  html = html.replace(/^-{1,2} ?(.+)$/gm, '<li>$1</li>')
   html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
 
   // 有序列表
@@ -91,9 +138,6 @@ const mdToHtml = (md: string): string => {
 
   // 链接
   html = html.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
-
-  // 分割线
-  html = html.replace(/^---$/gm, '<hr />')
 
   // 段落（包裹非块元素的文本）
   const blockPattern = /^<\/?(h[1-4]|ul|ol|li|pre|code|hr|table|blockquote)/m
@@ -111,6 +155,12 @@ const mdToHtml = (md: string): string => {
     }
   }
   html = result.join('\n')
+
+
+  // ── 还原数学公式占位符 ──
+  for (const { placeholder, html: mathHtml } of mathPlaceholders) {
+    html = html.replace(placeholder, mathHtml)
+  }
 
   return html
 }
