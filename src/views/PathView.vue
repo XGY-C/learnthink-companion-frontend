@@ -160,7 +160,7 @@ const getTimelineIcon = (node: PathNode) => {
       <div class="px-4 py-6 max-w-4xl mx-auto">
         <el-timeline>
           <el-timeline-item
-            v-for="(node, index) in nodes"
+            v-for="node in nodes"
             :key="node.id"
             :type="getTimelineType(node)"
             :icon="getTimelineIcon(node)"

@@ -29,3 +29,13 @@
 
 3. **素材合规**：以上动画均为 LearnThink 团队使用 After Effects 或程序生成器自制，
    不涉及第三方版权素材，可用于比赛演示及学术答辩。
+
+| `chat-pulse.json` | 自制 | LearnThink 团队 | 自有版权 | 对话建画像：对话气泡 + 脉冲波纹 |
+| `agent-network.json` | 自制 | LearnThink 团队 | 自有版权 | 多智能体协同：节点连线网络 |
+| `trust-shield.json` | 自制 | LearnThink 团队 | 自有版权 | 证据可追溯：盾牌 + 扫描验证 |
+| `quality-loop.json` | 自制 | LearnThink 团队 | 自有版权 | 质量闭环：循环轨道 + 检查点 |
+
+| `chat-pulse.json` | 自制 | LearnThink 团队 | 自有版权 | 对话建画像：对话气泡 + 脉冲波纹 |
+| `agent-network.json` | 自制 | LearnThink 团队 | 自有版权 | 多智能体协同：节点连线网络 |
+| `trust-shield.json` | 自制 | LearnThink 团队 | 自有版权 | 证据可追溯：盾牌 + 扫描验证 |
+| `quality-loop.json` | 自制 | LearnThink 团队 | 自有版权 | 质量闭环：循环轨道 + 检查点 |

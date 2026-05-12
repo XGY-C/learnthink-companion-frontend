@@ -5,6 +5,59 @@
    科技蓝 #2B6FFF + 暖心橙 #FF8C42 + AI紫 #7C5CFC
    =================================================================== */
 
+/* ---- Tailwind v4 @theme：将设计令牌映射为 Tailwind 工具类 ---- */
+@theme {
+  /* 品牌色 */
+  --color-lt-brand: #2B6FFF;
+  --color-lt-brand-light: #6B9BFF;
+  --color-lt-brand-lighter: #A3C4FF;
+  --color-lt-brand-lightest: #E8F0FE;
+  --color-lt-brand-dark: #1A4FCC;
+  --color-lt-brand-disabled: #B8C8E8;
+
+  /* 橙色 */
+  --color-lt-orange: #FF8C42;
+  --color-lt-orange-text: #5A3B00;
+  --color-lt-orange-light-3: #FFB380;
+  --color-lt-orange-light-5: #FFD9B3;
+  --color-lt-orange-light-9: #FFF3E6;
+
+  /* AI紫 */
+  --color-lt-ai: #7C5CFC;
+  --color-lt-ai-light-3: #A78BFF;
+  --color-lt-ai-light-5: #CBB5FF;
+  --color-lt-ai-light-7: #E8DFFF;
+  --color-lt-ai-light-9: #F5F0FF;
+  --color-lt-ai-dark-2: #5A3ED4;
+
+  /* 语义色 */
+  --color-lt-success: #34C759;
+  --color-lt-warning: #FF9F0A;
+  --color-lt-danger: #FF3B30;
+
+  /* 中性色 */
+  --color-lt-text-primary: #1A1A2E;
+  --color-lt-text-secondary: #5A5A72;
+  --color-lt-text-auxiliary: #8E8EA0;
+  --color-lt-text-placeholder: #B8B8C8;
+  --color-lt-text-disabled: #C8C8D0;
+  --color-lt-bg-page: #F5F7FA;
+  --color-lt-bg-card: #FFFFFF;
+  --color-lt-border: #E8ECF0;
+
+  /* 圆角 */
+  --radius-lt-sm: 4px;
+  --radius-lt-md: 8px;
+  --radius-lt-lg: 12px;
+  --radius-lt-full: 20px;
+
+  /* 间距 */
+  --spacing-lt-compact: 8px;
+  --spacing-lt-regular: 16px;
+  --spacing-lt-loose: 24px;
+  --spacing-lt-xl: 32px;
+}
+
 :root {
   /* ======================== 1. 主色系：科技蓝 ======================== */
   --lt-brand: #2B6FFF;

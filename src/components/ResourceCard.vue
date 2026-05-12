@@ -1,6 +1,6 @@
 <template>
   <el-card class="resource-card h-full flex flex-col relative" :body-style="{ padding: '16px', display: 'flex', flexDirection: 'column', height: '100%', flexGrow: 1 }">
-        <div v-if="status === 'loading'" class="h-full flex flex-col justify-center items-center py-6 gap-3">
+        <div v-if="status === 'pending'" class="h-full flex flex-col justify-center items-center py-6 gap-3">
           <el-skeleton animated :rows="3" />
           <span class="text-sm" style="color: var(--lt-text-auxiliary);">等待该资源生成...</span>
         </div>
@@ -66,7 +66,7 @@ import { computed } from 'vue'
 const props = defineProps<{
   title: string
   type: string
-  status: 'loading' | 'ready' | 'failed' | 'rejected'
+  status: 'pending' | 'ready' | 'failed' | 'rejected'
   confidence?: 'high' | 'medium' | 'low'
   sourcesCount?: number
   qualityScore?: number
@@ -77,37 +77,13 @@ const props = defineProps<{
 
 defineEmits(['preview', 'view-sources', 'regenerate'])
 
-const typeLabelMap: Record<string, string> = {
-  doc: '讲解文档',
-  mindmap: '思维导图',
-  quiz: '练习题',
-  reading: '拓展阅读',
-  code: '代码案例',
-  video_script: '视频脚本'
-}
-const typeLabel = computed(() => typeLabelMap[props.type] || props.type)
+import { RESOURCE_TYPE_LABEL, RESOURCE_TYPE_TAG, CONFIDENCE_CONFIG } from '@/constants'
 
-const typeTagStyleMap: Record<string, any> = {
-  doc: 'primary',
-  mindmap: 'warning',
-  quiz: 'success',
-  reading: 'info',
-  code: 'danger',
-  video_script: 'default'
-}
-const typeTagStyle = computed(() => typeTagStyleMap[props.type] || 'info')
+const typeLabel = computed(() => RESOURCE_TYPE_LABEL[props.type] || props.type)
 
-const confidenceStyleMap: Record<string, any> = {
-  high: 'success',
-  medium: 'warning',
-  low: 'danger'
-}
-const confidenceStyle = computed(() => props.confidence ? confidenceStyleMap[props.confidence] : 'info')
+const typeTagStyle = computed(() => RESOURCE_TYPE_TAG[props.type] || 'info')
 
-const confidenceLabelMap: Record<string, string> = {
-  high: '高',
-  medium: '中',
-  low: '低'
-}
-const confidenceLabel = computed(() => props.confidence ? confidenceLabelMap[props.confidence] : '未知')
+const confidenceStyle = computed(() => props.confidence ? (CONFIDENCE_CONFIG[props.confidence]?.type ?? 'info') : 'info')
+
+const confidenceLabel = computed(() => props.confidence ? (CONFIDENCE_CONFIG[props.confidence]?.label ?? '未知') : '未知')
 </script>

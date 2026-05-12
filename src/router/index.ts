@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '@/components/Layout/MainLayout.vue'
+import DashboardView from '@/views/DashboardView.vue'
+import { useUserStore } from '@/stores/user'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -13,15 +15,15 @@ const router = createRouter({
       path: '/',
       component: MainLayout,
       children: [
-        {
+                {
           path: '',
           name: 'dashboard',
-          component: () => import('@/views/DashboardView.vue')
+          component: DashboardView
         },
         {
-          path: 'profile',
-          name: 'profile',
-          component: () => import('@/views/ProfileView.vue')
+          path: 'chat',
+          name: 'chat',
+          component: () => import('@/views/ChatView.vue')
         },
         {
           path: 'studio',
@@ -46,6 +48,23 @@ const router = createRouter({
       ]
     }
   ]
+})
+
+router.beforeEach((to) => {
+  const userStore = useUserStore()
+
+  // 登录页不需要鉴权
+  if (to.path === '/login') {
+    if (userStore.isLoggedIn) return { path: '/' }
+    return true
+  }
+
+  // 其他页面需要登录
+  if (!userStore.isLoggedIn) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+
+  return true
 })
 
 export default router

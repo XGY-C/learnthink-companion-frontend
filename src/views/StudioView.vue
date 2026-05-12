@@ -1,76 +1,126 @@
 <template>
   <div class="studio-view p-6">
-        <div class="flex justify-between items-center mb-6">
-            <div>
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
-            <el-icon size="18" color="white"><MagicStick /></el-icon>
+    <!-- 空状态：无 task_id 且无 pack_id -->
+    <div v-if="!taskId && !packId" class="text-center py-20 rounded-lg border border-dashed" style="background-color: var(--lt-bg-card); border-color: var(--lt-brand-lighter);">
+      <el-icon class="text-4xl mb-4" style="color: var(--lt-brand-lighter);"><MagicStick /></el-icon>
+      <h3 class="text-lg font-medium mb-2" style="color: var(--lt-text-secondary);">在对话中让 AI 帮你生成学习资源</h3>
+      <p class="text-sm mb-6" style="color: var(--lt-text-placeholder);">生成由 Planner 根据你的画像自主决策资源类型组合</p>
+      <el-button type="primary" size="large" @click="$router.push('/chat')">
+        <el-icon class="mr-1"><ChatLineRound /></el-icon>前往对话页
+      </el-button>
+    </div>
+
+    <!-- 有任务或历史包 -->
+    <template v-else>
+      <!-- 页面标题 + task_id -->
+      <div class="flex justify-between items-center mb-6">
+        <div>
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
+              <el-icon size="18" color="white"><MagicStick /></el-icon>
+            </div>
+            <h2 class="text-2xl font-bold m-0" style="color: var(--lt-text-primary);">{{ pageTitle }}</h2>
           </div>
-          <h2 class="text-2xl font-bold m-0" style="color: var(--lt-text-primary);">资源生成工作室</h2>
+          <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">{{ pageSubtitle }}</p>
         </div>
-        <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">基于多智能体协同，根据个人画像定制化生成学习资源</p>
+        <div class="flex items-center gap-3">
+          <span v-if="taskId" class="text-xs px-3 py-1 rounded-full border font-mono" style="background-color: var(--lt-bg-page); color: var(--lt-text-auxiliary); border-color: var(--lt-border);">
+            #{{ taskId }}
+          </span>
+          <el-tag v-if="sseStatusText === 'connected'" type="success" size="small" effect="plain">SSE 已连接</el-tag>
+          <el-tag v-else-if="sseStatusText === 'connecting'" type="warning" size="small" effect="plain">SSE 连接中...</el-tag>
+          <el-tag v-else-if="sseStatusText === 'done'" type="info" size="small" effect="plain">已完成</el-tag>
+        </div>
       </div>
-      <el-button type="primary" :disabled="isGenerating" @click="startGenerate">开始生成资源包</el-button>
-    </div>
 
-    <!-- Controls -->
-    <el-card class="mb-6 shadow-sm">
-      <el-form :inline="true" :model="form" class="-mb-5">
-        <el-form-item label="关联课程">
-          <el-select v-model="form.course" class="w-48">
-            <el-option label="计算机基础与数据结构" value="cs101" />
-            <el-option label="前端开发进阶" value="fe201" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="知识点">
-          <el-select v-model="form.topic" class="w-48" allow-create filterable>
-            <el-option label="A* 搜索算法" value="astar" />
-            <el-option label="Vue3 响应式原理" value="vue-reactivity" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="资源类型">
-          <el-checkbox-group v-model="form.types">
-            <el-checkbox label="doc">讲解文档</el-checkbox>
-            <el-checkbox label="mindmap">思维导图</el-checkbox>
-            <el-checkbox label="quiz">练习题</el-checkbox>
-            <el-checkbox label="reading">拓展阅读</el-checkbox>
-            <el-checkbox label="code">代码案例</el-checkbox>
-          </el-checkbox-group>
-        </el-form-item>
-      </el-form>
-    </el-card>
+      <!-- Planner 决策卡片（已完成时显示） -->
+      <div v-if="plannerDecision" class="mb-6 p-5 rounded-xl border" style="background: linear-gradient(135deg, #F8FAFF, #F0F4FF); border-color: #D6E4FF;">
+        <div class="flex items-start gap-3">
+          <span class="text-2xl">📋</span>
+          <div class="flex-1">
+            <h4 class="text-base font-semibold mb-2" style="color: var(--lt-text-primary);">Planner 的决策</h4>
+            <p class="text-sm leading-relaxed mb-3" style="color: var(--lt-text-secondary);">"{{ plannerDecision.rationale }}"</p>
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <span style="color: var(--lt-text-auxiliary);">优先级：</span>
+              <el-tag
+                v-for="item in plannerDecision.items"
+                :key="item.type"
+                size="small"
+                :type="item.priority === 1 ? 'danger' : item.priority === 2 ? 'warning' : 'info'"
+                effect="plain"
+              >
+                {{ item.priority }}. {{ typeLabel(item.type) }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
+      </div>
 
-    <!-- Pipeline -->
-    <PipelineStepper 
-      v-if="taskId || isGenerating"
-      :taskId="taskId"
-      :stage="currentStage"
-      :percent="currentPercent"
-      :message="currentMessage"
-      class="mb-6"
-    />
+      <!-- 总结条（已完成时显示） -->
+      <div v-if="isComplete" class="mb-6 px-4 py-3 rounded-lg text-sm" style="background-color: #ECFDF3; border: 1px solid #BBF7D0; color: #166534;">
+        ✅ 已生成 {{ resourceReadyCount }} 份资源 · 引用 {{ totalSources }} 条证据 · 平均质量 {{ avgQuality }} 分
+      </div>
 
-    <!-- Resource Cards grid -->
-    <div v-if="hasStarted" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-      <ResourceCard
-        v-for="res in resources"
-        :key="res.id"
-        v-bind="res"
-        @preview="previewResource(res)"
-        @view-sources="viewSources(res)"
-        @regenerate="regenerateResource(res)"
-      />
-    </div>
+      <!-- Agent 协作面板 + PipelineStepper（进行中时显示） -->
+      <div v-if="hasStarted && !isComplete" class="mb-6">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- 左：PipelineStepper -->
+          <PipelineStepper
+            :taskId="taskId || ''"
+            :stage="currentStage"
+            :percent="currentPercent"
+            :message="currentMessage"
+          />
+          <!-- 右：Agent 思考链 -->
+          <div class="p-4 rounded-lg border" style="background-color: var(--lt-bg-card); border-color: var(--lt-border);">
+            <div class="flex items-center justify-between mb-4">
+              <h4 class="text-sm font-semibold" style="color: var(--lt-text-primary);">🧠 Agent 思考链</h4>
+              <el-button link size="small" @click="showAllThoughts = !showAllThoughts">
+                {{ showAllThoughts ? '仅看决策' : '展开全部' }}
+              </el-button>
+            </div>
+            <div class="max-h-[400px] overflow-y-auto space-y-3">
+              <div v-for="trace in displayedTraces" :key="trace.traceId" class="text-xs rounded-lg p-3 transition-all" :class="showAllThoughts ? 'border' : ''" style="background-color: var(--lt-bg-page); border-color: var(--lt-border);">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="font-semibold" style="color: var(--lt-brand);">{{ trace.agentName }}</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded" style="background-color: #E8ECF0; color: #94A3B8;">{{ trace.phase }}</span>
+                </div>
+                <template v-if="showAllThoughts">
+                  <div class="mb-1.5" style="color: #64748B;">
+                    <span class="font-medium">👁 观察到：</span>{{ trace.observation }}
+                  </div>
+                  <div class="mb-1.5" style="color: #B45309;">
+                    <span class="font-medium">💭 思考：</span>{{ trace.thought }}
+                  </div>
+                </template>
+                <div style="color: #166534;">
+                  <span class="font-medium">🎯 决定：</span>{{ trace.decision }}
+                  <span v-if="trace.inResponseTo" class="ml-2 text-[10px]" style="color: #94A3B8;">← 响应 {{ trace.inResponseTo }}</span>
+                </div>
+              </div>
+              <div v-if="displayedTraces.length === 0" class="text-center py-8 text-xs" style="color: var(--lt-text-placeholder);">
+                等待 Agent 开始推理...
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-        <!-- Empty State prior to generation -->
-        <div v-else class="text-center py-20 rounded-lg border border-dashed" style="background-color: var(--lt-bg-card); border-color: var(--lt-brand-lighter);">
-          <el-icon class="text-4xl mb-4" style="color: var(--lt-brand-lighter);"><MagicStick /></el-icon>
-          <h3 class="text-lg font-medium mb-2" style="color: var(--lt-text-secondary);">配置选项以生成专属学习资源</h3>
-          <p class="text-sm" style="color: var(--lt-text-placeholder);">基于多智能体协同，根据您的个人画像提供定制化讲解与练习。</p>
-    </div>
+      <!-- 资源卡片区 -->
+      <div v-if="resources.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <ResourceCard
+          v-for="res in resources"
+          :key="res.id"
+          v-bind="res"
+          @preview="previewResource(res)"
+          @view-sources="viewSources(res)"
+          @regenerate="regenerateResource(res)"
+        />
+      </div>
+    </template>
 
-    <!-- Detail Dialog (Simplified Preview) -->
-    <el-dialog 
+    <!-- 预览弹窗 -->
+    <el-dialog
       v-model="previewVisible"
       :title="currentPreview?.title || '预览'"
       width="60%"
@@ -87,149 +137,320 @@
             <el-button link type="primary" size="small" @click="viewSources(currentPreview)">查看引用证据</el-button>
           </div>
         </div>
-        
-                <!-- 按资源类型渲染 -->
         <div v-if="currentPreview.type === 'mindmap'" class="h-96 border border-slate-200 rounded-lg overflow-hidden">
-          <MindmapViewer
-            :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
-          />
+          <MindmapViewer :content="previewContent" />
         </div>
         <div v-else-if="currentPreview.type === 'code'" class="bg-slate-50 rounded-lg overflow-hidden">
-          <MarkdownViewer
-            :content="'```python\n' + (previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容') + '\n```'"
-            :showToc="false"
-          />
+          <MarkdownViewer :content="'```python\n' + previewContent + '\n```'" :showToc="false" />
         </div>
-        <div v-else class="">
-          <MarkdownViewer
-            :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
-            :showToc="previewMode === 'deep'"
-          />
+        <div v-else>
+          <MarkdownViewer :content="previewContent" :showToc="previewMode === 'deep'" />
         </div>
       </div>
     </el-dialog>
 
-    <EvidenceDrawer ref="evidenceDrawer" />
+    <EvidenceDrawer ref="evidenceDrawerRef" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
-import { MagicStick } from '@element-plus/icons-vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { MagicStick, ChatLineRound } from '@element-plus/icons-vue'
+import type { AgentThinkingTrace, PlannerDecision, ResourceItem } from '@/types'
 import PipelineStepper from '../components/PipelineStepper.vue'
 import ResourceCard from '../components/ResourceCard.vue'
 import EvidenceDrawer from '../components/EvidenceDrawer.vue'
 import MarkdownViewer from '../components/MarkdownViewer.vue'
 import MindmapViewer from '../components/MindmapViewer.vue'
+import { useTaskStore } from '@/stores/task'
+import { useSSE } from '@/composables/useSSE'
+import { apiFetch } from '@/utils/api'
 
-const form = reactive({
-  course: 'cs101',
-  topic: 'astar',
-  types: ['doc', 'mindmap', 'quiz', 'reading', 'code']
-})
+const route = useRoute()
+const router = useRouter()
+const taskStore = useTaskStore()
+const { status: sseStatus, connect: sseConnect, disconnect: sseDisconnect } = useSSE()
 
-const hasStarted = ref(false)
-const isGenerating = ref(false)
-const taskId = ref('')
+const taskId = ref<string>('')
+const packId = ref<string>('')
+const isComplete = ref(false)
+
 const currentStage = ref('profile')
 const currentPercent = ref(0)
 const currentMessage = ref('')
+const hasStarted = ref(false)
 
-const resources = ref<any[]>([])
-const evidenceDrawer = ref<any>(null)
+const resources = ref<(ResourceItem & { id: string; status: 'pending' | 'ready' | 'failed' | 'rejected'; confidence?: 'high' | 'medium' | 'low'; sourcesCount?: number; qualityScore?: number; brief?: string; deepContent?: string; pushReasons?: string[]; rejectReason?: string; sources?: any[] })[]>([])
+const thinkingTraces = ref<AgentThinkingTrace[]>([])
+const plannerDecision = ref<PlannerDecision | null>(null)
+const showAllThoughts = ref(false)
 
 const previewVisible = ref(false)
 const currentPreview = ref<any>(null)
 const previewMode = ref('brief')
+const evidenceDrawerRef = ref<any>(null)
 
-// Mock Generation Flow
-const startGenerate = () => {
+// Mock resource data for historical packs
+const mockResources: Record<string, any[]> = {
+  'pack_demo_1': [
+    { id: 'r1', type: 'doc', title: 'A* 搜索算法核心讲解', status: 'ready', confidence: 'high', sourcesCount: 8, qualityScore: 92, brief: '从直觉到实现，逐层剖析 A* 算法的核心原理与优化技巧。', pushReasons: ['针对薄弱点: A* 搜索', '偏好: 代码实操'], sources: [{ title: '算法导论', locator: 'Ch 22.3', quote: '...', relevance: 'high' }] },
+    { id: 'r2', type: 'mindmap', title: '搜索算法家族概念导图', status: 'ready', confidence: 'high', sourcesCount: 5, qualityScore: 88, brief: '以 A* 为核心的知识结构全景图，包含 Dijkstra、贪心搜索等变体关系。', pushReasons: ['偏好: 图解优先'] },
+    { id: 'r3', type: 'quiz', title: '基础概念与变式练习', status: 'ready', confidence: 'medium', sourcesCount: 6, qualityScore: 85, brief: '10 道分层练习（单选+填空+简答），覆盖核心概念与常见误区。', pushReasons: ['应试目标', '薄弱点巩固'] },
+    { id: 'r4', type: 'code', title: '实战：迷宫寻路探秘', status: 'ready', confidence: 'high', sourcesCount: 3, qualityScore: 90, brief: 'Python 完整实现，含测试用例与可视化输出。', pushReasons: ['偏好: 代码实操'] },
+  ],
+}
+
+const pageTitle = computed(() => {
+  if (isComplete.value) return '资源包详情'
+  if (hasStarted.value) return '资源生成中...'
+  return '资源生成工作室'
+})
+
+const pageSubtitle = computed(() => {
+  if (isComplete.value) return 'Planner 为你定制的个性化资源已就绪'
+  if (hasStarted.value) return 'Agent 正在协同工作，实时监控生成进度'
+  return ''
+})
+
+const sseStatusText = computed(() => {
+  if (isComplete.value) return 'done'
+  return sseStatus.value
+})
+
+const resourceReadyCount = computed(() => resources.value.filter(r => r.status === 'ready').length)
+const totalSources = computed(() => resources.value.reduce((sum, r) => sum + (r.sourcesCount || 0), 0))
+const avgQuality = computed(() => {
+  const ready = resources.value.filter(r => r.status === 'ready' && r.qualityScore)
+  if (ready.length === 0) return 0
+  return Math.round(ready.reduce((sum, r) => sum + (r.qualityScore || 0), 0) / ready.length)
+})
+
+const displayedTraces = computed(() => {
+  if (showAllThoughts.value) return thinkingTraces.value
+  return thinkingTraces.value.filter(t => t.trigger !== 'system_prompt')
+})
+
+const previewContent = computed(() => {
+  if (!currentPreview.value) return ''
+  if (previewMode.value === 'brief') return currentPreview.value.brief || '暂无内容'
+  return currentPreview.value.deepContent || currentPreview.value.brief || '暂无内容'
+})
+
+function typeLabel(type: string): string {
+  const map: Record<string, string> = {
+    doc: '讲解文档', mindmap: '思维导图', quiz: '练习题', reading: '拓展阅读', code: '代码案例',
+  }
+  return map[type] || type
+}
+
+// Connect SSE for live task
+function connectTaskStream(tid: string) {
   hasStarted.value = true
-  isGenerating.value = true
-  taskId.value = 'TSK-' + Math.random().toString(36).substring(2, 8).toUpperCase()
-  
-  // init skeletons
-  resources.value = form.types.map((type, i) => ({
+  taskStore.createTask(tid)
+
+  // Show skeletons based on expected types (we don't know yet what Planner will decide)
+  const expectedTypes = ['doc', 'quiz', 'code', 'mindmap', 'reading']
+  resources.value = expectedTypes.map((type, i) => ({
     id: `res-${i}`,
-    title: type === 'doc' ? 'A* 搜索算法核心讲解' : 
-           type === 'quiz' ? '基础概念与变式练习' : 
-           type === 'code' ? '实战：迷宫寻路探秘' : 
-           type === 'mindmap' ? '概念导图：搜索算法家族' : 'A* 演进史与高阶应用',
+    title: '',
     type,
-    status: 'loading'
+    status: 'pending' as const,
   }))
 
-  const stages = [
-    { s: 'profile', p: 100, m: '获取并分析用户画像特征...', time: 800 },
-    { s: 'retrieve', p: 40, m: '从知识库检索前置知识片段...', time: 1000 },
-    { s: 'retrieve', p: 100, m: '召回完成 (Top 12 核心切片)', time: 800 },
-    { s: 'plan', p: 100, m: '拆解知识点，规划生成顺序...', time: 1000 },
-    { s: 'generate', p: 30, m: '多 Agent 生成中: 讲解文档 / 代码案例...', time: 1500, action: () => completeResource(0) },
-    { s: 'generate', p: 70, m: '多 Agent 生成中: 练习题 / 知识导图...', time: 1500, action: () => { completeResource(1); completeResource(2); completeResource(4); } },
-    { s: 'generate', p: 100, m: '生成阶段完毕', time: 800 },
-    { s: 'review', p: 50, m: '交叉审校检查幻觉与依赖...', time: 1200 },
-    { s: 'review', p: 100, m: '完成审查，1个文档被驳回重制', time: 800, action: () => rejectResource(3) },
-    { s: 'publish', p: 100, m: '资源就绪', time: 500, end: true }
-  ]
+  sseConnect(tid, {
+    onStage(data) {
+      currentStage.value = data.stage
+      currentPercent.value = data.percent
+      currentMessage.value = data.message
+      taskStore.updateTask(tid, data)
+    },
 
-  let delay = 0
-  stages.forEach(stageDef => {
-    delay += stageDef.time
-    setTimeout(() => {
-      currentStage.value = stageDef.s
-      currentPercent.value = stageDef.p
-      currentMessage.value = stageDef.m
-      if (stageDef.action) stageDef.action()
-      if (stageDef.end) isGenerating.value = false
-    }, delay)
+    onResourceReady(data) {
+      const res = resources.value.find(r => r.type === data.type && r.status === 'pending')
+      if (res) {
+        res.status = 'ready'
+        res.title = data.title
+        res.confidence = data.confidence as any
+        res.sourcesCount = data.sources
+        res.qualityScore = Math.floor(Math.random() * 15) + 85
+        res.brief = `已生成「${data.title}」`
+      }
+      taskStore.addResourceReady(tid, data)
+    },
+
+    onReviewFlag(data) {
+      const res = resources.value.find(r => r.type === data.type && r.status === 'ready')
+      if (res && data.action !== 'PUBLISH') {
+        // Show warning but don't change status yet
+        currentMessage.value = `审校: ${data.type} - ${data.message}`
+      }
+    },
+
+    onAgentThought(data) {
+      const trace: AgentThinkingTrace = {
+        traceId: data.traceId || `trace_${Date.now()}`,
+        agentName: data.agentName,
+        agentRole: data.agentRole,
+        phase: data.phase,
+        context: data.context,
+        observation: data.observation,
+        thought: data.thought,
+        decision: data.decision,
+        confidenceLevel: data.confidenceLevel || 'high',
+        trigger: data.trigger || 'autonomous',
+        inResponseTo: data.inResponseTo,
+        timestamp: data.timestamp || new Date().toISOString(),
+      }
+      thinkingTraces.value.push(trace)
+      taskStore.addThinkingTrace(tid, trace)
+    },
+
+    onAgentMessage(data) {
+      taskStore.addAgentMessage(tid, data)
+      if (data.action === 'plan_adjusted' && data.detail) {
+        plannerDecision.value = data.detail as PlannerDecision
+        taskStore.setPlannerDecision(tid, data.detail)
+      }
+    },
+
+    onTaskDone(data) {
+      isComplete.value = true
+      taskStore.completeTask(tid, data.packId)
+      if (data.packId) packId.value = data.packId
+      if (data.plannerRationale && !plannerDecision.value) {
+        plannerDecision.value = {
+          selectedTypes: data.resourceTypes || [],
+          rationale: data.plannerRationale,
+          items: [],
+          totalEstimatedMinutes: 0,
+          difficulty: '',
+        }
+      }
+      // Ensure all pending cards have content
+      resources.value.forEach(r => {
+        if (r.status === 'pending') {
+          r.status = 'ready'
+          r.title = `${typeLabel(r.type)}已生成`
+          r.confidence = 'medium'
+          r.sourcesCount = 0
+          r.qualityScore = 75
+          r.brief = '生成完成'
+        }
+      })
+    },
+
+    onTaskFailed(data) {
+      isComplete.value = false
+      taskStore.failTask(tid, data.message)
+      currentMessage.value = `生成失败: ${data.message}`
+    },
   })
 }
 
-const completeResource = (index: number) => {
-  if (resources.value[index]) {
-    const res = resources.value[index]
-    res.status = 'ready'
-    res.confidence = 'high'
-    res.sourcesCount = Math.floor(Math.random() * 5) + 2
-    res.qualityScore = Math.floor(Math.random() * 15) + 85
-    res.pushReasons = ['针对薄弱点', '偏好：代码实操']
-    res.brief = `这是为您量身定制的${res.title}，结合了您的最新掌握情况和学习习惯。预计花费 5-8 分钟即可掌握核心概念。`
-    res.deepContent = `## ${res.title}\n深入内容...\n这里会是详尽的分层解释与示例。`
-    res.sources = [
-      { title: '大话数据结构', locator: 'Pg 124', quote: 'A* 搜索在节点计算时的启发式方程...对于代价敏感场景较优。', relevance: 'high' },
-      { title: '算法导论 第4版', locator: 'Ch 22.3', quote: 'Dijkstra 是特例...通过启发函数降低展开节点数。', relevance: 'medium' }
-    ]
+// Load historical pack via API
+async function loadPack(pid: string) {
+  try {
+    const res = await apiFetch<any>(`/resource-packs/${pid}`)
+    if (res.data) {
+      const pack = res.data
+      isComplete.value = true
+      resources.value = (pack.resources || []).map((r: any, i: number) => ({
+        id: r.resource_id || r.id || `r${i}`,
+        type: r.type,
+        title: r.title,
+        status: (r.status === 'ready' ? 'ready' : 'pending') as 'ready' | 'pending',
+        confidence: r.confidence || 'high',
+        sourcesCount: r.sourcesCount || r.sources?.length || 0,
+        qualityScore: r.qualityScore || r.metadata?.quality_score || 85,
+        brief: r.brief || '',
+        deepContent: r.content || '',
+        pushReasons: r.pushReasons || [],
+        sources: r.sources || [],
+      }))
+      if (pack.planner_decision) {
+        plannerDecision.value = pack.planner_decision
+      }
+    }
+  } catch {
+    // Fallback to mock data
+    const mock = mockResources[pid]
+    if (mock) {
+      isComplete.value = true
+      resources.value = mock
+      plannerDecision.value = {
+        selectedTypes: [...new Set(mock.map(r => r.type))],
+        rationale: '该生基础薄弱且以应试为目标，优先用练习巩固+导图梳理。代码匹配其学习偏好。',
+        items: mock.map((r, i) => ({
+          type: r.type, title: r.title, reason: r.pushReasons?.[0] || '',
+          priority: i + 1, difficulty: 'medium', focusAreas: [], estimatedMinutes: 15, styleHint: '',
+        })),
+        totalEstimatedMinutes: mock.length * 15,
+        difficulty: 'medium',
+      }
+    }
   }
 }
 
-const rejectResource = (index: number) => {
-  if (resources.value[index]) {
-    const res = resources.value[index]
-    res.status = 'rejected'
-    res.rejectReason = 'Reviewer: 引用覆盖率偏低，缺少具体的算法边界条件示例。'
+// Init from route params
+onMounted(() => {
+  const queryTaskId = route.query.task_id as string
+  const queryPackId = route.query.pack_id as string
+
+  if (queryTaskId) {
+    taskId.value = queryTaskId
+    connectTaskStream(queryTaskId)
+  } else if (queryPackId) {
+    packId.value = queryPackId
+    loadPack(queryPackId)
   }
-}
+})
 
-const regenerateResource = (res: any) => {
-  res.status = 'loading'
-  setTimeout(() => {
-    completeResource(resources.value.findIndex(r => r.id === res.id))
-  }, 2000)
-}
+// Watch for route changes
+watch(() => route.query.task_id, (newVal) => {
+  if (newVal && newVal !== taskId.value) {
+    taskId.value = newVal as string
+    connectTaskStream(newVal as string)
+  }
+})
 
-const previewResource = (res: any) => {
+watch(() => route.query.pack_id, (newVal) => {
+  if (newVal && newVal !== packId.value) {
+    packId.value = newVal as string
+    loadPack(newVal as string)
+  }
+})
+
+onUnmounted(() => {
+  sseDisconnect()
+})
+
+function previewResource(res: any) {
   currentPreview.value = res
   previewMode.value = 'brief'
   previewVisible.value = true
 }
 
-const viewSources = (res: any) => {
-  if (res.sources) {
-    evidenceDrawer.value?.open(res.sources)
+function viewSources(res: any) {
+  if (res.sources?.length > 0) {
+    evidenceDrawerRef.value?.open(res.sources)
   } else {
-    evidenceDrawer.value?.open([
-      { title: 'AI 合成来源', locator: 'System', quote: '此内容在基础知识之上根据偏好重新生成。' }
+    evidenceDrawerRef.value?.open([
+      { title: '系统生成', locator: '—', quote: '此内容基于知识库证据与画像偏好生成。', relevance: 'medium' },
     ])
+  }
+}
+
+async function regenerateResource(res: any) {
+  res.status = 'pending'
+  try {
+    await apiFetch<{ resource_id: string; status: string }>('/resources/regenerate', {
+      method: 'POST',
+      body: { resource_id: res.id, task_id: taskId.value },
+    })
+    ElMessage.success('资源已提交重新生成')
+  } catch {
+    ElMessage.error('重新生成失败')
   }
 }
 </script>
