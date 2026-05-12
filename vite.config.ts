@@ -22,7 +22,17 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        rewrite: (path) => path.replace(/^\/api/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            // SSE 响应禁用缓冲，确保流式传输
+            if (proxyRes.headers['content-type']?.toString().includes('text/event-stream')) {
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('X-Accel-Buffering', 'no');
+              res.flushHeaders();
+            }
+          });
+        }
       }
     }
   }

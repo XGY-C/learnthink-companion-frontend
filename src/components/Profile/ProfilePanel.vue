@@ -84,7 +84,7 @@ const radarOption = computed(() => ({
 
 // ===== 核心层数据 =====
 const knowledgeValue = computed(() => getDim('knowledge_basis')?.value)
-const masteredList = computed(() => (knowledgeValue.value?.mastered ?? []) as string[])
+const masteredList = computed(() => (knowledgeValue.value?.mastered ?? knowledgeValue.value?.strong ?? []) as string[])
 const weakList    = computed(() => (knowledgeValue.value?.weak ?? []) as string[])
 const kbPercent   = computed(() => {
   const total = masteredList.value.length + weakList.value.length
@@ -102,7 +102,10 @@ const styleValue = computed(() => getDim('cognitive_style')?.value)
 const styleLabel  = computed(() => {
   const pref = styleValue.value?.media_preference as string
   const map: Record<string, string> = { text: '图文优先', video: '视频优先', code: '代码优先', mixed: '混合' }
-  return map[pref] ?? '未设置'
+  if (pref && map[pref]) return map[pref]
+  const styleArr = (styleValue.value?.style ?? []) as string[]
+  if (styleArr.length > 0) return styleArr.join('、')
+  return '未设置'
 })
 const densityLabel = computed(() => {
   const d = styleValue.value?.example_density as string
@@ -111,7 +114,7 @@ const densityLabel = computed(() => {
 })
 
 const paceValue = computed(() => getDim('learning_pace')?.value)
-const paceMinutes  = computed(() => paceValue.value?.daily_minutes ?? '?')
+const paceMinutes  = computed(() => paceValue.value?.daily_minutes ?? paceValue.value?.minutes_per_day ?? '?')
 const paceUrgency  = computed(() => {
   const u = paceValue.value?.urgency as string
   const map: Record<string, string> = { relaxed: '宽松', normal: '正常', intensive: '紧凑' }

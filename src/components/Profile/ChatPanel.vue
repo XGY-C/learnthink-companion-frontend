@@ -173,7 +173,10 @@ async function sendMessage(text?: string) {
 
         for (const line of lines) {
           if (line.startsWith('event:')) eventType = line.slice(6).trim()
-          else if (line.startsWith('data:')) dataStr = line.slice(5).trim()
+          else if (line.startsWith('data:')) {
+            const val = line.slice(5)
+            dataStr = dataStr === '' ? val : dataStr + '\n' + val
+          }
         }
         if (!dataStr) continue
 
@@ -240,6 +243,9 @@ async function sendMessage(text?: string) {
             const msg = messages[msgIndex]
             // Replace entire message object to guarantee Vue reactivity trigger
             messages.splice(msgIndex, 1, { ...msg, text: msg.text + dataStr })
+            // 先等 Vue 完成 DOM 更新，再让出给浏览器渲染管道（rAF 保证在下一帧绘制前执行）
+            await nextTick()
+            await new Promise(resolve => requestAnimationFrame(resolve))
           }
         }
       }
@@ -258,12 +264,14 @@ async function sendMessage(text?: string) {
     }
 
     activeSession.value.messages[msgIndex].isStreaming = false
-    activeSession.value.updatedAt = new Date().toISOString()
 
     if (profileReadyVal) {
       profileVersionId.value = profileVersionIdVal
       loadProfileFromBackend()
     }
+    // 每轮对话后刷新画像（增量数据已异步保存）
+    profile.refreshProfile()
+
     if (generationReadyVal) {
       generationReady.value = true
       ElMessage.success('画像已就绪！AI 已为你准备了资源生成方案~')
@@ -305,7 +313,6 @@ async function triggerGenerate(topic?: string) {
         ],
         suggestionStyle: 'primary',
       })
-      activeSession.value.updatedAt = new Date().toISOString()
       ElMessage.success(`资源生成任务已创建 #${taskId}`)
       generateTopic.value = ''
       generationReady.value = false
@@ -370,11 +377,12 @@ async function startChat(courseId: string, forceNew = false) {
       role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, text: m.content,
     }))
     const existing = sessions.value.find(s => s.id === chatId.value)
-    if (existing) { existing.messages = msgs; existing.updatedAt = new Date().toISOString() }
+    if (existing) { existing.messages = msgs }
     else {
+      const nowIso = new Date().toISOString()
       sessions.value.unshift({
         id: chatId.value, title: msgs.length > 0 ? autoTitle(msgs) : '新会话',
-        messages: msgs, courseId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        messages: msgs, courseId, createdAt: nowIso, updatedAt: nowIso,
       })
     }
     activeSessionId.value = chatId.value
@@ -415,7 +423,7 @@ async function loadSessionMessages(sessionId: string) {
         thinking: m.thinking || undefined,
       }))
       const session = sessions.value.find(s => s.id === sessionId)
-      if (session) { session.messages = msgs; session.updatedAt = new Date().toISOString() }
+      if (session) { session.messages = msgs }
     }
   } catch (err) { console.error('loadSessionMessages failed:', err) }
 }
@@ -593,7 +601,8 @@ onMounted(() => initChat())
               </div>
               <!-- 正文 -->
               <div class="px-4 py-3 assistant-message-body">
-                <MarkdownViewer :content="msg.text" :showToc="false" />
+                <MarkdownViewer v-if="!msg.isStreaming" :content="msg.text" :showToc="false" />
+                <pre v-else class="streaming-text whitespace-pre-wrap text-sm leading-relaxed" style="color: var(--lt-text-primary); font-family: inherit; margin: 0;">{{ msg.text }}</pre>
                 <span v-if="msg.isStreaming && msg.text" class="streaming-cursor" />
               </div>
               <!-- v3.1: 资源生成建议按钮 -->

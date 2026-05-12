@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useProfileStore } from '@/stores/profile'
 import type { CourseInfo } from '@/stores/profile'
@@ -15,6 +15,10 @@ const isCollapsed = ref(false)
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
 }
+
+onMounted(() => {
+  profileStore.refreshProfile()
+})
 </script>
 
 <template>

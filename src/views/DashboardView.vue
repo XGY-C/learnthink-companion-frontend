@@ -33,8 +33,10 @@ echarts.use([RadarChart, CanvasRenderer])
 
 // ===== 响应式数据 =====
 
-/** 是否有画像（控制空状态） */
-const hasProfile = ref(true) // 默认 true 展示完整驾驶舱；false 展示空状态引导
+/** 是否有画像（基于 store 中的真实数据） */
+const hasProfile = computed(() =>
+  profile.fullProfile !== null && profile.fullProfile.dimensions.length > 0
+)
 
 /** 顶部 4 指标卡 */
 const metrics = computed(() => [

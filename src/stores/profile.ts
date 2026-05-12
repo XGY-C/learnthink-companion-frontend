@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { apiFetch } from '@/utils/api'
 import type { ProfileDimension, Profile, ProfileDelta, ProfileDimensionChange, ProfileDimensionItem } from '@/types'
 
 export interface CourseInfo {
@@ -25,7 +26,7 @@ export const useProfileStore = defineStore('profile', () => {
   function switchCourse(course: CourseInfo) {
     if (activeCourseId.value === course.id) return
     activeCourseId.value = course.id
-    // 课程切换后需重新加载该课程画像 — 由各页面 watch activeCourseId 自行处理
+    refreshProfile(course.id)
   }
   // ===== 可视化数据（雷达图/标签云用） =====
   const dimensions = ref<ProfileDimension[]>([
@@ -48,14 +49,36 @@ export const useProfileStore = defineStore('profile', () => {
     dimensions.value.map(d => ({ name: d.name, value: d.value }))
   )
 
-  const tags = computed(() => ({
-    weakness: dimensions.value.filter(d => d.category === 'weakness').map(d => d.name),
-    mastered: dimensions.value.filter(d => d.category === 'mastery' && d.value >= 70).map(d => d.name),
-    interest: ['前端工程化', 'Vue 生态', '性能优化'] as string[],
-  }))
+  const tags = computed(() => {
+    const kb = getDimValue('knowledge_basis')
+    const weak = (kb?.weak ?? []) as string[]
+    const strong = (kb?.strong ?? kb?.mastered ?? []) as string[]
+    const interestDim = getDimValue('interest_direction')
+    const interest = (interestDim?.topics ?? []) as string[]
 
-  const pace = computed(() => '15')
-  const preference = computed(() => '代码实操优先')
+    if (weak.length || strong.length || interest.length) {
+      return { weakness: weak, mastered: strong, interest }
+    }
+
+    return {
+      weakness: dimensions.value.filter(d => d.category === 'weakness').map(d => d.name),
+      mastered: dimensions.value.filter(d => d.category === 'mastery' && d.value >= 70).map(d => d.name),
+      interest: dimensions.value.filter(d => d.category === 'interest').map(d => d.name),
+    }
+  })
+
+  const pace = computed(() => {
+    const paceVal = getDimValue('learning_pace')
+    const minutes = paceVal?.minutes_per_day ?? paceVal?.daily_minutes
+    return minutes ? String(minutes) : ''
+  })
+
+  const preference = computed(() => {
+    const styleVal = getDimValue('cognitive_style')
+    const styles = (styleVal?.style ?? []) as string[]
+    if (styles.length > 0) return styles.join('、')
+    return ''
+  })
 
   function updateDimension(name: string, newValue: number) {
     const dim = dimensions.value.find(d => d.name === name)
@@ -146,7 +169,7 @@ export const useProfileStore = defineStore('profile', () => {
     // 将知识基础映射到兼容的旧可视化结构
     const kbDim = profileData.dimensions.find(d => d.key === 'knowledge_basis')
     if (kbDim) {
-      const mastered = (kbDim.value?.mastered ?? []) as string[]
+      const mastered = (kbDim.value?.strong ?? kbDim.value?.mastered ?? []) as string[]
       const weak = (kbDim.value?.weak ?? []) as string[]
       dimensions.value = []
       for (const topic of mastered) {
@@ -170,11 +193,41 @@ export const useProfileStore = defineStore('profile', () => {
     }
   }
 
+  function clearProfile() {
+    fullProfile.value = null
+    lastDelta.value = null
+    profileVersion.value = 'v0'
+    updatedAt.value = ''
+    dimensions.value = []
+  }
+
+  async function refreshProfile(courseId?: string) {
+    const targetCourse = courseId ?? activeCourseId.value
+    if (!targetCourse) return
+    try {
+      const res = await apiFetch<Profile | Record<string, any>>(
+        `/profile?course_id=${encodeURIComponent(targetCourse)}`
+      )
+      const data = res.data as Profile
+      if (!data || !data.dimensions || data.dimensions.length === 0) {
+        clearProfile()
+        return
+      }
+      loadFromProfile(data)
+    } catch (err) {
+      console.error('loadProfile failed:', err)
+    }
+  }
+
+  function getDimValue(key: ProfileDimensionItem['key']) {
+    return fullProfile.value?.dimensions?.find(d => d.key === key)?.value
+  }
+
   return {
     courses, activeCourseId, activeCourse, switchCourse,
     dimensions, profileVersion, updatedAt, fullProfile, lastDelta,
     radarData, tags, pace, preference,
     updateDimension, updateFromDialog,
-    applyDelta, applyDimensionChange, loadFromProfile,
+    applyDelta, applyDimensionChange, loadFromProfile, refreshProfile,
   }
 })
