@@ -157,6 +157,28 @@ export interface AgentThinkingTrace {
   timestamp: string
 }
 
+/** 前端思考链步骤（ChatPanel 用，由 SSE agent.thought 事件驱动） */
+export interface ThinkingStep {
+  label: string
+  icon: string
+  done: boolean
+  /** 原始阶段标识（CONTEXT | RETRIEVE | REFLECT | RAG | DECISION），用于步骤类型分类 */
+  phase?: string
+  /** 简短描述 */
+  detail?: string
+  /** 完整推理链字段 */
+  observation?: string
+  thought?: string
+  decision?: string
+  confidenceLevel?: string
+}
+
+/** 思考链记录（挂载在每条助手消息上） */
+export interface ThinkingRecord {
+  steps: ThinkingStep[]
+  expanded?: boolean
+}
+
 /** Agent 协作消息（SSE agent.message） */
 export interface AgentMessage {
   agent: string

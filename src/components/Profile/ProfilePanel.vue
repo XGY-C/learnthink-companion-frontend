@@ -125,7 +125,11 @@ const paceUrgency  = computed(() => {
 const majorValue = computed(() => getDim('major_context')?.value)
 const majorText  = computed(() => {
   if (!majorValue.value) return '未设置'
-  return `${majorValue.value.major ?? ''} · ${majorValue.value.course ?? ''}`.trim()
+  const UNKNOWN = new Set(['', '未知', 'unknown', 'null', '无'])
+  const parts = [majorValue.value.major, majorValue.value.course].filter(
+    (v): v is string => typeof v === 'string' && !UNKNOWN.has(v.trim())
+  )
+  return parts.join(' · ') || '未设置'
 })
 const majorGrade  = computed(() => majorValue.value?.grade as string || '')
 

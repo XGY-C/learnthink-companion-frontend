@@ -5,9 +5,13 @@ import { ChatLineRound, Plus, Delete, Fold, Expand, MagicStick } from '@element-
 import { useProfileStore } from '@/stores/profile'
 import { useRouter } from 'vue-router'
 import { apiFetch } from '@/utils/api'
+import type { ThinkingStep, ThinkingRecord } from '@/types'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
+import ThoughtChainTimeline from '@/components/ThoughtChainTimeline.vue'
 import LottieAnimation from '@/components/LottieAnimation.vue'
 import liveChatbotLottie from '@/assets/lottie/live-chatbot.json'
+import GenerationCard from '@/components/GenerationCard.vue'
+import { useSSE } from '@/composables/useSSE'
 
 const router = useRouter()
 const profile = useProfileStore()
@@ -18,14 +22,6 @@ interface Suggestion {
   sendAs: string
 }
 
-interface ThinkingStep {
-  label: string; icon: string; done: boolean; detail?: string
-}
-
-interface ThinkingRecord {
-  steps: ThinkingStep[]
-  expanded?: boolean
-}
 
 interface ChatMessage {
   role: 'assistant' | 'user'
@@ -155,7 +151,7 @@ async function sendMessage(text?: string) {
     const decoder = new TextDecoder()
     let buffer = ''
     let profileReadyVal = false, profileVersionIdVal: string | null = null
-    let generationReadyVal = false
+    let generationReadyVal = false, generationMetaVal: any = null
     let firstChunk = true, chunkCount = 0
 
     while (true) {
@@ -188,19 +184,24 @@ async function sendMessage(text?: string) {
               CONTEXT:  { label: '理解上下文', icon: '📋' },
               RETRIEVE: { label: '检索知识库', icon: '🔗' },
               REFLECT:  { label: '评估画像',   icon: '🎯' },
+              RAG:      { label: '检索分析',   icon: '🔍' },
+              DECISION: { label: '决策判断',   icon: '⚖️' },
             }
-            const meta = phaseLabels[parsed.phase]
-            if (meta) {
-              const step: ThinkingStep = {
-                label: meta.label,
-                icon: meta.icon,
-                done: true,
-                detail: parsed.observation || parsed.thought || '',
-              }
-              // Avoid duplicate steps for the same phase
-              if (!thinkingSteps.some(s => s.label === meta.label)) {
-                thinkingSteps.push(step)
-              }
+            const meta = phaseLabels[parsed.phase] || { label: parsed.phase, icon: '●' }
+            const step: ThinkingStep = {
+              label: meta.label,
+              icon: meta.icon,
+              done: true,
+              phase: parsed.phase || undefined,
+              detail: parsed.observation || parsed.thought || '',
+              observation: parsed.observation || undefined,
+              thought: parsed.thought || undefined,
+              decision: parsed.decision || undefined,
+              confidenceLevel: parsed.confidenceLevel || undefined,
+            }
+            // Avoid duplicate steps for the same phase
+            if (!thinkingSteps.some(s => s.label === meta.label)) {
+              thinkingSteps.push(step)
             }
 
             if (parsed.phase === 'REFLECT') {
@@ -217,6 +218,7 @@ async function sendMessage(text?: string) {
             profileReadyVal = parsed.profileReady ?? false
             profileVersionIdVal = parsed.profileVersionId || null
             generationReadyVal = parsed.generationReady ?? false
+            generationMetaVal = parsed.generationMeta
           } catch { /* fall through */ }
           // Finalize thinking card with whatever real steps we have
           if (activeSession.value) {
@@ -274,7 +276,20 @@ async function sendMessage(text?: string) {
 
     if (generationReadyVal) {
       generationReady.value = true
-      ElMessage.success('画像已就绪！AI 已为你准备了资源生成方案~')
+      // 在对话流中内联推送确认卡片，用户确认后再触发生成
+      const genKind = (generationMetaVal as any)?.stage === 'ready' ? 'explicit' : 'offer'
+      const lastUserMsg = [...activeSession.value.messages].reverse().find(m => m.role === 'user')?.text || ''
+      activeSession.value.messages.push({
+        role: 'assistant',
+        text: genKind === 'explicit'
+          ? '检测到你需要生成学习资源，是否确认启动？'
+          : '你的学习画像已就绪，是否为你生成个性化学习资源？',
+        suggestions: [
+          { text: '✅ 确认生成', sendAs: `__generate__:${lastUserMsg}` },
+          { text: '⏸ 稍后再说', sendAs: '' },
+        ],
+        suggestionStyle: 'primary',
+      })
       nextTick(() => {
         const el = document.querySelector('.overflow-y-auto[style*="grid-row: 2"]')
         if (el) el.scrollTop = el.scrollHeight
@@ -289,6 +304,49 @@ async function sendMessage(text?: string) {
   }
 }
 
+// ===== 任务 SSE 管理 =====
+interface TaskCardState {
+  taskId: string; topic: string; status: 'generating' | 'done' | 'failed'
+  progress: number; resourceTypes: string[]; readyCount: number; totalCount: number
+  errorMessage?: string
+}
+const taskCards = ref<Record<string, TaskCardState>>({})
+const taskSSE = useSSE()
+
+function connectTaskSSE(taskId: string, topic: string) {
+  if (!taskSSE) return
+  taskCards.value[taskId] = { taskId, topic, status: 'generating', progress: 0, resourceTypes: [], readyCount: 0, totalCount: 0 }
+  taskSSE.connect(taskId, {
+    onStage(data) {
+      const card = taskCards.value[taskId]
+      if (!card) return
+      card.progress = data.percent || 0
+      const rts = data.stats?.resourceTypes
+      if (rts && Array.isArray(rts) && rts.length > 0) {
+        card.resourceTypes = rts
+        card.totalCount = rts.length
+      }
+    },
+    onResourceReady(data) {
+      const card = taskCards.value[taskId]
+      if (!card) return
+      card.readyCount++
+      card.totalCount = Math.max(card.totalCount, card.readyCount)
+      if (data.type && !card.resourceTypes.includes(data.type)) {
+        card.resourceTypes = [...card.resourceTypes, data.type]
+      }
+    },
+    onTaskDone() {
+      const card = taskCards.value[taskId]
+      if (card) card.status = 'done'
+    },
+    onTaskFailed(data) {
+      const card = taskCards.value[taskId]
+      if (card) { card.status = 'failed'; card.errorMessage = data.message || '生成失败' }
+    },
+  })
+}
+
 // ===== API: 触发资源生成 =====
 async function triggerGenerate(topic?: string) {
   const topicText = topic || generateTopic.value.trim()
@@ -300,18 +358,26 @@ async function triggerGenerate(topic?: string) {
   try {
     const res = await apiFetch<{ taskId: string }>('/tasks/generate', {
       method: 'POST',
-      body: { course_id: profile.activeCourseId, topic: topicText, profile_version: profile.fullProfile?.version || 1 },
+      body: { courseId: profile.activeCourseId, topic: topicText, profileVersion: profile.fullProfile?.version || 1 },
     })
     if (res.data?.taskId) {
       const taskId = res.data.taskId
+      connectTaskSSE(taskId, topicText)
       activeSession.value.messages.push({
         role: 'assistant',
-        text: `好的！我已经为你启动了「**${topicText}**」的资源包生成。\n\nPlanner 正在分析你的学习画像，自主判断最适合你的资源组合…`,
+        text: `好的！我已经为你启动了「${topicText}」的资源包生成。`,
         suggestions: [
           { text: '前往工作室查看进度', sendAs: `/studio?task_id=${taskId}` },
           { text: '继续聊天', sendAs: '' },
         ],
         suggestionStyle: 'primary',
+      })
+      // Push a GenerationCard after the text message
+      activeSession.value.messages.push({
+        role: 'assistant',
+        text: '',
+        // @ts-ignore — generation card meta
+        _generationCard: { taskId, topic: topicText },
       })
       ElMessage.success(`资源生成任务已创建 #${taskId}`)
       generateTopic.value = ''
@@ -469,7 +535,14 @@ function formatSessionTime(iso: string): string {
 }
 
 function handleSuggestionClick(suggestion: { text: string; sendAs: string }) {
-  if (suggestion.sendAs.startsWith('/studio')) router.push(suggestion.sendAs)
+  if (suggestion.sendAs.startsWith('__generate__:')) {
+    // Extract topic from user message and trigger generation
+    const msg = suggestion.sendAs.slice('__generate__:'.length)
+    // Simple topic extraction: look for content after "生成/做/创建"
+    const topicMatch = msg.match(/(?:生成|做|创建|帮[我]?[做个]).{0,5}?([\u4e00-\u9fa5a-zA-Z0-9+]{2,30})/)
+    const topic = topicMatch ? topicMatch[1] : msg.slice(0, 20)
+    triggerGenerate(topic)
+  } else if (suggestion.sendAs.startsWith('/studio')) router.push(suggestion.sendAs)
   else if (suggestion.sendAs) sendMessage(suggestion.sendAs)
 }
 
@@ -574,33 +647,23 @@ onMounted(() => initChat())
           <div v-for="(msg, idx) in activeSession.messages" :key="idx" class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
             <!-- AI 消息 -->
             <div v-if="msg.role === 'assistant'" class="max-w-[72%] rounded-xl text-sm leading-relaxed" style="border: 1px solid var(--lt-border); border-left: 3px solid var(--lt-brand); background-color: var(--lt-bg-card); border-radius: 12px; overflow: hidden;">
-              <!-- 思考过程（v3.1: 由 agent.thought 事件驱动） -->
-              <div v-if="msg.thinking" class="msg-thinking">
-                <button class="msg-think-toggle" @click="msg.thinking!.expanded = !msg.thinking!.expanded">
-                  <span class="msg-think-icon">{{ msg.thinking.steps.every(s => s.done) ? '✅' : '●' }}</span>
-                  <span v-if="msg.thinking.steps.every(s => s.done) && !msg.isStreaming">
-                    思考完成 · 点击查看
-                  </span>
-                  <span v-else>
-                    思考中 · {{ msg.thinking.steps.filter(s => s.done).length }}/{{ msg.thinking.steps.length }}
-                  </span>
-                  <span v-if="msg.isStreaming" class="ml-1 inline-block w-2.5 h-2.5 border-2 border-l-transparent rounded-full animate-spin" style="border-color: var(--lt-brand) transparent var(--lt-brand) var(--lt-brand);"></span>
-                  <span class="msg-think-arrow" :class="{ rotated: msg.thinking.expanded }">▾</span>
-                </button>
-                <div v-if="msg.thinking.expanded" class="msg-think-body">
-                  <div v-for="(s, si) in msg.thinking.steps" :key="si" class="msg-think-step">
-                    <span class="msg-think-step-icon">{{ s.icon }}</span>
-                    <div class="flex-1 min-w-0">
-                      <span class="msg-think-step-label" :style="{ opacity: s.done ? 1 : 0.5 }">{{ s.label }}</span>
-                      <span v-if="s.detail && s.done" class="block text-xs mt-0.5" style="color: var(--lt-text-auxiliary);">{{ s.detail }}</span>
-                    </div>
-                    <span v-if="s.done" style="color: var(--lt-success); font-size: 11px;">✓</span>
-                    <span v-else class="inline-block w-2.5 h-2.5 border-2 border-l-transparent rounded-full animate-spin" style="border-color: var(--lt-brand) transparent var(--lt-brand) var(--lt-brand);"></span>
-                  </div>
-                </div>
-              </div>
+              <!-- 思考过程（ThoughtChainTimeline 时间线组件） -->
+              <ThoughtChainTimeline
+                v-if="msg.thinking"
+                :steps="msg.thinking.steps"
+                :is-streaming="msg.isStreaming"
+                :expanded="msg.thinking.expanded || false"
+                @update:expanded="msg.thinking.expanded = $event"
+                class="mx-3 mb-2"
+              />
+              <!-- GenerationCard（资源生成状态卡片） -->
+              <GenerationCard
+                v-if="(msg as any)._generationCard"
+                v-bind="taskCards[(msg as any)._generationCard.taskId] || (msg as any)._generationCard"
+                class="mx-3 mb-2"
+              />
               <!-- 正文 -->
-              <div class="px-4 py-3 assistant-message-body">
+              <div v-if="!(msg as any)._generationCard" class="px-4 py-3 assistant-message-body">
                 <MarkdownViewer v-if="!msg.isStreaming" :content="msg.text" :showToc="false" />
                 <pre v-else class="streaming-text whitespace-pre-wrap text-sm leading-relaxed" style="color: var(--lt-text-primary); font-family: inherit; margin: 0;">{{ msg.text }}</pre>
                 <span v-if="msg.isStreaming && msg.text" class="streaming-cursor" />
@@ -662,21 +725,5 @@ onMounted(() => initChat())
 .assistant-message-body :deep(.markdown-content) { font-size: 14px; line-height: 1.7; }
 .assistant-message-body :deep(.markdown-content p) { margin: 4px 0; }
 .assistant-message-body :deep(.markdown-content pre) { margin: 8px 0; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.animate-spin { animation: spin 0.8s linear infinite; }
 
-.msg-thinking { border-bottom: 1px solid rgba(52,199,89,0.1); background-color: rgba(52,199,89,0.03); }
-.msg-think-toggle {
-  display: flex; align-items: center; gap: 6px; width: 100%;
-  padding: 8px 16px; border: none; background: transparent; cursor: pointer;
-  font-size: 12px; color: var(--lt-text-auxiliary); transition: background 0.15s;
-}
-.msg-think-toggle:hover { background-color: rgba(52,199,89,0.06); }
-.msg-think-icon { font-size: 11px; font-weight: 700; color: var(--lt-success); }
-.msg-think-arrow { font-size: 10px; transition: transform 0.2s; margin-left: auto; }
-.msg-think-arrow.rotated { transform: rotate(180deg); }
-.msg-think-body { padding: 4px 16px 10px; }
-.msg-think-step { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; }
-.msg-think-step-icon { font-size: 11px; flex-shrink: 0; width: 16px; text-align: center; padding-top: 1px; }
-.msg-think-step-label { font-size: 12px; }
 </style>

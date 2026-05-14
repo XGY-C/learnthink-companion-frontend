@@ -46,6 +46,7 @@
         <div class="flex justify-end gap-2 pt-3" style="border-top: 1px solid var(--lt-border);">
           <template v-if="status === 'ready'">
             <el-button size="small" @click="$emit('preview')">预览</el-button>
+            <el-button v-if="type === 'doc' || type === 'code'" size="small" plain @click="$emit('download')">下载</el-button>
             <el-button size="small" plain type="info" @click="$emit('regenerate')">重生成</el-button>
           </template>
           <template v-else-if="status === 'rejected' || status === 'failed'">
@@ -75,7 +76,7 @@ const props = defineProps<{
   rejectReason?: string
 }>()
 
-defineEmits(['preview', 'view-sources', 'regenerate'])
+defineEmits(['preview', 'view-sources', 'regenerate', 'download'])
 
 import { RESOURCE_TYPE_LABEL, RESOURCE_TYPE_TAG, CONFIDENCE_CONFIG } from '@/constants'
 
