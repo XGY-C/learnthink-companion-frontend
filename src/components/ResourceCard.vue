@@ -1,5 +1,5 @@
 <template>
-  <el-card class="resource-card h-full flex flex-col relative" :body-style="{ padding: '16px', display: 'flex', flexDirection: 'column', height: '100%', flexGrow: 1 }">
+  <el-card class="resource-card h-full flex flex-col relative card-elevated !overflow-visible" :body-style="{ padding: '16px', display: 'flex', flexDirection: 'column', height: '100%', flexGrow: 1, overflow: 'visible' }">
         <div v-if="status === 'pending'" class="h-full flex flex-col justify-center items-center py-6 gap-3">
           <el-skeleton animated :rows="3" />
           <span class="text-sm" style="color: var(--lt-text-auxiliary);">等待该资源生成...</span>
@@ -46,7 +46,18 @@
         <div class="flex justify-end gap-2 pt-3" style="border-top: 1px solid var(--lt-border);">
           <template v-if="status === 'ready'">
             <el-button size="small" @click="$emit('preview')">预览</el-button>
-            <el-button v-if="type === 'doc' || type === 'code'" size="small" plain @click="$emit('download')">下载</el-button>
+            <el-button v-if="type === 'code'" size="small" plain @click="$emit('download', 'py')">下载 .py</el-button>
+            <el-dropdown v-else-if="type === 'doc' || type === 'reading'" size="small" @command="(cmd: string) => $emit('download', cmd)">
+              <el-button size="small" plain>
+                下载 <el-icon class="ml-1"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="docx">下载 DOCX</el-dropdown-item>
+                  <el-dropdown-item command="md">下载 Markdown</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button size="small" plain type="info" @click="$emit('regenerate')">重生成</el-button>
           </template>
           <template v-else-if="status === 'rejected' || status === 'failed'">
@@ -63,6 +74,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { ArrowDown } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   title: string
@@ -76,7 +88,12 @@ const props = defineProps<{
   rejectReason?: string
 }>()
 
-defineEmits(['preview', 'view-sources', 'regenerate', 'download'])
+defineEmits<{
+  (e: 'preview'): void
+  (e: 'view-sources'): void
+  (e: 'regenerate'): void
+  (e: 'download', format: string): void
+}>()
 
 import { RESOURCE_TYPE_LABEL, RESOURCE_TYPE_TAG, CONFIDENCE_CONFIG } from '@/constants'
 

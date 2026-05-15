@@ -18,12 +18,13 @@ import {
   Aim,
   TrendCharts,
   Reading,
-  DataBoard,
   User,
   MagicStick
 } from '@element-plus/icons-vue'
 import { useProfileStore } from '@/stores/profile'
 import { usePathStore } from '@/stores/path'
+import EmptyState from '@/components/EmptyState.vue'
+import DashboardIcon from '@/components/icons/DashboardIcon.vue'
 
 const router = useRouter()
 const profile = useProfileStore()
@@ -223,6 +224,13 @@ const refreshMetrics = () => {
   ElMessage.success('已刷新仪表盘数据')
 }
 
+/** 指标卡点击跳转 */
+const metricRoutes = ['/chat', '/chat', '/studio', '/path']
+function handleMetricClick(idx: number) {
+  const route = metricRoutes[idx]
+  if (route) router.push(route)
+}
+
 // ===== 模拟数据加载 =====
 onMounted(() => {
   // 可在此发起 API 请求获取真实数据
@@ -235,9 +243,7 @@ onMounted(() => {
     <div class="flex items-center justify-between">
             <div>
         <h1 class="text-2xl font-bold flex items-center gap-2" style="color: var(--lt-text-primary);">
-            <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
-              <el-icon size="18" color="white"><DataBoard /></el-icon>
-            </div>
+            <DashboardIcon :size="36" :animated="true" />
             <span>学习驾驶舱</span>
           </h1>
           <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">基于多智能体画像驱动的个性化学习概览</p>
@@ -280,7 +286,7 @@ onMounted(() => {
             <!-- 1. 顶部概览条：4 个指标卡（增强版） -->
       <el-row :gutter="20">
         <el-col v-for="(metric, idx) in metrics" :key="idx" :xs="12" :sm="6" class="mb-4">
-          <el-card shadow="never" class="metric-card group" :body-style="{ padding: '20px' }" style="border: 1px solid var(--lt-border); border-radius: 12px;">
+          <el-card shadow="never" class="metric-card group cursor-pointer" :body-style="{ padding: '20px' }" style="border: 1px solid var(--lt-border); border-radius: 12px;" @click="handleMetricClick(idx)">
             <div class="flex items-center gap-4">
               <div
                 class="w-12 h-12 rounded-xl flex items-center justify-center text-lg shrink-0 transition-all duration-300 group-hover:scale-110 group-hover:shadow-sm"
@@ -574,11 +580,11 @@ onMounted(() => {
 .metric-card {
   position: relative;
   overflow: hidden;
-  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s ease;
+  transition: transform var(--lt-transition-smooth), box-shadow var(--lt-transition-smooth);
 }
 .metric-card:hover {
   transform: translateY(-3px);
-  box-shadow: 0 4px 16px rgba(43, 111, 255, 0.12) !important;
+  box-shadow: var(--lt-shadow-hover) !important;
 }
 
 /* 渐变装饰条动画 */

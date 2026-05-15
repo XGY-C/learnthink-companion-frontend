@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { VideoPlay, Monitor, Search, Medal } from '@element-plus/icons-vue'
+import PathIcon from '@/components/icons/PathIcon.vue'
 
 const router = useRouter()
 
@@ -135,8 +136,11 @@ const getTimelineIcon = (node: PathNode) => {
     <!-- 顶部状态栏 -->
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-bold" style="color: #1A1A2E;">学习路径规划</h1>
-          <p class="text-sm mt-1" style="color: #8E8EA0;">根据你的画像实时动态生成的学习地图</p>
+        <div class="flex items-center gap-3 mb-1">
+          <PathIcon :size="36" />
+          <h1 class="text-2xl font-bold" style="color: #1A1A2E;">学习路径规划</h1>
+        </div>
+        <p class="text-sm mt-1 ml-[44px]" style="color: #8E8EA0;">根据你的画像实时动态生成的学习地图</p>
       </div>
       <el-button type="primary" :icon="Search" plain @click="drawerVisible = false">
         重新规划路径

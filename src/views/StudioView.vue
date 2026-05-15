@@ -1,44 +1,18 @@
 <template>
   <div class="studio-view p-6">
-    <!-- 空状态：无 task_id 且无 pack_id -->
-    <div v-if="!taskId && !packId" class="text-center py-20 rounded-lg border border-dashed" style="background-color: var(--lt-bg-card); border-color: var(--lt-brand-lighter);">
-      <el-icon class="text-4xl mb-4" style="color: var(--lt-brand-lighter);"><MagicStick /></el-icon>
-      <h3 class="text-lg font-medium mb-2" style="color: var(--lt-text-secondary);">在对话中让 AI 帮你生成学习资源</h3>
-      <p class="text-sm mb-6" style="color: var(--lt-text-placeholder);">生成由 Planner 根据你的画像自主决策资源类型组合</p>
-      <el-button type="primary" size="large" @click="$router.push('/chat')">
-        <el-icon class="mr-1"><ChatLineRound /></el-icon>前往对话页
+    <!-- 返回按钮 -->
+    <div class="mb-4">
+      <el-button link @click="$router.push('/studio')">
+        <el-icon class="mr-1"><ArrowLeft /></el-icon>返回任务列表
       </el-button>
     </div>
 
-    <!-- 有任务或历史包 -->
-    <template v-else>
-      <div v-if="!taskId && !packId" class="studio-sidebar">
-        <div class="text-sm font-semibold mb-3" style="color: var(--lt-text-primary);">📦 历史资源包</div>
-        <div
-          v-for="p in packList" :key="p.pack_id"
-          class="pack-list-item"
-          :class="{ 'pack-active': packId === p.pack_id }"
-          @click="selectPack(p)"
-        >
-          <div class="pack-item-topic">{{ p.topic }}</div>
-          <div class="pack-item-meta">
-            <span>{{ p.created_at ? new Date(p.created_at).toLocaleDateString('zh-CN') : '' }}</span>
-            <span v-if="p.task_id" class="text-[10px] px-1.5 py-0.5 rounded" style="background-color: rgba(52,199,89,0.1); color: var(--lt-success);">✅</span>
-          </div>
-        </div>
-        <div v-if="packList.length === 0" class="text-center py-8 text-xs" style="color: var(--lt-text-placeholder);">
-          暂无历史资源包
-        </div>
-      </div>
-
-      <div class="studio-content">
+    <div v-if="taskId || packId" class="studio-content">
       <!-- 页面标题 + task_id -->
         <div class="flex justify-between items-center mb-6">
           <div>
             <div class="flex items-center gap-3">
-              <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
-                <el-icon size="18" color="white"><MagicStick /></el-icon>
-              </div>
+              <StudioIcon :size="36" />
               <h2 class="text-2xl font-bold m-0" style="color: var(--lt-text-primary);">{{ pageTitle }}</h2>
             </div>
             <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">{{ pageSubtitle }}</p>
@@ -137,7 +111,7 @@
             @preview="previewResource(res)"
             @view-sources="viewSources(res)"
             @regenerate="regenerateResource(res)"
-            @download="downloadResource(res)"
+            @download="downloadResource(res, $event)"
           />
         </div>
   
@@ -156,17 +130,38 @@
             </el-radio-group>
             <span v-else />
             <div class="flex items-center gap-2 ml-auto text-sm">
-              <el-button v-if="currentPreview.type === 'code'" size="small" @click="copyCode(currentPreview.deepContent || currentPreview.brief || '')">复制代码</el-button>
-              <el-button v-if="currentPreview.type === 'doc' || currentPreview.type === 'code'" size="small" @click="downloadResource(currentPreview)">下载</el-button>
+              <template v-if="currentPreview.type === 'code'">
+                <el-button size="small" @click="downloadResource(currentPreview)">下载 .py</el-button>
+              </template>
+              <el-dropdown v-else-if="currentPreview.type === 'doc' || currentPreview.type === 'reading'" size="small" @command="(cmd: string) => cmd === 'docx' ? downloadResource(currentPreview) : downloadMdResource(currentPreview)">
+                <el-button size="small" type="primary">
+                  下载 <el-icon class="ml-1"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="docx">下载 DOCX</el-dropdown-item>
+                    <el-dropdown-item command="md">下载 Markdown</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
               <span class="text-slate-500">质量分 {{ currentPreview.qualityScore }}/100</span>
               <el-button link type="primary" size="small" @click="viewSources(currentPreview)">引用证据</el-button>
             </div>
           </div>
-          <div v-if="currentPreview.type === 'mindmap'" class="min-h-[400px] border border-slate-200 rounded-lg overflow-hidden">
-            <MindmapViewer :content="previewContent" />
+          <div v-if="currentPreview.type === 'mindmap'" class="min-h-[600px] border border-slate-200 rounded-lg">
+            <MindmapViewer ref="mindmapViewerRef" :content="currentPreview.deepContent || currentPreview.brief || ''" :isJson="true" />
+          </div>
+          <!-- 导出按钮：仅思维导图时显示 -->
+          <div v-if="currentPreview.type === 'mindmap'" class="flex gap-2 mt-3">
+            <el-button size="small" @click="mindmapViewerRef?.exportSvg(currentPreview.title + '.svg')">
+              <el-icon class="mr-1"><Download /></el-icon>导出 SVG
+            </el-button>
+            <el-button size="small" @click="mindmapViewerRef?.exportPng(currentPreview.title + '.png')">
+              <el-icon class="mr-1"><Download /></el-icon>导出 PNG
+            </el-button>
           </div>
           <div v-else-if="currentPreview.type === 'code'" class="bg-slate-50 rounded-lg overflow-hidden">
-            <MarkdownViewer :content="'```python\n' + (currentPreview.deepContent || currentPreview.brief || '') + '\n```'" :showToc="false" />
+            <MarkdownViewer :content="currentPreview.deepContent || currentPreview.brief || ''" :showToc="false" />
           </div>
           <div v-else>
             <MarkdownViewer :content="previewContent" :showToc="previewMode === 'deep'" />
@@ -174,8 +169,7 @@
         </div>
       </el-dialog>
   
-      </div><!-- /studio-content -->
-    </template><!-- /v-else -->
+    </div><!-- /studio-content -->
   
     <EvidenceDrawer ref="evidenceDrawerRef" />
   </div><!-- /studio-view -->
@@ -183,7 +177,6 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { useProfileStore } from '@/stores/profile'
 
 const AGENT_COLORS: Record<string, string> = {
   ConversationAgent: '#2B6FFF',
@@ -202,8 +195,9 @@ function formatTime(iso: string): string {
 }
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { MagicStick, ChatLineRound } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowDown, Download } from '@element-plus/icons-vue'
 import type { AgentThinkingTrace, PlannerDecision, ResourceItem } from '@/types'
+import StudioIcon from '@/components/icons/StudioIcon.vue'
 import PipelineStepper from '../components/PipelineStepper.vue'
 import ResourceCard from '../components/ResourceCard.vue'
 import EvidenceDrawer from '../components/EvidenceDrawer.vue'
@@ -212,14 +206,15 @@ import MindmapViewer from '../components/MindmapViewer.vue'
 import { useTaskStore } from '@/stores/task'
 import { useSSE } from '@/composables/useSSE'
 import { apiFetch } from '@/utils/api'
+import { markdownToDocxBlob, downloadDocx, preprocessLatexForMarkdown } from '@/utils/docxExport'
 
 const route = useRoute()
 const router = useRouter()
 const taskStore = useTaskStore()
 const { status: sseStatus, connect: sseConnect, disconnect: sseDisconnect } = useSSE()
 
-const taskId = ref<string>('')
-const packId = ref<string>('')
+const taskId = ref<string>((route.params.taskId as string) || '')
+const packId = ref<string>((route.query.pack_id as string) || '')
 const isComplete = ref(false)
 
 const currentStage = ref('profile')
@@ -235,46 +230,40 @@ const showAllThoughts = ref(false)
 const previewVisible = ref(false)
 const currentPreview = ref<any>(null)
 
-// 多包侧栏
-const profileStore = useProfileStore()
-interface PackSummary { pack_id: string; topic: string; created_at: string; task_id?: string }
-const packList = ref<PackSummary[]>([])
-async function loadPackList() {
-  try {
-    const res = await apiFetch<PackSummary[]>(`/resources/packs?course_id=${profileStore.activeCourseId}`)
-    if (res.data) packList.value = res.data
-  } catch {}
-}
-function selectPack(pack: PackSummary) {
-  router.push(`/studio?pack_id=${pack.pack_id}`)
-}
 const previewMode = ref('brief')
 const evidenceDrawerRef = ref<any>(null)
+const mindmapViewerRef = ref<{ exportSvg: (filename?: string) => void; exportPng: (filename?: string) => Promise<void> } | null>(null)
 
-function downloadResource(res: any) {
+async function downloadResource(res: any, format = 'docx') {
   const content = res.deepContent || res.brief || ''
-  const ext = res.type === 'code' ? 'py' : 'md'
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${res.title || 'resource'}.${ext}`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-function copyCode(code: string) {
-  navigator.clipboard.writeText(code).then(() => {
-    ElMessage.success('代码已复制到剪贴板')
-  }).catch(() => {
-    ElMessage.warning('复制失败，请手动选择代码复制')
-  })
+  if (res.type === 'code' || format === 'py') {
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${res.title || 'resource'}.py`
+    a.click()
+  } else if (format === 'md') {
+    downloadMdResource(res)
+  } else {
+    const blob = await markdownToDocxBlob(content, res.title)
+    downloadDocx(blob, res.title || 'resource')
+  }
 }
 
+function downloadMdResource(res: any) {
+  const raw = res.deepContent || res.brief || ''
+  const content = preprocessLatexForMarkdown(raw)
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${res.title || 'resource'}.md`
+  a.click()
+}
 // Mock resource data for historical packs
 const mockResources: Record<string, any[]> = {
   'pack_demo_1': [
     { id: 'r1', type: 'doc', title: 'A* 搜索算法核心讲解', status: 'ready', confidence: 'high', sourcesCount: 8, qualityScore: 92, brief: '从直觉到实现，逐层剖析 A* 算法的核心原理与优化技巧。', pushReasons: ['针对薄弱点: A* 搜索', '偏好: 代码实操'], sources: [{ title: '算法导论', locator: 'Ch 22.3', quote: '...', relevance: 'high' }] },
-    { id: 'r2', type: 'mindmap', title: '搜索算法家族概念导图', status: 'ready', confidence: 'high', sourcesCount: 5, qualityScore: 88, brief: '以 A* 为核心的知识结构全景图，包含 Dijkstra、贪心搜索等变体关系。', pushReasons: ['偏好: 图解优先'] },
+    { id: 'r2', type: 'mindmap', title: '搜索算法家族概念导图', status: 'ready', confidence: 'high', sourcesCount: 5, qualityScore: 88, brief: '以 A* 为核心的知识结构全景图，包含 Dijkstra、贪心搜索等变体关系。', deepContent: JSON.stringify({ root: { text: '搜索算法家族', children: [{ text: '无信息搜索', children: [{ text: 'BFS 广度优先' }, { text: 'DFS 深度优先' }] }, { text: '启发式搜索', children: [{ text: 'A* 算法', children: [{ text: 'f(n)=g(n)+h(n)' }, { text: '可采纳性' }] }, { text: '贪心最佳优先' }] }, { text: '局部搜索', children: [{ text: '爬山法' }, { text: '模拟退火' }] }] } }), pushReasons: ['偏好: 图解优先'] },
     { id: 'r3', type: 'quiz', title: '基础概念与变式练习', status: 'ready', confidence: 'medium', sourcesCount: 6, qualityScore: 85, brief: '10 道分层练习（单选+填空+简答），覆盖核心概念与常见误区。', pushReasons: ['应试目标', '薄弱点巩固'] },
     { id: 'r4', type: 'code', title: '实战：迷宫寻路探秘', status: 'ready', confidence: 'high', sourcesCount: 3, qualityScore: 90, brief: 'Python 完整实现，含测试用例与可视化输出。', pushReasons: ['偏好: 代码实操'] },
   ],
@@ -323,8 +312,29 @@ function typeLabel(type: string): string {
   return map[type] || type
 }
 
+function extractBrief(content: string | undefined | null): string {
+  if (!content) return ''
+  // Try JSON (mindmap / quiz)
+  if (content.startsWith('{') || content.startsWith('[')) return ''
+  // Strip markdown headers, bold, blockquotes, code blocks, links, images, HTML
+  let text = content
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^>\s*/gm, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/!\[.*?\]\(.*?\)/g, '')
+    .replace(/\[([^\]]+)\]\(.*?\)/g, '$1')
+    .replace(/<\/?[^>]+>/g, '')
+    .replace(/\n\s*\n/g, '\n')
+    .trim()
+  // Take first paragraph that has real content
+  const lines = text.split('\n').filter(l => l.trim().length > 10)
+  return lines[0]?.trim().substring(0, 200) || ''
+}
+
 // Connect SSE for live task
-function connectTaskStream(tid: string) {
+async function connectTaskStream(tid: string) {
   hasStarted.value = true
   taskStore.createTask(tid)
 
@@ -336,6 +346,49 @@ function connectTaskStream(tid: string) {
     type,
     status: 'pending' as const,
   }))
+
+  // Poll current task state to restore progress after page refresh
+  try {
+    const res = await apiFetch<any>(`/tasks/${tid}`)
+    if (res.data) {
+      const d = res.data
+      currentStage.value = d.stage || currentStage.value
+      currentPercent.value = d.percent || 0
+      if (d.message) currentMessage.value = d.message
+      taskStore.updateTask(tid, {
+        stage: d.stage,
+        percent: d.percent,
+        message: d.message,
+      })
+      if (d.status === 'SUCCEEDED') {
+        isComplete.value = true
+        taskStore.completeTask(tid, d.pack_id)
+        if (d.pack_id) {
+          packId.value = d.pack_id
+          await loadPack(d.pack_id) // load full resource list (includes deepContent)
+        } else {
+          resources.value = (d.resources || []).map((r: any, i: number) => ({
+            id: r.id || `res-${i}`,
+            title: r.title || '',
+            type: r.type,
+            status: 'ready',
+            confidence: r.confidence || 'medium',
+            sourcesCount: r.sources_count || 0,
+            qualityScore: r.quality_score || 85,
+            brief: r.brief || '已生成',
+          }))
+        }
+        return // task done, no need for SSE
+      }
+      if (d.status === 'FAILED') {
+        taskStore.failTask(tid, d.error_message || '生成失败')
+        currentMessage.value = d.error_message || '生成失败'
+        return
+      }
+    }
+  } catch {
+    // Task not found yet or server error — SSE will catch up
+  }
 
   sseConnect(tid, {
     onStage(data) {
@@ -396,7 +449,10 @@ function connectTaskStream(tid: string) {
     onTaskDone(data) {
       isComplete.value = true
       taskStore.completeTask(tid, data.packId)
-      if (data.packId) packId.value = data.packId
+      if (data.packId) {
+        packId.value = data.packId
+        loadPack(data.packId)
+      }
       if (data.plannerRationale && !plannerDecision.value) {
         plannerDecision.value = {
           selectedTypes: data.resourceTypes || [],
@@ -406,23 +462,26 @@ function connectTaskStream(tid: string) {
           difficulty: '',
         }
       }
-      // Ensure all pending cards have content
-      resources.value.forEach(r => {
-        if (r.status === 'pending') {
-          r.status = 'ready'
-          r.title = `${typeLabel(r.type)}已生成`
-          r.confidence = 'medium'
-          r.sourcesCount = 0
-          r.qualityScore = 75
-          r.brief = '生成完成'
-        }
-      })
+      // Fallback for any pending cards when no packId available
+      if (!data.packId) {
+        resources.value.forEach(r => {
+          if (r.status === 'pending') {
+            r.status = 'ready'
+            r.title = `${typeLabel(r.type)}已生成`
+            r.confidence = 'medium'
+            r.sourcesCount = 0
+            r.qualityScore = 75
+            r.brief = '生成完成'
+          }
+        })
+      }
     },
 
     onTaskFailed(data) {
       isComplete.value = false
-      taskStore.failTask(tid, data.message)
-      currentMessage.value = `生成失败: ${data.message}`
+      const msg = data.error?.message || data.message || '服务器内部错误'
+      taskStore.failTask(tid, msg)
+      currentMessage.value = `生成失败: ${msg}`
     },
   })
 }
@@ -442,7 +501,7 @@ async function loadPack(pid: string) {
         confidence: r.confidence || 'high',
         sourcesCount: r.sourcesCount || r.sources?.length || 0,
         qualityScore: r.qualityScore || r.metadata?.quality_score || 85,
-        brief: r.brief || '',
+        brief: r.brief || extractBrief(r.content) || '',
         deepContent: r.content || '',
         pushReasons: r.pushReasons || [],
         sources: r.sources || [],
@@ -471,24 +530,22 @@ async function loadPack(pid: string) {
   }
 }
 
-// Init from route params
-onMounted(() => {
-  const queryTaskId = route.query.task_id as string
-  const queryPackId = route.query.pack_id as string
-
-  if (queryTaskId) {
-    taskId.value = queryTaskId
-    connectTaskStream(queryTaskId)
-  } else if (queryPackId) {
-    packId.value = queryPackId
-    loadPack(queryPackId)
-  } else {
-    loadPackList() // show sidebar with all historical packs
-  }
-})
+	// Init from route params
+	onMounted(() => {
+	  const paramTaskId = (route.params.taskId as string) || ""
+	  const queryPackId = route.query.pack_id as string
+	
+	  if (paramTaskId) {
+	    taskId.value = paramTaskId
+	    connectTaskStream(paramTaskId)
+	  } else if (queryPackId) {
+	    packId.value = queryPackId
+	    loadPack(queryPackId)
+	  }
+	})
 
 // Watch for route changes
-watch(() => route.query.task_id, (newVal) => {
+	watch(() => route.params.taskId, (newVal) => {
   if (newVal && newVal !== taskId.value) {
     taskId.value = newVal as string
     connectTaskStream(newVal as string)
@@ -537,27 +594,6 @@ async function regenerateResource(res: any) {
 </script>
 
 <style scoped>
-.pack-list-item {
-  padding: 8px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-  margin-bottom: 4px;
-  border: 1px solid transparent;
-}
-.pack-list-item:hover { background-color: var(--lt-bg-page); }
-.pack-list-item.pack-active {
-  background-color: rgba(43,111,255,0.06);
-  border-color: var(--lt-brand-lighter);
-}
-.pack-item-topic { font-size: 13px; font-weight: 500; color: var(--lt-text-primary); }
-.pack-item-meta { font-size: 11px; color: var(--lt-text-auxiliary); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
-.studio-sidebar {
-  width: 260px; flex-shrink: 0; overflow-y: auto; max-height: calc(100vh - 140px);
-  float: left; margin-right: 24px;
-}
-.studio-content { min-width: 0; }
-.studio-sidebar + .studio-content { margin-left: 284px; }
 .trace-card {
   font-size: 12px;
   border-radius: 10px;

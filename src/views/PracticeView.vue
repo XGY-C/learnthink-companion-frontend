@@ -3,12 +3,13 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
+import PracticeIcon from '@/components/icons/PracticeIcon.vue'
 
 const router = useRouter()
 
 // ===== Type Definitions =====
-type QuestionType = 'single' | 'fill-blank' | 'short-answer'
-type Difficulty = 'easy' | 'medium' | 'hard'
+type QuestionType = 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TRUE_FALSE' | 'FILL_IN_BLANK' | 'SHORT_ANSWER'
+type Difficulty = number  // 1-5 五级难度标准
 type Confidence = 'high' | 'medium' | 'low'
 
 interface Source {
@@ -19,24 +20,23 @@ interface Source {
 }
 
 interface Question {
-  id: string
+  id: number
   type: QuestionType
-  stem: string
-  options?: { label: string; text: string }[]
-  placeholder?: string
+  content: string              // 题干，支持 LaTeX（$...$ / $$...$$）
+  options: string[] | null     // 选择题/判断题选项，填空/简答为 null
   answer: string
-  analysis: string
-  difficulty: Difficulty
-  knowledgePoints: string[]
-  errorTags: string[]
-  pushReason: string
-  qualityScore: number
-  confidence: Confidence
+  analysis: string             // 详细解析
+  difficulty: Difficulty       // 1-5 五级难度
+  knowledgePoint: string       // 对应知识点
+  // --- 前端展示扩展字段 ---
   sources: Source[]
+  confidence: Confidence
+  qualityScore: number
+  pushReason: string
 }
 
 interface ResultItem {
-  questionId: string
+  questionId: number
   isCorrect: boolean
   userAnswer: string
 }
@@ -53,8 +53,8 @@ const evidenceDrawer = ref<InstanceType<typeof EvidenceDrawer> | null>(null)
 const elapsedSeconds = ref(0)
 const timerInterval = ref<ReturnType<typeof setInterval> | null>(null)
 
-// Difficulty filter
-const difficultyFilter = ref<Difficulty | 'all'>('all')
+// Difficulty filter (5-level)
+const difficultyFilter = ref<number | 'all'>('all')
 
 // ===== Mock Data =====
 const practiceMeta = reactive({
@@ -68,166 +68,138 @@ const practiceMeta = reactive({
 
 const questions = ref<Question[]>([
   {
-    id: 'q1',
-    type: 'single',
-    stem: '在 A* 搜索算法中，估值函数 f(n) 的正确计算公式是？',
-    options: [
-      { label: 'A', text: 'f(n) = g(n)' },
-      { label: 'B', text: 'f(n) = h(n)' },
-      { label: 'C', text: 'f(n) = g(n) + h(n)' },
-      { label: 'D', text: 'f(n) = g(n) x h(n)' }
-    ],
+    id: 1,
+    type: 'SINGLE_CHOICE',
+    content: '在 A* 搜索算法中，估值函数 $f(n)$ 的正确计算公式是？',
+    options: ['A. f(n) = g(n)', 'B. f(n) = h(n)', 'C. f(n) = g(n) + h(n)', 'D. f(n) = g(n) \\times h(n)'],
     answer: 'C',
-    analysis: 'A* 算法的核心估值函数 f(n) = g(n) + h(n)，其中 g(n) 是从起点到当前节点 n 的实际代价，h(n) 是从节点 n 到目标节点的启发式估计代价。两者相加得到总代价估计。',
-    difficulty: 'easy',
-    knowledgePoints: ['A* 搜索', '估值函数'],
-    errorTags: ['概念混淆', '公式记忆'],
-    pushReason: '针对薄弱点：A* 核心公式',
-    qualityScore: 95,
-    confidence: 'high',
+    analysis: '本题考察 A* 算法核心公式识记（Level 1）。A* 估值函数 $f(n) = g(n) + h(n)$，其中 $g(n)$ 是从起点到节点 $n$ 的实际代价，$h(n)$ 是从 $n$ 到目标的启发式估计代价。干扰项：A 遗漏启发式分量（退化为 Dijkstra）；B 仅保留启发式（退化为贪心搜索）；D 将加法误为乘法。',
+    difficulty: 1,
+    knowledgePoint: 'A* 搜索算法',
     sources: [
       { title: '算法导论 第4版', locator: 'Ch 22.3', quote: 'A* 搜索使用评估函数 f(n) = g(n) + h(n) 来评估节点优先级。', relevance: 'high' },
       { title: '人工智能：一种现代方法', locator: 'Pg 189', quote: 'A* 算法结合了 Dijkstra 算法（g(n)）和贪心最佳优先搜索（h(n)）的思想。', relevance: 'high' }
-    ]
+    ],
+    confidence: 'high',
+    qualityScore: 95,
+    pushReason: '针对薄弱点：A* 核心公式'
   },
   {
-    id: 'q2',
-    type: 'single',
-    stem: '以下哪种启发式函数 h(n) 是「可采纳的（Admissible）」？',
-    options: [
-      { label: 'A', text: 'h(n) 始终大于真实代价' },
-      { label: 'B', text: 'h(n) 始终小于等于真实代价' },
-      { label: 'C', text: 'h(n) 始终等于真实代价' },
-      { label: 'D', text: 'h(n) 与真实代价无关' }
-    ],
+    id: 2,
+    type: 'SINGLE_CHOICE',
+    content: '以下哪种启发式函数 $h(n)$ 是「可采纳的（Admissible）」？',
+    options: ['A. h(n) 始终大于真实代价', 'B. h(n) 始终小于等于真实代价', 'C. h(n) 始终等于真实代价', 'D. h(n) 与真实代价无关'],
     answer: 'B',
-    analysis: '可采纳启发式（Admissible Heuristic）要求 h(n) 永远不会高估到达目标节点的实际代价，即 h(n) <= h*(n) 对所有节点 n 成立。这保证了 A* 算法能找到最优解。',
-    difficulty: 'medium',
-    knowledgePoints: ['A* 搜索', '可采纳启发式'],
-    errorTags: ['概念混淆'],
-    pushReason: '核心概念辨析：可采纳性是A*最优性的关键',
-    qualityScore: 88,
-    confidence: 'high',
+    analysis: '本题考察可采纳启发式的定义理解（Level 2）。可采纳启发式要求 $h(n) \\leq h^*(n)$ 对所有节点 $n$ 成立，即永远不高估实际代价——这是 A* 最优性的充分条件。干扰项：A 描述的是「过度估计」；C 过于严格（完美启发式理想情况）；D 忽略启发式设计的核心约束。',
+    difficulty: 2,
+    knowledgePoint: '可采纳启发式',
     sources: [
       { title: '算法导论 第4版', locator: 'Ch 22.3', quote: '如果 h(n) 是可采纳的，则 A* 保证找到最优路径。', relevance: 'high' },
       { title: '斯坦福 CS221 讲义', locator: 'Lecture 8', quote: 'Admissible heuristic never overestimates the cost to reach the goal.', relevance: 'high' }
-    ]
+    ],
+    confidence: 'high',
+    qualityScore: 88,
+    pushReason: '核心概念辨析：可采纳性是A*最优性的关键'
   },
   {
-    id: 'q3',
-    type: 'fill-blank',
-    stem: '在 A* 搜索中，若启发式函数 h(n) 满足一致性（Consistency）条件，也称为 ______ 性。',
-    placeholder: '请输入你的答案',
+    id: 3,
+    type: 'FILL_IN_BLANK',
+    content: '在 A* 搜索中，若启发式函数 $h(n)$ 满足一致性（Consistency）条件，也称为 ______ 性。',
+    options: null,
     answer: '单调',
-    analysis: '一致性（Consistency）条件也称为单调性（Monotonicity）。它要求对于任意边 (u, v)，有 h(u) <= cost(u, v) + h(v)。满足一致性的启发式函数必然也是可采纳的。',
-    difficulty: 'medium',
-    knowledgePoints: ['A* 搜索', '一致性启发式'],
-    errorTags: ['术语记忆'],
-    pushReason: '偏好：概念辨析型题目',
-    qualityScore: 85,
-    confidence: 'medium',
+    analysis: '本题考察一致性条件的术语识记（Level 1）。一致性条件又称单调性（Monotonicity），要求对任意边 $(u,v)$ 有 $h(u) \\leq cost(u,v) + h(v)$。满足一致性的启发式必然也是可采纳的，且在使用闭合集优化时保证最优性。',
+    difficulty: 1,
+    knowledgePoint: '一致性启发式',
     sources: [
       { title: '人工智能：一种现代方法', locator: 'Pg 195', quote: '一致性条件有时也称为单调条件。', relevance: 'high' }
-    ]
+    ],
+    confidence: 'medium',
+    qualityScore: 85,
+    pushReason: '偏好：概念辨析型题目'
   },
   {
-    id: 'q4',
-    type: 'single',
-    stem: '在二维网格寻路中，以下哪种启发式函数通常最适合 A* 算法？',
-    options: [
-      { label: 'A', text: '曼哈顿距离（Manhattan Distance）' },
-      { label: 'B', text: '欧几里得距离（Euclidean Distance）' },
-      { label: 'C', text: '切比雪夫距离（Chebyshev Distance）' },
-      { label: 'D', text: '零启发式（h(n) = 0）' }
-    ],
+    id: 4,
+    type: 'SINGLE_CHOICE',
+    content: '在二维网格寻路（仅允许四方向移动）中，以下哪种启发式函数通常最适合 A* 算法？',
+    options: ['A. 曼哈顿距离', 'B. 欧几里得距离', 'C. 切比雪夫距离', 'D. 零启发式（h(n) = 0）'],
     answer: 'A',
-    analysis: '对于四方向移动（上下左右）的网格，曼哈顿距离是最常用的可采纳启发式，因为它计算水平+垂直距离，不会高估实际代价。欧几里得距离虽然也可采纳但计算开销大。切比雪夫距离适用于八方向移动。零启发式退化为 Dijkstra 算法。',
-    difficulty: 'hard',
-    knowledgePoints: ['A* 搜索', '启发式函数设计', '网格寻路'],
-    errorTags: ['场景应用'],
-    pushReason: '针对薄弱点：启发式函数在不同场景的选择',
-    qualityScore: 90,
-    confidence: 'high',
+    analysis: '本题考察不同场景下启发式函数的选择应用（Level 3）。四方向网格中，曼哈顿距离计算水平+垂直距离，与实际移动代价完全匹配，且不会高估（可采纳）。干扰项：B 欧几里得距离计算开销大且低估严重（扩展节点多）；C 切比雪夫距离适用于八方向移动；D 零启发式退化为 Dijkstra 算法，效率最低。',
+    difficulty: 3,
+    knowledgePoint: '启发式函数设计',
     sources: [
       { title: '大话数据结构', locator: 'Pg 134', quote: '曼哈顿距离在四方向格点地图中是最优的可采纳启发式。', relevance: 'high' },
       { title: 'Red Blob Games: A* 可视化教程', locator: 'Heuristics section', quote: 'For 4-direction movement, Manhattan distance is the standard heuristic.', relevance: 'medium' }
-    ]
+    ],
+    confidence: 'high',
+    qualityScore: 90,
+    pushReason: '针对薄弱点：启发式函数在不同场景的选择'
   },
   {
-    id: 'q5',
-    type: 'fill-blank',
-    stem: 'A* 算法使用优先队列（最小堆）来管理待扩展节点，每次取出 f(n) 值最 ______ 的节点进行扩展。',
-    placeholder: '请输入：大 或 小',
+    id: 5,
+    type: 'FILL_IN_BLANK',
+    content: 'A* 算法使用优先队列（最小堆）管理待扩展节点，每次取出 $f(n)$ 值最 ______ 的节点进行扩展。',
+    options: null,
     answer: '小',
-    analysis: 'A* 使用最小堆（优先队列）按 f(n) 值从小到大管理开放集（Open Set），每次取出 f(n) 最小的节点进行扩展，确保优先探索最有希望的路径。',
-    difficulty: 'easy',
-    knowledgePoints: ['A* 搜索', '优先队列'],
-    errorTags: ['算法流程'],
-    pushReason: '节奏：15分钟/天 -> 速览版基础概念',
-    qualityScore: 82,
-    confidence: 'medium',
+    analysis: '本题考察 A* 算法流程理解（Level 2）。A* 使用最小堆按 $f(n)$ 值升序管理开放集（Open Set），每次取出 $f(n)$ 最小的节点扩展——确保优先探索最有希望的路径，这是 A* 高效性的关键机制。',
+    difficulty: 2,
+    knowledgePoint: 'A* 搜索算法',
     sources: [
       { title: '数据结构与算法分析', locator: 'Ch 9.3', quote: '优先队列是 A* 算法的核心数据结构，保证了每次扩展最优节点。', relevance: 'high' }
-    ]
+    ],
+    confidence: 'medium',
+    qualityScore: 82,
+    pushReason: '节奏：15分钟/天，侧重基础概念'
   },
   {
-    id: 'q6',
-    type: 'short-answer',
-    stem: '请简要说明 A* 算法与 Dijkstra 算法的核心区别，以及 A* 在什么条件下退化为 Dijkstra 算法？',
-    placeholder: '请输入你的回答（不少于 20 字）',
-    answer: 'A* 使用 f(n) = g(n) + h(n) 评估节点优先级，而 Dijkstra 仅使用 g(n)（即 h(n)=0）。A* 通过启发式函数引导搜索方向，效率更高。当 h(n)=0 时，A* 退化为 Dijkstra 算法，因为此时 f(n)=g(n)，扩展顺序与 Dijkstra 完全一致。',
-    analysis: 'A* 与 Dijkstra 的核心区别在于：A* 利用启发式信息引导搜索，可以更快地找到目标；Dijkstra 从起点向所有方向均匀扩展。A* 在 h(n)=0 时退化为 Dijkstra。此外，如果启发式函数设计不当（过度估计），A* 可能无法找到最优解。',
-    difficulty: 'hard',
-    knowledgePoints: ['A* 搜索', 'Dijkstra 算法', '算法对比'],
-    errorTags: ['概念混淆', '分析不完整'],
-    pushReason: '偏好：代码实操与算法辨析',
-    qualityScore: 93,
-    confidence: 'high',
+    id: 6,
+    type: 'SHORT_ANSWER',
+    content: '请简要说明 A* 算法与 Dijkstra 算法的核心区别，并分析 A* 在什么条件下退化为 Dijkstra 算法？',
+    options: null,
+    answer: 'A* 使用 f(n)=g(n)+h(n) 评估节点优先级，Dijkstra 仅使用 g(n)。当 h(n)=0 时 A* 退化为 Dijkstra，因为此时 f(n)=g(n)，扩展顺序与 Dijkstra 完全一致。',
+    analysis: '本题考察算法对比分析能力（Level 4）。A* 与 Dijkstra 的本质区别在于搜索策略：A* 利用启发式信息 $h(n)$ 引导方向性搜索，Dijkstra 从起点向所有方向均匀扩展。当 $h(n)=0$ 时，$f(n)=g(n)$，A* 退化为 Dijkstra。另外，若 $h(n)$ 过度估计，A* 可能错过最优解。理解这一关系是掌握启发式搜索设计的关键。',
+    difficulty: 4,
+    knowledgePoint: 'A* 搜索算法',
     sources: [
       { title: '算法导论 第4版', locator: 'Ch 22.3-22.4', quote: 'Dijkstra 算法是 A* 算法在 h(n)=0 时的特例。', relevance: 'high' },
       { title: '人工智能：一种现代方法', locator: 'Pg 192', quote: 'A* 搜索比 Dijkstra 算法更高效，因为它使用启发式信息进行定向搜索。', relevance: 'high' }
-    ]
+    ],
+    confidence: 'high',
+    qualityScore: 93,
+    pushReason: '偏好：代码实操与算法辨析'
   },
   {
-    id: 'q7',
-    type: 'single',
-    stem: '关于 A* 搜索的「最优性」条件，以下说法正确的是？',
-    options: [
-      { label: 'A', text: '只要 h(n) > 0，A* 就能找到最优解' },
-      { label: 'B', text: '只要 h(n) 是可采纳的，A* 保证找到最优解' },
-      { label: 'C', text: 'A* 在任何条件下都能找到最优解' },
-      { label: 'D', text: 'A* 的最优性与启发式函数无关' }
-    ],
+    id: 7,
+    type: 'SINGLE_CHOICE',
+    content: '关于 A* 搜索的「最优性」条件，以下说法正确的是？',
+    options: ['A. 只要 h(n) > 0，A* 就能找到最优解', 'B. 只要 h(n) 是可采纳的，A* 保证找到最优解', 'C. A* 在任何条件下都能找到最优解', 'D. A* 的最优性与启发式函数无关'],
     answer: 'B',
-    analysis: 'A* 的最优性依赖于启发式函数的可采纳性（admissible）。如果 h(n) 永远不会高估实际代价，即 h(n) <= h*(n)，则 A* 保证找到最优解。这是 A* 算法最重要的理论保证。',
-    difficulty: 'medium',
-    knowledgePoints: ['A* 搜索', '最优性条件'],
-    errorTags: ['概念混淆'],
-    pushReason: '核心定理辨析：A* 最优性条件',
-    qualityScore: 91,
-    confidence: 'high',
+    analysis: '本题考察最优性条件的理解辨析（Level 3）。A* 的最优性充分条件是 $h(n)$ 可采纳（不高估）。干扰项：A 混淆了「正启发式」和「可采纳启发式」；C 忽略前提条件；D 与算法理论直接矛盾。注意：在树搜索版本中可采纳性足够，在图搜索版本中还需一致性保证。',
+    difficulty: 3,
+    knowledgePoint: 'A* 最优性条件',
     sources: [
       { title: '算法导论 第4版', locator: 'Ch 22.3', quote: 'Theorem: If h is admissible, A* is optimal.', relevance: 'high' },
       { title: '人工智能：一种现代方法', locator: 'Pg 192-194', quote: 'A* 是可采纳的，前提是 h(n) 是可采纳的。', relevance: 'high' }
-    ]
+    ],
+    confidence: 'high',
+    qualityScore: 91,
+    pushReason: '核心定理辨析：A* 最优性条件'
   },
   {
-    id: 'q8',
-    type: 'short-answer',
-    stem: '举一个实际场景，说明为什么启发式函数 h(n) 选择不当会导致 A* 搜索效率下降甚至找不到最优解。',
-    placeholder: '请结合实际场景举例说明',
-    answer: '以游戏寻路为例：若在迷宫中使用欧几里得距离作为启发式（实际移动只能上下左右），曼哈顿距离会更准确。若使用一个高估的启发式（如 h(n) = 真实代价 x 2），A* 会过度自信地沿着某条路径前进，可能忽略实际更优的路径，最终找不到最优解。例如在地图导航中，使用直线距离（过小河）会高估无法直接穿越的障碍物场景，导致次优路径。',
-    analysis: '这是一个开放性题目，关键在于理解：1. 过度估计的启发式（非可采纳）会破坏最优性保证；2. 不准确的（但可采纳的）启发式只影响效率（扩展更多节点），不会破坏最优性；3. 启发式的选择需要与问题的实际移动代价模型匹配。',
-    difficulty: 'hard',
-    knowledgePoints: ['A* 搜索', '启发式函数设计', '实际应用'],
-    errorTags: ['分析不完整', '场景理解'],
-    pushReason: '偏好：代码实操与场景分析',
-    qualityScore: 87,
-    confidence: 'medium',
+    id: 8,
+    type: 'SHORT_ANSWER',
+    content: '举一个实际场景，说明为什么启发式函数 $h(n)$ 选择不当会导致 A* 搜索效率下降甚至找不到最优解。',
+    options: null,
+    answer: '以游戏寻路为例：若在四方向迷宫中使用欧几里得距离（低估严重），A* 会扩展过多节点导致效率低下；若使用高估启发式（如 h(n)=2×真实代价），A* 可能错过实际最优路径。',
+    analysis: '本题考察评价与创造能力（Level 5）。关键在于区分两类问题：①不准确的但可采纳的启发式（如欧几里得距离用于四方向网格）仅降低效率，不破坏最优性——因为不高估；②过度估计的启发式破坏最优性——因为可能跳过包含最优解的节点。优秀的启发式应在「可采纳」前提下尽量「接近真实代价」。',
+    difficulty: 5,
+    knowledgePoint: '启发式函数设计',
     sources: [
       { title: 'Red Blob Games: A* 可视化教程', locator: 'Heuristics section', quote: 'Choosing an appropriate heuristic depends on the type of movement allowed.', relevance: 'high' },
       { title: 'AI Game Programming Wisdom', locator: 'Ch 3.2', quote: 'Overestimating heuristics can lead to suboptimal paths in practical applications.', relevance: 'medium' }
-    ]
+    ],
+    confidence: 'medium',
+    qualityScore: 87,
+    pushReason: '偏好：代码实操与场景分析'
   }
 ])
 
@@ -269,13 +241,17 @@ const accuracyRate = computed(() => {
 })
 
 const weakPoints = computed(() => {
+  // 从答错题目的 analysis 中提取错因关键词（概念混淆、公式错误、计算失误等）
   const tagCount = new Map<string, number>()
+  const errorPatterns = ['概念混淆', '公式错误', '计算失误', '理解偏差', '逻辑陷阱', '场景应用', '分析不完整']
   results.value.forEach(r => {
     if (!r.isCorrect) {
       const q = questions.value.find(q => q.id === r.questionId)
       if (q) {
-        q.errorTags.forEach(tag => {
-          tagCount.set(tag, (tagCount.get(tag) || 0) + 1)
+        errorPatterns.forEach(pattern => {
+          if (q.analysis.includes(pattern)) {
+            tagCount.set(pattern, (tagCount.get(pattern) || 0) + 1)
+          }
         })
       }
     }
@@ -292,9 +268,8 @@ const wrongKnowledgePoints = computed(() => {
     if (!r.isCorrect) {
       const q = questions.value.find(q => q.id === r.questionId)
       if (q) {
-        q.knowledgePoints.forEach(kp => {
-          kpCount.set(kp, (kpCount.get(kp) || 0) + 1)
-        })
+        const kp = q.knowledgePoint
+        kpCount.set(kp, (kpCount.get(kp) || 0) + 1)
       }
     }
   })
@@ -322,13 +297,14 @@ const confidenceType = (c: Confidence) => {
 }
 
 const difficultyLabel = (d: Difficulty) => {
-  const map: Record<Difficulty, string> = { easy: '简单', medium: '中等', hard: '困难' }
-  return map[d]
+  const map: Record<number, string> = { 1: 'L1 识记', 2: 'L2 理解', 3: 'L3 应用', 4: 'L4 分析', 5: 'L5 评价' }
+  return map[d] || `L${d}`
 }
 
-const difficultyType = (d: Difficulty) => {
-  const map: Record<Difficulty, string> = { easy: 'success', medium: 'warning', hard: 'danger' }
-  return map[d]
+const difficultyType = (d: Difficulty): 'success' | 'warning' | 'danger' | 'info' => {
+  if (d <= 2) return 'success'
+  if (d === 3) return 'warning'
+  return 'danger'
 }
 
 // ===== Methods =====
@@ -352,7 +328,7 @@ const stopTimer = () => {
   }
 }
 
-const selectAnswer = (questionId: string, value: string) => {
+const selectAnswer = (questionId: number, value: string) => {
   answerRecords[questionId] = value
 }
 
@@ -394,9 +370,9 @@ const submitAnswers = () => {
   const res: ResultItem[] = questions.value.map(q => {
     const userAns = answerRecords[q.id] || ''
     let isCorrect = false
-    if (q.type === 'single') {
+    if (q.type === 'SINGLE_CHOICE' || q.type === 'MULTIPLE_CHOICE' || q.type === 'TRUE_FALSE') {
       isCorrect = checkSingleChoice(q, userAns)
-    } else if (q.type === 'fill-blank') {
+    } else if (q.type === 'FILL_IN_BLANK') {
       isCorrect = checkFillBlank(q, userAns)
     } else {
       isCorrect = checkShortAnswer(q, userAns)
@@ -439,14 +415,14 @@ const goToPath = () => {
   router.push({ name: 'path' })
 }
 
-const getQuestionStatus = (qId: string): 'success' | 'danger' | 'info' => {
+const getQuestionStatus = (qId: number): 'success' | 'danger' | 'info' => {
   if (!submitted.value) return 'info'
   const r = results.value.find(res => res.questionId === qId)
   if (!r) return 'info'
   return r.isCorrect ? 'success' : 'danger'
 }
 
-const getQuestionIcon = (qId: string): string => {
+const getQuestionIcon = (qId: number): string => {
   if (!submitted.value) return ''
   const r = results.value.find(res => res.questionId === qId)
   if (!r) return ''
@@ -471,9 +447,7 @@ onUnmounted(() => {
       <div class="flex items-center justify-between mb-4 flex-shrink-0">
         <div>
           <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style="background: linear-gradient(135deg, #2B6FFF, #1A4FCC);">
-              <el-icon size="18" color="white"><EditPen /></el-icon>
-            </div>
+            <PracticeIcon :size="36" />
             <div>
               <h1 class="text-2xl font-bold" style="color: #1A1A2E;">定制练习</h1>
               <p class="text-sm mt-0.5" style="color: #8E8EA0;">
@@ -483,11 +457,13 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="flex items-center gap-3">
-          <el-select v-model="difficultyFilter" size="small" class="w-28" @change="currentQuestionIndex = 0" style="--el-border-radius-base: 20px;">
-            <el-option label="全部难度" value="all" />
-            <el-option label="简单" value="easy" />
-            <el-option label="中等" value="medium" />
-            <el-option label="困难" value="hard" />
+          <el-select v-model="difficultyFilter" size="small" class="w-32" @change="currentQuestionIndex = 0" style="--el-border-radius-base: 20px;">
+            <el-option label="全部难度" :value="'all'" />
+            <el-option label="L1 识记" :value="1" />
+            <el-option label="L2 理解" :value="2" />
+            <el-option label="L3 应用" :value="3" />
+            <el-option label="L4 分析" :value="4" />
+            <el-option label="L5 评价" :value="5" />
           </el-select>
           <div class="flex items-center gap-2 text-sm px-3.5 py-1.5 rounded-full shadow-sm" style="background-color: rgba(255,255,255,0.8); backdrop-filter: blur(12px); border: 1px solid #E8ECF0;">
             <el-icon style="color: #2B6FFF;"><Timer /></el-icon>
@@ -660,13 +636,13 @@ onUnmounted(() => {
                 <!-- 内容 -->
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-2">
-                    <el-tag size="small" :type="q.type === 'single' ? 'primary' : q.type === 'fill-blank' ? 'warning' : 'info'">
-                      {{ q.type === 'single' ? '单选题' : q.type === 'fill-blank' ? '填空题' : '简答题' }}
+                    <el-tag size="small" :type="q.type === 'SINGLE_CHOICE' ? 'primary' : q.type === 'FILL_IN_BLANK' ? 'warning' : 'info'">
+                      {{ q.type === 'SINGLE_CHOICE' ? '单选题' : q.type === 'FILL_IN_BLANK' ? '填空题' : '简答题' }}
                     </el-tag>
                     <el-tag size="small" :type="difficultyType(q.difficulty)">{{ difficultyLabel(q.difficulty) }}</el-tag>
                     <el-tag size="small" type="info" effect="plain" class="text-xs">{{ q.pushReason }}</el-tag>
                   </div>
-                  <p class="text-base font-medium text-gray-900 mb-3">{{ q.stem }}</p>
+                  <p class="text-base font-medium text-gray-900 mb-3">{{ q.content }}</p>
 
                   <!-- 用户的答案 -->
                   <div class="mb-3 bg-gray-50 p-3 rounded text-sm">
@@ -704,8 +680,8 @@ onUnmounted(() => {
                       查看引用来源（{{ q.sources.length }}）
                     </el-button>
                     <div class="flex flex-wrap gap-1 ml-auto">
-                      <el-tag v-for="tag in q.errorTags" :key="tag" size="small" type="danger" effect="plain">
-                        {{ tag }}
+                      <el-tag size="small" type="info" effect="plain">
+                        {{ q.knowledgePoint }}
                       </el-tag>
                     </div>
                   </div>
@@ -777,8 +753,8 @@ onUnmounted(() => {
             <el-card shadow="never" class="mb-4" style="border-radius: 14px; border: 1px solid #E8ECF0;">
               <!-- 题目标题行 -->
               <div class="flex items-center gap-2 mb-4">
-                <el-tag :type="currentQuestion.type === 'single' ? 'primary' : currentQuestion.type === 'fill-blank' ? 'warning' : 'info'" class="!rounded-full">
-                  {{ currentQuestion.type === 'single' ? '📝 单选题' : currentQuestion.type === 'fill-blank' ? '✏️ 填空题' : '📖 简答题' }}
+                <el-tag :type="currentQuestion.type === 'SINGLE_CHOICE' ? 'primary' : currentQuestion.type === 'FILL_IN_BLANK' ? 'warning' : 'info'" class="!rounded-full">
+                  {{ currentQuestion.type === 'SINGLE_CHOICE' ? '单选题' : currentQuestion.type === 'FILL_IN_BLANK' ? '填空题' : '简答题' }}
                 </el-tag>
                 <el-tag size="small" :type="difficultyType(currentQuestion.difficulty)" class="!rounded-full">
                   {{ difficultyLabel(currentQuestion.difficulty) }}
@@ -798,39 +774,39 @@ onUnmounted(() => {
 
               <!-- 题干：浅蓝背景 #E8F0FE -->
               <div class="p-4 rounded-xl mb-6 border" style="background: #E8F0FE; border-color: #D6E4FF;">
-                <p class="text-lg font-medium leading-relaxed" style="color: #1A1A2E;">{{ currentQuestion.stem }}</p>
+                <p class="text-lg font-medium leading-relaxed" style="color: #1A1A2E;">{{ currentQuestion.content }}</p>
               </div>
 
               <!-- 单选题选项：选中状态用蓝色 #2B6FFF -->
-              <div v-if="currentQuestion.type === 'single' && currentQuestion.options" class="space-y-3 mb-4">
+              <div v-if="(currentQuestion.type === 'SINGLE_CHOICE' || currentQuestion.type === 'MULTIPLE_CHOICE') && currentQuestion.options" class="space-y-3 mb-4">
                 <div
                   v-for="opt in currentQuestion.options"
-                  :key="opt.label"
+                  :key="opt"
                   class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all duration-200"
-                  :class="answerRecords[currentQuestion.id] === opt.label ? 'shadow-sm' : ''"
-                  :style="answerRecords[currentQuestion.id] === opt.label
+                  :class="answerRecords[currentQuestion.id] === opt.substring(0, 1) ? 'shadow-sm' : ''"
+                  :style="answerRecords[currentQuestion.id] === opt.substring(0, 1)
                     ? 'border-color: #2B6FFF; background-color: #E8F0FE;'
                     : 'border-color: #E8ECF0;'"
-                  @click="selectAnswer(currentQuestion.id, opt.label)"
+                  @click="selectAnswer(currentQuestion.id, opt.substring(0, 1))"
                 >
                   <div
                     class="w-7 h-7 rounded-full flex items-center justify-center mr-3 text-sm font-semibold transition-all duration-200"
-                    :class="answerRecords[currentQuestion.id] === opt.label ? 'text-white shadow-sm' : ''"
-                    :style="answerRecords[currentQuestion.id] === opt.label
+                    :class="answerRecords[currentQuestion.id] === opt.substring(0, 1) ? 'text-white shadow-sm' : ''"
+                    :style="answerRecords[currentQuestion.id] === opt.substring(0, 1)
                       ? 'background-color: #2B6FFF;'
                       : 'background-color: #F5F7FA; color: #8E8EA0;'"
                   >
-                    {{ opt.label }}
+                    {{ opt.substring(0, 1) }}
                   </div>
-                  <span style="color: #5A5A72;">{{ opt.text }}</span>
+                  <span style="color: #5A5A72;">{{ opt.substring(3) }}</span>
                 </div>
               </div>
 
               <!-- 填空题 -->
-              <div v-if="currentQuestion.type === 'fill-blank'" class="mb-4">
+              <div v-if="currentQuestion.type === 'FILL_IN_BLANK'" class="mb-4">
                 <el-input
                   :model-value="answerRecords[currentQuestion.id] || ''"
-                  :placeholder="currentQuestion.placeholder || '请输入答案'"
+                  placeholder="请输入答案"
                   size="large"
                   class="max-w-lg"
                   @input="(val: string) => selectAnswer(currentQuestion.id, val)"
@@ -838,10 +814,10 @@ onUnmounted(() => {
               </div>
 
               <!-- 简答题 -->
-              <div v-if="currentQuestion.type === 'short-answer'" class="mb-4">
+              <div v-if="currentQuestion.type === 'SHORT_ANSWER'" class="mb-4">
                 <el-input
                   :model-value="answerRecords[currentQuestion.id] || ''"
-                  :placeholder="currentQuestion.placeholder || '请输入你的回答'"
+                  placeholder="请输入你的回答"
                   type="textarea"
                   :rows="5"
                   :maxlength="500"
@@ -901,8 +877,8 @@ onUnmounted(() => {
               :class="answerRecords[q.id] && answerRecords[q.id].trim() ? 'bg-success' : 'bg-gray-300'"
             />
             <span class="flex-1 truncate">第 {{ idx + 1 }} 题</span>
-            <el-tag size="small" :type="q.type === 'single' ? 'primary' : q.type === 'fill-blank' ? 'warning' : 'info'" class="flex-shrink-0">
-              {{ q.type === 'single' ? '单选' : q.type === 'fill-blank' ? '填空' : '简答' }}
+            <el-tag size="small" :type="q.type === 'SINGLE_CHOICE' ? 'primary' : q.type === 'FILL_IN_BLANK' ? 'warning' : 'info'" class="flex-shrink-0">
+              {{ q.type === 'SINGLE_CHOICE' ? '单选' : q.type === 'FILL_IN_BLANK' ? '填空' : '简答' }}
             </el-tag>
           </div>
         </div>

@@ -363,3 +363,18 @@ body {
   opacity: 0;
   transform: translateY(-12px);
 }
+
+/* ---- 交错入场动画（列表卡片依次出现） ---- */
+@keyframes staggerFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.stagger-fade-in {
+  animation: staggerFadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) both;
+}

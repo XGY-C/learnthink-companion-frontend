@@ -7,9 +7,9 @@ const router = useRouter()
 
 function handleNotificationClick(item: any) {
   if (item.packId) {
-    router.push(`/studio?pack_id=${item.packId}`)
+    router.push(`/studio/${item.taskId || ''}?pack_id=${item.packId}`)
   } else if (item.taskId) {
-    router.push(`/studio?task_id=${item.taskId}`)
+    router.push(`/studio/${item.taskId}`)
   }
   notification.remove(item.id)
 }

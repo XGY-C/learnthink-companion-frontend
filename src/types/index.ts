@@ -132,6 +132,24 @@ export interface TaskState {
   events: TaskEvent[]
 }
 
+/** 任务列表摘要（后端 GET /api/tasks 返回） */
+export interface TaskSummary {
+  taskId: string
+  topic: string
+  courseId: string
+  taskType: string
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
+  stage: string | null
+  percent: number
+  resourceTypes: string[]
+  packId: string | null
+  resourceCount: number
+  errorMessage: string | null
+  createdAt: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
 /** 任务事件 */
 export interface TaskEvent {
   type: 'stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'done'
@@ -197,7 +215,7 @@ export interface PlannerDecision {
   rationale: string
   items: PlanItem[]
   totalEstimatedMinutes: number
-  difficulty: string
+  difficulty: number  // 1-5 五级难度
 }
 
 export interface PlanItem {
@@ -205,10 +223,32 @@ export interface PlanItem {
   title: string
   reason: string
   priority: number
-  difficulty: string
+  difficulty: number  // 1-5 五级难度
   focusAreas: string[]
   estimatedMinutes: number
   styleHint: string
+}
+
+// ========== 练习题（Quiz Question）相关类型 ==========
+
+/** 题目类型枚举 */
+export type QuestionType = 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TRUE_FALSE' | 'FILL_IN_BLANK' | 'SHORT_ANSWER'
+
+/** 单道练习题（对应后端 quiz JSON 格式） */
+export interface Question {
+  id: number
+  type: QuestionType
+  content: string              // 题干，支持 LaTeX（$...$ / $$...$$）
+  options: string[] | null     // 选择题/判断题必填，填空/简答为 null
+  answer: string               // 选择题填选项字母，多选填字母串，填空填具体值，简答填关键步骤
+  analysis: string             // 详细解析：解题思路 + 关键步骤 + 干扰项分析 + 难度层级说明
+  difficulty: number           // 1-5 五级难度标准
+  knowledgePoint: string       // 对应大纲知识点名称
+}
+
+/** 练习题集 */
+export interface QuizContent {
+  questions: Question[]
 }
 
 /** SSE 事件类型汇总 */

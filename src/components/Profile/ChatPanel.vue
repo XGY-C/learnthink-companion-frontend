@@ -152,6 +152,7 @@ async function sendMessage(text?: string) {
     let buffer = ''
     let profileReadyVal = false, profileVersionIdVal: string | null = null
     let generationReadyVal = false, generationMetaVal: any = null
+    let coveredCountVal = 0
     let firstChunk = true, chunkCount = 0
 
     while (true) {
@@ -219,6 +220,7 @@ async function sendMessage(text?: string) {
             profileVersionIdVal = parsed.profileVersionId || null
             generationReadyVal = parsed.generationReady ?? false
             generationMetaVal = parsed.generationMeta
+            coveredCountVal = parsed.coveredCount ?? 0
           } catch { /* fall through */ }
           // Finalize thinking card with whatever real steps we have
           if (activeSession.value) {
@@ -276,16 +278,20 @@ async function sendMessage(text?: string) {
 
     if (generationReadyVal) {
       generationReady.value = true
+      if (coveredCountVal > 0) totalFilled.value = coveredCountVal
       // 在对话流中内联推送确认卡片，用户确认后再触发生成
       const genKind = (generationMetaVal as any)?.stage === 'ready' ? 'explicit' : 'offer'
-      const lastUserMsg = [...activeSession.value.messages].reverse().find(m => m.role === 'user')?.text || ''
+      const resolvedTopic = (generationMetaVal as any)?.preferences?.topic
+      const launchTopic = resolvedTopic || [...activeSession.value.messages].reverse().find(m => m.role === 'user')?.text || ''
       activeSession.value.messages.push({
         role: 'assistant',
         text: genKind === 'explicit'
-          ? '检测到你需要生成学习资源，是否确认启动？'
+          ? (resolvedTopic
+              ? `检测到你需要「${resolvedTopic}」的学习资源，是否确认启动？`
+              : '检测到你需要生成学习资源，是否确认启动？')
           : '你的学习画像已就绪，是否为你生成个性化学习资源？',
         suggestions: [
-          { text: '✅ 确认生成', sendAs: `__generate__:${lastUserMsg}` },
+          { text: resolvedTopic ? `✅ 确认生成「${resolvedTopic}」` : '✅ 确认生成', sendAs: `__generate__:${launchTopic}` },
           { text: '⏸ 稍后再说', sendAs: '' },
         ],
         suggestionStyle: 'primary',
@@ -308,6 +314,7 @@ async function sendMessage(text?: string) {
 interface TaskCardState {
   taskId: string; topic: string; status: 'generating' | 'done' | 'failed'
   progress: number; resourceTypes: string[]; readyCount: number; totalCount: number
+  message: string; stage: string
   errorMessage?: string
 }
 const taskCards = ref<Record<string, TaskCardState>>({})
@@ -315,12 +322,14 @@ const taskSSE = useSSE()
 
 function connectTaskSSE(taskId: string, topic: string) {
   if (!taskSSE) return
-  taskCards.value[taskId] = { taskId, topic, status: 'generating', progress: 0, resourceTypes: [], readyCount: 0, totalCount: 0 }
+  taskCards.value[taskId] = { taskId, topic, status: 'generating', progress: 0, resourceTypes: [], readyCount: 0, totalCount: 0, message: '准备中...', stage: '' }
   taskSSE.connect(taskId, {
     onStage(data) {
       const card = taskCards.value[taskId]
       if (!card) return
       card.progress = data.percent || 0
+      card.message = data.message || card.message
+      card.stage = data.stage || card.stage
       const rts = data.stats?.resourceTypes
       if (rts && Array.isArray(rts) && rts.length > 0) {
         card.resourceTypes = rts
@@ -367,16 +376,11 @@ async function triggerGenerate(topic?: string) {
         role: 'assistant',
         text: `好的！我已经为你启动了「${topicText}」的资源包生成。`,
         suggestions: [
-          { text: '前往工作室查看进度', sendAs: `/studio?task_id=${taskId}` },
+          { text: '前往工作室查看进度', sendAs: `/studio/${taskId}` },
           { text: '继续聊天', sendAs: '' },
         ],
         suggestionStyle: 'primary',
-      })
-      // Push a GenerationCard after the text message
-      activeSession.value.messages.push({
-        role: 'assistant',
-        text: '',
-        // @ts-ignore — generation card meta
+        // @ts-ignore — generation card embedded in the same bubble
         _generationCard: { taskId, topic: topicText },
       })
       ElMessage.success(`资源生成任务已创建 #${taskId}`)
@@ -536,11 +540,8 @@ function formatSessionTime(iso: string): string {
 
 function handleSuggestionClick(suggestion: { text: string; sendAs: string }) {
   if (suggestion.sendAs.startsWith('__generate__:')) {
-    // Extract topic from user message and trigger generation
-    const msg = suggestion.sendAs.slice('__generate__:'.length)
-    // Simple topic extraction: look for content after "生成/做/创建"
-    const topicMatch = msg.match(/(?:生成|做|创建|帮[我]?[做个]).{0,5}?([\u4e00-\u9fa5a-zA-Z0-9+]{2,30})/)
-    const topic = topicMatch ? topicMatch[1] : msg.slice(0, 20)
+    // Topic resolved by backend ConversationAgent.resolveTopic()
+    const topic = suggestion.sendAs.slice('__generate__:'.length)
     triggerGenerate(topic)
   } else if (suggestion.sendAs.startsWith('/studio')) router.push(suggestion.sendAs)
   else if (suggestion.sendAs) sendMessage(suggestion.sendAs)
@@ -656,18 +657,22 @@ onMounted(() => initChat())
                 @update:expanded="msg.thinking.expanded = $event"
                 class="mx-3 mb-2"
               />
-              <!-- GenerationCard（资源生成状态卡片） -->
-              <GenerationCard
-                v-if="(msg as any)._generationCard"
-                v-bind="taskCards[(msg as any)._generationCard.taskId] || (msg as any)._generationCard"
-                class="mx-3 mb-2"
-              />
-              <!-- 正文 -->
+              <!-- 正文（纯文本消息） -->
               <div v-if="!(msg as any)._generationCard" class="px-4 py-3 assistant-message-body">
                 <MarkdownViewer v-if="!msg.isStreaming" :content="msg.text" :showToc="false" />
                 <pre v-else class="streaming-text whitespace-pre-wrap text-sm leading-relaxed" style="color: var(--lt-text-primary); font-family: inherit; margin: 0;">{{ msg.text }}</pre>
                 <span v-if="msg.isStreaming && msg.text" class="streaming-cursor" />
               </div>
+              <!-- 带 GenerationCard 的消息：先显示文字，再显示进度卡片 -->
+              <template v-if="(msg as any)._generationCard">
+                <div class="px-4 py-3 assistant-message-body">
+                  <p style="color: var(--lt-text-primary); margin: 0;">{{ msg.text }}</p>
+                </div>
+                <GenerationCard
+                  v-bind="taskCards[(msg as any)._generationCard.taskId] || (msg as any)._generationCard"
+                  class="mx-3 mb-2"
+                />
+              </template>
               <!-- v3.1: 资源生成建议按钮 -->
               <div v-if="msg.suggestions && msg.suggestions.length > 0" class="px-4 pb-3 flex flex-wrap gap-2">
                 <el-button v-for="(sug, si) in msg.suggestions" :key="si" size="small" :type="msg.suggestionStyle === 'primary' ? 'primary' : undefined" plain @click="handleSuggestionClick(sug)">{{ sug.text }}</el-button>

@@ -15,7 +15,7 @@ const router = createRouter({
       path: '/',
       component: MainLayout,
       children: [
-                {
+        {
           path: '',
           name: 'dashboard',
           component: DashboardView
@@ -28,6 +28,11 @@ const router = createRouter({
         {
           path: 'studio',
           name: 'studio',
+          component: () => import('@/views/StudioTaskList.vue')
+        },
+        {
+          path: 'studio/:taskId',
+          name: 'studio-detail',
           component: () => import('@/views/StudioView.vue')
         },
         {

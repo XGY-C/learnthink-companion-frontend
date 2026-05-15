@@ -28,7 +28,6 @@
           class="flex-1 min-w-[240px]"
           clearable
           @clear="searchQuery = ''"
-        />
         <el-select v-model="sortOrder" class="w-36" placeholder="排序方式">
           <el-option label="最新优先" value="newest" />
           <el-option label="最早优先" value="oldest" />
@@ -160,7 +159,6 @@
                       @preview="previewResource(res, pack)"
                       @view-sources="viewSources(res)"
                       @regenerate="regenerateResource(res, pack)"
-                    />
                   </div>
                   <!-- 操作按钮组 -->
                   <div class="flex justify-end gap-2">
@@ -212,6 +210,17 @@
             <span style="color: #8E8EA0;">
               质量分 <strong style="color: #2B6FFF;">{{ currentPreview.qualityScore }}</strong>/100
             </span>
+            <el-dropdown v-if="currentPreview.type === 'doc' || currentPreview.type === 'reading'" size="small" @command="(cmd: string) => cmd === 'docx' ? downloadDocxResource(currentPreview) : downloadMdResource(currentPreview)">
+              <el-button size="small" type="primary">
+                <el-icon class="mr-1"><Download /></el-icon>下载 <el-icon class="ml-1"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="docx">下载 DOCX</el-dropdown-item>
+                  <el-dropdown-item command="md">下载 Markdown</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button link type="primary" size="small" @click="viewSources(currentPreview)">
               查看引用证据
             </el-button>
@@ -221,22 +230,31 @@
                 <!-- 内容体：根据类型渲染 -->
           <div class="min-h-[200px]">
             <!-- 思维导图 -->
-            <div v-if="currentPreview.type === 'mindmap'" class="h-96 border border-slate-200 rounded-lg overflow-hidden">
+            <div v-if="currentPreview.type === 'mindmap'" class="h-[600px] border border-slate-200 rounded-lg">
               <MindmapViewer
+                ref="mindmapViewerRef"
                 :content="previewMode === 'brief' ? currentPreview.brief || '# 暂无内容' : currentPreview.deepContent || currentPreview.brief || '# 暂无内容'"
-              />
+                :isJson="true"
+            </div>
+            <!-- 导出按钮 -->
+            <div v-if="currentPreview.type === 'mindmap'" class="flex gap-2 mt-3">
+              <el-button size="small" @click="mindmapViewerRef?.exportSvg(currentPreview.title + '.svg')">
+                <el-icon class="mr-1"><Download /></el-icon>导出 SVG
+              </el-button>
+              <el-button size="small" @click="mindmapViewerRef?.exportPng(currentPreview.title + '.png')">
+                <el-icon class="mr-1"><Download /></el-icon>导出 PNG
+              </el-button>
             </div>
             <!-- 练习题：用 Markdown 展示 -->
             <div v-else-if="currentPreview.type === 'quiz'" class="space-y-4">
               <MarkdownViewer
                 :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
                 :showToc="false"
-              />
             </div>
-            <!-- 代码案例：代码块高亮 -->
+            <!-- 代码案例：Markdown 渲染（内容自带代码块） -->
             <div v-else-if="currentPreview.type === 'code'" class="border border-slate-200 rounded-lg overflow-hidden">
               <MarkdownViewer
-                :content="'```python\n' + (previewMode === 'brief' ? currentPreview.brief || '' : currentPreview.deepContent || currentPreview.brief || '') + '\n```'"
+                :content="previewMode === 'brief' ? currentPreview.brief || '' : currentPreview.deepContent || currentPreview.brief || ''"
                 :showToc="false"
               />
             </div>
@@ -245,14 +263,12 @@
               <MarkdownViewer
                 :content="'## 视频脚本\n\n' + (previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容')"
                 :showToc="false"
-              />
             </div>
             <!-- 默认（doc/reading 等）：完整 Markdown 渲染 -->
             <div v-else class="">
               <MarkdownViewer
                 :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
                 :showToc="previewMode === 'deep'"
-              />
             </div>
           </div>
 
@@ -310,12 +326,15 @@ import {
   Delete,
   Reading,
   DataBoard,
+  ArrowDown,
+  Download,
 } from '@element-plus/icons-vue'
 import type { ResourcePack } from '@/types'
 import ResourceCard from '@/components/ResourceCard.vue'
 import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
+import { markdownToDocxBlob, downloadDocx, preprocessLatexForMarkdown } from '@/utils/docxExport'
 
 const router = useRouter()
 
@@ -332,6 +351,7 @@ const currentPreview = ref<any>(null)
 const previewMode = ref('brief')
 
 const evidenceDrawer = ref<any>(null)
+const mindmapViewerRef = ref<{ exportSvg: (filename?: string) => void; exportPng: (filename?: string) => Promise<void> } | null>(null)
 
 // ==================== Mock 数据 ====================
 const packList = reactive<ResourcePack[]>([
@@ -681,6 +701,22 @@ const previewResource = (res: any, _pack: ResourcePack) => {
   previewVisible.value = true
 }
 
+async function downloadDocxResource(res: any) {
+  const content = res.deepContent || res.brief || ''
+  const blob = await markdownToDocxBlob(content, res.title)
+  downloadDocx(blob, res.title || 'resource')
+}
+
+function downloadMdResource(res: any) {
+  const raw = res.deepContent || res.brief || ''
+  const content = preprocessLatexForMarkdown(raw)
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${res.title || 'resource'}.md`
+  a.click()
+}
+
 const viewSources = (res: any) => {
   if (res.sources && res.sources.length > 0) {
     evidenceDrawer.value?.open(res.sources)
@@ -708,8 +744,13 @@ const continueLearning = (pack: ResourcePack) => {
   router.push(`/path?pack=${pack.id}`)
 }
 
-const openInStudio = (pack: ResourcePack) => {
-  router.push(`/studio?pack=${pack.id}`)
+const openInStudio = (pack: any) => {
+  const taskId = pack.task_id || pack.taskId
+  if (taskId) {
+    router.push(`/studio/${taskId}?pack_id=${pack.id}`)
+  } else {
+    router.push('/studio')
+  }
 }
 
 const deletePack = (pack: ResourcePack) => {

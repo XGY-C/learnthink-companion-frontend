@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{
   resourceTypes?: string[]
   readyCount?: number
   totalCount?: number
+  message?: string
   errorMessage?: string
 }>(), {
   status: 'generating',
@@ -17,6 +18,7 @@ const props = withDefaults(defineProps<{
   resourceTypes: () => [],
   readyCount: 0,
   totalCount: 0,
+  message: '准备中...',
 })
 
 const router = useRouter()
@@ -36,7 +38,7 @@ const resourceBadges = computed(() =>
 )
 
 function handleClick() {
-  router.push(`/studio?task_id=${props.taskId}`)
+  router.push(`/studio/${props.taskId}`)
 }
 </script>
 
@@ -68,7 +70,7 @@ function handleClick() {
         <div class="gen-progress-fill" :style="{ width: (progress || 0) + '%' }" />
       </div>
       <div class="gen-stats">
-        <span v-if="totalCount">已生成 {{ readyCount || 0 }}/{{ totalCount }} 类</span>
+        <span v-if="message">{{ message }}</span>
         <span v-else>准备中...</span>
       </div>
     </div>
