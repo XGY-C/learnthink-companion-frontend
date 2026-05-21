@@ -17,7 +17,7 @@ const emit = defineEmits<{
 }>()
 
 // ── 步骤分类 ──
-const REASONING_PHASES = new Set(['CONTEXT', 'DECISION'])
+const REASONING_PHASES = new Set(['CONTEXT', 'DECISION', 'PLANNING'])
 const TOOL_CALL_PHASES = new Set(['RETRIEVE', 'REFLECT', 'RAG'])
 
 function stepCategory(step: ThinkingStep): 'reasoning' | 'tool_call' | 'unknown' {

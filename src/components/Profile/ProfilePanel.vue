@@ -5,9 +5,13 @@ import { RadarChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import { useProfileStore } from '@/stores/profile'
+import { DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import type { ProfileDimensionItem, ProfileDimensionKey } from '@/types'
 
 echarts.use([RadarChart, CanvasRenderer])
+
+defineProps<{ collapsed?: boolean }>()
+const emit = defineEmits<{ toggle: [] }>()
 
 const profile = useProfileStore()
 
@@ -34,11 +38,10 @@ function getDim(key: ProfileDimensionKey): ProfileDimensionItem | undefined {
 
 function dimValue(key: ProfileDimensionKey): number {
   const dim = getDim(key)
-  if (!dim) return 5   // 未建立 → 接近零
+  if (!dim) return 5
   return Math.round(dim.confidence * 100)
 }
 
-// 雷达图层色：核心蓝 / 风格橙 / 辅助灰
 function layerColor(layer: string): string {
   if (layer === 'core') return '#2B6FFF'
   if (layer === 'style') return '#FF9F0A'
@@ -82,7 +85,6 @@ const radarOption = computed(() => ({
   ],
 }))
 
-// ===== 核心层数据 =====
 const knowledgeValue = computed(() => getDim('knowledge_basis')?.value)
 const masteredList = computed(() => (knowledgeValue.value?.mastered ?? knowledgeValue.value?.strong ?? []) as string[])
 const weakList    = computed(() => (knowledgeValue.value?.weak ?? []) as string[])
@@ -97,7 +99,6 @@ const goalPrimary = computed(() => goalValue.value?.primary as string || '未设
 const goalSubs    = computed(() => (goalValue.value?.sub_goals ?? []) as string[])
 const goalPercent = computed(() => dimValue('learning_goal'))
 
-// ===== 风格层数据 =====
 const styleValue = computed(() => getDim('cognitive_style')?.value)
 const styleLabel  = computed(() => {
   const pref = styleValue.value?.media_preference as string
@@ -121,7 +122,6 @@ const paceUrgency  = computed(() => {
   return map[u] ?? ''
 })
 
-// ===== 辅助层数据 =====
 const majorValue = computed(() => getDim('major_context')?.value)
 const majorText  = computed(() => {
   if (!majorValue.value) return '未设置'
@@ -139,7 +139,6 @@ const interestTopics = computed(() => (interestValue.value?.topics ?? []) as str
 const errorValue = computed(() => getDim('error_pattern')?.value)
 const errorTags = computed(() => (errorValue.value?.tags ?? []) as string[])
 
-// ===== 元数据 =====
 const versionText = computed(() =>
   profile.fullProfile ? `v${profile.fullProfile.version}` : profile.profileVersion
 )
@@ -149,10 +148,40 @@ const updatedText = computed(() =>
 </script>
 
 <template>
-  <div style="display: grid; grid-template-rows: auto 1fr; height: 100%; background-color: var(--lt-bg-card); border-left: 1px solid var(--lt-border);">
+  <!-- 收起态：右侧细条 -->
+  <div
+    v-if="collapsed"
+    class="flex flex-col items-center justify-between py-4 cursor-pointer group transition-colors"
+    style="height: 100%; width: 36px; background-color: var(--lt-bg-card); border-left: 1px solid var(--lt-border);"
+    @click="emit('toggle')"
+  >
+    <span
+      class="text-xs font-medium tracking-wider transition-colors group-hover:text-[var(--lt-brand)]"
+      style="writing-mode: vertical-rl; color: var(--lt-text-auxiliary);"
+    >学习画像</span>
+    <div class="flex flex-col items-center gap-1.5">
+      <el-tag size="small" type="info" effect="plain" class="!text-[10px] !px-0.5">{{ versionText }}</el-tag>
+      <el-icon :size="14" class="transition-colors group-hover:text-[var(--lt-brand)]" style="color: var(--lt-text-placeholder);"><DArrowLeft /></el-icon>
+    </div>
+  </div>
+
+  <!-- 展开态：完整面板 -->
+  <div
+    v-else
+    style="display: grid; grid-template-rows: auto 1fr; height: 100%; background-color: var(--lt-bg-card); border-left: 1px solid var(--lt-border);"
+  >
     <!-- 头部 -->
     <div class="p-4" style="grid-row: 1; border-bottom: 1px solid var(--lt-border);">
-      <h2 class="text-lg font-medium" style="color: var(--lt-text-primary);">学习画像</h2>
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-medium" style="color: var(--lt-text-primary);">学习画像</h2>
+        <el-button
+          link
+          class="!p-1 !min-w-0"
+          @click="emit('toggle')"
+        >
+          <el-icon :size="16" style="color: var(--lt-text-placeholder);"><DArrowRight /></el-icon>
+        </el-button>
+      </div>
       <div class="flex items-center justify-between mt-1">
         <p class="text-xs" style="color: var(--lt-text-auxiliary);">{{ updatedText }}</p>
         <el-tag size="small" type="info" effect="plain">{{ versionText }}</el-tag>
@@ -189,7 +218,6 @@ const updatedText = computed(() =>
           核心 · 决定学什么
         </h3>
 
-        <!-- 知识基础 -->
         <div class="mb-4">
           <div class="flex justify-between mb-1">
             <span class="text-xs font-medium" style="color: var(--lt-text-secondary);">知识基础</span>
@@ -207,7 +235,6 @@ const updatedText = computed(() =>
           </div>
         </div>
 
-        <!-- 学习目标 -->
         <div>
           <div class="flex justify-between mb-1">
             <span class="text-xs font-medium" style="color: var(--lt-text-secondary);">学习目标</span>

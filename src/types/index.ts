@@ -1,10 +1,106 @@
+// ========== 用户（User）相关类型 ==========
+
+/** 用户完整信息（与后端 UserInfoResponse 对齐） */
+export interface UserInfo {
+  id: string
+  username: string
+  email: string
+  role: string
+  displayName?: string
+  avatarUrl?: string
+  bio?: string
+  major?: string
+  grade?: string
+  createdAt?: string
+}
+
+/** 个人资料更新请求 */
+export interface UpdateProfileRequest {
+  displayName?: string
+  bio?: string
+  major?: string
+  grade?: string
+}
+
+/** 学习统计（与后端 LearningStatsResponse 对齐） */
+export interface LearningStats {
+  totalHours: number
+  weekHours: number
+  resourcePackCount: number
+  weekResourcePacks: number
+  pathProgressPercent: number
+  weakCount: number
+  prevWeakCount: number
+  totalQuizScoreAvg?: number
+  radarData: { name: string; value: number }[]
+  weeklyActivity: { week: string; hours: number }[]
+  profileHistory: ProfileVersionSummary[]
+}
+
+/** 画像版本摘要 */
+export interface ProfileVersionSummary {
+  version: number
+  createdAt: string
+  trigger: string
+  summary: string[]
+}
+
+/** 后端通知（与 NotificationResponse 对齐） */
+export interface AppNotification {
+  id: string
+  type: string
+  title: string
+  message: string
+  isRead: boolean
+  isPushed: boolean
+  refId?: string
+  refType?: string
+  createdAt: string
+}
+
+// ========== 课程（Course）相关类型 ==========
+
+/** 课程信息（来自后端 API） */
+export interface CourseInfo {
+  id: string
+  name: string
+  emoji: string
+  enrolledAt?: string
+  progress?: {
+    tasksCompleted: number
+    resourcesGenerated: number
+    pathProgressPercent: number
+  }
+}
+
+/** 课程详情（含选课状态） */
+export interface CourseDetail {
+  id: string
+  name: string
+  description: string
+  emoji: string
+  enrolledCount: number
+  isEnrolled: boolean
+  createdAt: string
+}
+
+/** 可选课程列表项 */
+export interface AvailableCourse {
+  id: string
+  name: string
+  description: string
+  emoji: string
+  enrolledCount: number
+  createdAt: string
+}
+
 // ========== 资源包（Resource Pack）相关类型 ==========
 
 /** 单个资源项 */
 export interface ResourceItem {
   id: string
   title: string
-  type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video_script'
+  type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video'
   status: 'pending' | 'ready' | 'failed' | 'rejected'
   confidence?: 'high' | 'medium' | 'low'
   sourcesCount?: number
@@ -252,7 +348,7 @@ export interface QuizContent {
 }
 
 /** SSE 事件类型汇总 */
-export type SSEEventType = 'task.accepted' | 'task.stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'task.done' | 'task.failed'
+export type SSEEventType = 'task.accepted' | 'task.stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'task.done' | 'task.failed' | 'subtopic.started' | 'subtopic.completed'
 
 /** 全局通知项 */
 export interface NotificationItem {
@@ -299,4 +395,140 @@ export interface LearningPath {
   adjustments: PathAdjustment[]
   createdAt: string
   updatedAt: string
+}
+
+// ========== 学习计划 v3.0 (Plan) 相关类型 ==========
+
+/** 学习计划（大计划） */
+export interface Plan {
+  planId: string
+  version: number
+  profileVersion: number
+  courseId: string
+  status: string
+  createdAt: string | null
+  modules: Module[]
+  edges: Edge[]
+  summary: PlanSummary | null
+}
+
+export interface PlanSummary {
+  totalModules: number
+  coreModules: number
+  supplementaryModules: number
+  totalHours: number
+  completionEstimate: string
+}
+
+export interface Edge {
+  from: string
+  to: string
+  type: string
+}
+
+/** Module（大计划中的一个模块） */
+export interface Module {
+  moduleId: string
+  title: string
+  knowledgePoints: { kpId: string; name: string }[]
+  scope: 'core_curriculum' | 'supplementary' | 'extracurricular'
+  prerequisites: string[]
+  estimatedHours: number | null
+  depth: 'basic' | 'standard' | 'deep'
+  status: 'locked' | 'ready' | 'in_progress' | 'completed'
+  mastery: number | null
+  subPlanId: string | null
+  subPlan: SubPlan | null
+}
+
+/** 子计划（一个 module 的 activity 序列） */
+export interface SubPlan {
+  subPlanId: string
+  moduleId: string
+  version: number
+  activities: Activity[]
+  adjustments: any[]
+  stats: SubPlanStats | null
+  matchSummary: MatchSummary | null
+}
+
+export interface SubPlanStats {
+  completionPct: number
+  avgQuizScore: number | null
+  totalTimeSpent: number
+}
+
+export interface MatchSummary {
+  matchedCount: number
+  toGenerateCount: number
+  toGenerate: { type: string; topic: string; reason: string }[]
+}
+
+/** Activity（单个学习活动） */
+export interface Activity {
+  activityId: string
+  type: 'learn' | 'quiz' | 'explore'
+  title: string
+  description: string | null
+  requires: string[]
+  resource: ActivityResource | null
+  estimatedMinutes: number | null
+  order: number | null
+  completionCriteria: CompletionCriteria | null
+  status: 'locked' | 'ready' | 'in_progress' | 'completed' | 'failed' | 'skipped'
+  retryCount: number
+  result: ActivityResult | null
+}
+
+export interface ActivityResource {
+  source: 'matched' | 'generated'
+  resourcePackId: string | null
+  resourceType: string
+  generationStatus: string | null
+}
+
+export interface CompletionCriteria {
+  type: 'resource_open' | 'quiz_score'
+  threshold: number
+  met: boolean
+}
+
+export interface ActivityResult {
+  score: number | null
+  timeSpent: number | null
+  completedAt: string | null
+  weakTags: string[]
+}
+
+/** Quiz 答题结果 */
+export interface QuizQuestion {
+  questionId: string
+  type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TRUE_FALSE' | 'FILL_IN_BLANK' | 'SHORT_ANSWER'
+  content: string
+  options: string[] | null
+  answer: string
+  analysis: string
+  difficulty: number
+  tags?: { mistakes?: string[]; knowledge?: string[] }
+}
+
+/** Activity 提交响应 */
+export interface ActivitySubmitResponse {
+  activityId: string
+  activityCompleted: boolean
+  status?: string
+  score?: number
+  weakTags?: string[]
+  retryCount?: number
+  retryAllowed?: boolean
+  retriesRemaining?: number
+  moduleStatus?: string
+  moduleMastery?: number
+  autoAction?: AutoAction | null
+}
+
+export interface AutoAction {
+  type: string
+  reason: string
+  insertedActivities: { activityId: string; type: string; title: string }[]
 }

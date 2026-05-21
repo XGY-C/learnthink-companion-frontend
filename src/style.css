@@ -155,6 +155,15 @@
   --lt-shadow-hover: 0 4px 16px rgba(43, 111, 255, 0.12);
   --lt-shadow-elevated: 0 8px 32px rgba(43, 111, 255, 0.18);
   --lt-shadow-ai-hover: 0 4px 16px rgba(124, 92, 252, 0.15);
+
+  /* 图表专用色 */
+  --lt-chart-grid: #E8ECF0;
+  --lt-chart-split-bg-0: #F5F7FA;
+  --lt-chart-split-bg-1: #EEF1F5;
+  --lt-chart-split-bg-2: #E8ECF0;
+  --lt-chart-split-bg-3: #DEE3E8;
+  --lt-chart-axis-label: #8E8EA0;
+  --lt-chart-axis-line: #E8ECF0;
   /* 动效 */
   --lt-transition-base: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --lt-transition-smooth: 200ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -165,6 +174,49 @@
   --lt-font-heading: "Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   --lt-font-body: "Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   --lt-font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
+
+  /* ======================== 9. 移动端专属 Token（Component 层） ======================== */
+  /* 导航栏 */
+  --mobile-nav-height: 48px;
+  --mobile-nav-bg: var(--lt-bg-card);
+  --mobile-nav-divider: var(--lt-border);
+  --mobile-nav-title-size: 16px;
+  --mobile-nav-title-color: var(--lt-text-primary);
+
+  /* 底部 TabBar */
+  --mobile-tabbar-height: 56px;
+
+  /* BottomSheet */
+  --mobile-sheet-radius: var(--lt-radius-lg);
+  --mobile-sheet-scrim: rgba(0, 0, 0, 0.4);
+  --mobile-sheet-bg: var(--lt-bg-card);
+  --mobile-sheet-z-index: 1000;
+  --mobile-sheet-scrim-z-index: 999;
+  --mobile-sheet-animation-duration: 250ms;
+
+  /* 触摸反馈 */
+  --mobile-ripple-color: rgba(43, 111, 255, 0.12);
+  --mobile-press-scale: 0.97;
+  --mobile-touch-min: 44px;
+  --mobile-touch-spacing-min: 8px;
+  --mobile-active-bg: rgba(43, 111, 255, 0.06);
+
+  /* 安全区 */
+  --mobile-safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --mobile-safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --mobile-safe-area-inset-left: env(safe-area-inset-left, 0px);
+  --mobile-safe-area-inset-right: env(safe-area-inset-right, 0px);
+
+  /* 移动端间距 */
+  --mobile-page-padding-x: 16px;
+  --mobile-card-padding: 12px;
+  --mobile-card-gap: 12px;
+  --mobile-section-gap: 20px;
+
+  /* 移动端字号 */
+  --mobile-font-body: 15px;
+  --mobile-font-caption: 13px;
+  --mobile-font-small: 11px;
 }
 
 /* ---- 全局样式 ---- */

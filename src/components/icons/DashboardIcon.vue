@@ -10,8 +10,8 @@
     class="dashboard-icon"
     :class="[{ 'is-animated': animated, 'is-small': isSmall }]"
   >
-    <title id="dash-title">学习驾驶舱</title>
-    <desc id="dash-desc">雷达扫描监测学习状态，指标方块展示多维度数据</desc>
+    <title id="dash-title">学习总览</title>
+    <desc id="dash-desc">展示学习进度和多维度数据</desc>
 
     <defs>
       <!-- 底板渐变 -->

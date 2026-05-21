@@ -28,6 +28,7 @@
           class="flex-1 min-w-[240px]"
           clearable
           @clear="searchQuery = ''"
+        />
         <el-select v-model="sortOrder" class="w-36" placeholder="排序方式">
           <el-option label="最新优先" value="newest" />
           <el-option label="最早优先" value="oldest" />
@@ -159,7 +160,7 @@
                       @preview="previewResource(res, pack)"
                       @view-sources="viewSources(res)"
                       @regenerate="regenerateResource(res, pack)"
-                  </div>
+                  /></div>
                   <!-- 操作按钮组 -->
                   <div class="flex justify-end gap-2">
                     <el-button size="small" plain @click.stop="continueLearning(pack)">
@@ -235,6 +236,7 @@
                 ref="mindmapViewerRef"
                 :content="previewMode === 'brief' ? currentPreview.brief || '# 暂无内容' : currentPreview.deepContent || currentPreview.brief || '# 暂无内容'"
                 :isJson="true"
+            />
             </div>
             <!-- 导出按钮 -->
             <div v-if="currentPreview.type === 'mindmap'" class="flex gap-2 mt-3">
@@ -250,6 +252,7 @@
               <MarkdownViewer
                 :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
                 :showToc="false"
+              />
             </div>
             <!-- 代码案例：Markdown 渲染（内容自带代码块） -->
             <div v-else-if="currentPreview.type === 'code'" class="border border-slate-200 rounded-lg overflow-hidden">
@@ -259,16 +262,15 @@
               />
             </div>
             <!-- 视频脚本：Markdown 渲染 -->
-            <div v-else-if="currentPreview.type === 'video_script'" class="">
-              <MarkdownViewer
-                :content="'## 视频脚本\n\n' + (previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容')"
-                :showToc="false"
+            <div v-else-if="currentPreview.type === 'video'" class="">
+
             </div>
             <!-- 默认（doc/reading 等）：完整 Markdown 渲染 -->
             <div v-else class="">
               <MarkdownViewer
                 :content="previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容'"
                 :showToc="previewMode === 'deep'"
+              />
             </div>
           </div>
 
@@ -413,7 +415,7 @@ const packList = reactive<ResourcePack[]>([
         id: 'res-001-5', title: '迷宫寻路实战案例', type: 'code', status: 'ready',
         confidence: 'high', sourcesCount: 5, qualityScore: 90,
         brief: 'Python 实现 A* 算法求解迷宫最短路径，附带可视化与性能对比。',
-        deepContent: '```python\nimport heapq\n\ndef astar(grid, start, goal):\n    open_set = [(0, start)]\n    came_from = {}\n    g_score = {start: 0}\n    f_score = {start: heuristic(start, goal)}\n    ...\n```',
+        deepContent: '``python\nimport heapq\n\ndef astar(grid, start, goal):\n    open_set = [(0, start)]\n    came_from = {}\n    g_score = {start: 0}\n    f_score = {start: heuristic(start, goal)}\n    ...\n```',
         pushReasons: ['偏好：代码实操优先', '薄弱点：算法实现'],
         sources: [
           { title: 'Python 算法实现示例集', locator: '搜索算法', quote: 'A* 的 Python 实现通常使用优先队列。', relevance: 'high' }
@@ -514,7 +516,7 @@ const packList = reactive<ResourcePack[]>([
     estimatedMinutes: 50,
     isActive: false,
     pushReason: '项目实战需要；兴趣方向：后端开发',
-    resourceTypes: ['doc', 'mindmap', 'quiz', 'reading', 'video_script'],
+    resourceTypes: ['doc', 'mindmap', 'quiz', 'reading', 'video'],
     resources: [
       {
         id: 'res-004-1', title: 'HTTP 核心概念精讲', type: 'doc', status: 'ready',
@@ -545,11 +547,8 @@ const packList = reactive<ResourcePack[]>([
         sources: []
       },
       {
-        id: 'res-004-5', title: '从 HTTP/1.1 到 HTTP/3 演进', type: 'video_script', status: 'ready',
-        confidence: 'medium', sourcesCount: 3, qualityScore: 85,
-        brief: '视频脚本：生动讲解 HTTP 各版本的演进与核心改进点。',
-        pushReasons: ['偏好：视频学习'],
-        sources: []
+        id: 'res-004-5', title: '从 HTTP/1.1 到 HTTP/3 演进', type: 'video', status: 'ready',
+
       }
     ]
   },
@@ -678,7 +677,7 @@ const resourceTypeTagType = (type: string) => {
     quiz: 'success',
     reading: 'info',
     code: 'danger',
-    video_script: 'default'
+    video: 'default'
   }
   return map[type] || 'info'
 }
@@ -690,7 +689,7 @@ const resourceTypeLabel = (type: string) => {
     quiz: '练习题',
     reading: '拓展阅读',
     code: '代码案例',
-    video_script: '视频脚本'
+    video: '视频脚本'
   }
   return map[type] || type
 }

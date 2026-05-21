@@ -1,34 +1,84 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiFetch } from '@/utils/api'
-import type { ProfileDimension, Profile, ProfileDelta, ProfileDimensionChange, ProfileDimensionItem } from '@/types'
-
-export interface CourseInfo {
-  id: string
-  name: string
-  emoji: string
-}
-
-const COURSES: CourseInfo[] = [
-  { id: 'course-ai-001', name: '人工智能导论', emoji: '🤖' },
-  { id: 'course-db-001', name: '数据库原理', emoji: '🗄️' },
-]
+import type { ProfileDimension, Profile, ProfileDelta, ProfileDimensionChange, ProfileDimensionItem, CourseInfo } from '@/types'
 
 export const useProfileStore = defineStore('profile', () => {
-  // ===== 课程状态（全局共享） =====
-  const courses = ref<CourseInfo[]>([...COURSES])
-  const activeCourseId = ref<string>('course-ai-001')
+  // ===== 课程状态（动态加载） =====
+  const courses = ref<CourseInfo[]>([])
+  const activeCourseId = ref<string>('')
+  const coursesLoading = ref(false)
+  const coursesError = ref<string | null>(null)
 
-  const activeCourse = computed<CourseInfo>(() =>
-    courses.value.find(c => c.id === activeCourseId.value) ?? courses.value[0]
+  const activeCourse = computed<CourseInfo | null>(() =>
+    courses.value.find(c => c.id === activeCourseId.value) ?? null
   )
 
+  // ===== 课程 API 方法 =====
+
+  /** 获取我的已选课程 */
+  async function fetchMyCourses() {
+    coursesLoading.value = true
+    coursesError.value = null
+    try {
+      const res = await apiFetch<CourseInfo[]>('/courses/my')
+      courses.value = res.data ?? []
+    } catch {
+      coursesError.value = '课程列表加载失败'
+      courses.value = []
+    } finally {
+      coursesLoading.value = false
+    }
+  }
+
+  /** 选课并切换到新课程 */
+  async function enrollCourse(courseId: string) {
+    await apiFetch('/courses/enroll', { method: 'POST', body: { courseId } })
+    await fetchMyCourses()
+    const newCourse = courses.value.find(c => c.id === courseId)
+    if (newCourse) {
+      switchCourse(newCourse)
+    }
+  }
+
+  /** 退课 */
+  async function leaveCourse(courseId: string) {
+    await apiFetch('/courses/leave', { method: 'POST', body: { courseId } })
+    await fetchMyCourses()
+    if (activeCourseId.value === courseId) {
+      if (courses.value.length > 0) {
+        switchCourse(courses.value[0])
+      } else {
+        activeCourseId.value = ''
+        clearProfile()
+      }
+    }
+  }
+
+  /** 切换课程 */
   function switchCourse(course: CourseInfo) {
     if (activeCourseId.value === course.id) return
     activeCourseId.value = course.id
+    localStorage.setItem('activeCourseId', course.id)
     refreshProfile(course.id)
   }
-  // ===== 可视化数据（雷达图/标签云用） =====
+
+  /** 初始化课程状态 */
+  async function initCourses() {
+    await fetchMyCourses()
+    if (courses.value.length === 0) {
+      activeCourseId.value = ''
+      return
+    }
+    const saved = localStorage.getItem('activeCourseId')
+    if (saved && courses.value.find(c => c.id === saved)) {
+      activeCourseId.value = saved
+    } else {
+      activeCourseId.value = courses.value[0].id
+    }
+  }
+
+  // ===== 画像状态 =====
   const dimensions = ref<ProfileDimension[]>([
     { name: '代码能力', value: 70, category: 'mastery' },
     { name: '架构设计', value: 45, category: 'weakness' },
@@ -41,7 +91,6 @@ export const useProfileStore = defineStore('profile', () => {
   const profileVersion = ref('v1.2')
   const updatedAt = ref('刚刚')
 
-  // ===== 新增：完整画像与增量（对接后端 API） =====
   const fullProfile = ref<Profile | null>(null)
   const lastDelta = ref<ProfileDelta | null>(null)
 
@@ -90,23 +139,17 @@ export const useProfileStore = defineStore('profile', () => {
   }
 
   function updateFromDialog(_messages: string[]) {
-    // 模拟画像更新：从对话中提取维度变化
     profileVersion.value = 'v' + (parseFloat(profileVersion.value.replace('v', '')) + 0.1).toFixed(1)
     updatedAt.value = '刚刚'
   }
 
-  // ===== 新增：ProfileDelta 消费方法 =====
-
-  /** 应用画像增量，即时更新可视化数据 */
   function applyDelta(delta: ProfileDelta | null) {
     if (!delta || delta.changed.length === 0) return false
 
-    // 按 action 应用各维度变更
     for (const change of delta.changed) {
       applyDimensionChange(change)
     }
 
-    // 更新元数据
     profileVersion.value = `v${delta.to_version}`
     updatedAt.value = delta.updated_at
     lastDelta.value = delta
@@ -114,7 +157,6 @@ export const useProfileStore = defineStore('profile', () => {
     return true
   }
 
-  /** 将单维度变更映射到 fullProfile（差异更新，不覆盖其他维） */
   function applyDimensionChange(change: ProfileDimensionChange) {
     if (!fullProfile.value) {
       fullProfile.value = {
@@ -133,13 +175,11 @@ export const useProfileStore = defineStore('profile', () => {
     if (change.action === 'remove' && idx >= 0) {
       dims.splice(idx, 1)
     } else if (idx >= 0) {
-      // 更新已有维度
       dims[idx].value = change.after ?? dims[idx].value
       dims[idx].confidence = change.confidence
       dims[idx].updated_at = new Date().toISOString()
       dims[idx].source = 'inferred'
     } else if (change.action !== 'remove') {
-      // 新增维度
       dims.push({
         key: change.key,
         label: change.label,
@@ -153,20 +193,17 @@ export const useProfileStore = defineStore('profile', () => {
     fullProfile.value.version = change.confidence >= 0.6 ? (fullProfile.value.version || 0) + 1 : fullProfile.value.version
   }
 
-  /** 按 key 判定分层 */
   function resolveLayer(key: string): 'core' | 'style' | 'auxiliary' {
     if (key === 'knowledge_basis' || key === 'learning_goal') return 'core'
     if (key === 'cognitive_style' || key === 'learning_pace') return 'style'
     return 'auxiliary'
   }
 
-  /** 从完整 Profile JSON 初始化存储（页面加载/刷新时调用） */
   function loadFromProfile(profileData: Profile) {
     fullProfile.value = profileData
     profileVersion.value = `v${profileData.version}`
     updatedAt.value = profileData.updated_at
 
-    // 将知识基础映射到兼容的旧可视化结构
     const kbDim = profileData.dimensions.find(d => d.key === 'knowledge_basis')
     if (kbDim) {
       const mastered = (kbDim.value?.strong ?? kbDim.value?.mastered ?? []) as string[]
@@ -180,11 +217,9 @@ export const useProfileStore = defineStore('profile', () => {
       }
     }
 
-    // 从兴趣方向映射
     const intDim = profileData.dimensions.find(d => d.key === 'interest_direction')
     if (intDim) {
       const topics = (intDim.value?.topics ?? []) as string[]
-      // 注入 tags interest
       for (const topic of topics) {
         if (!dimensions.value.find(d => d.name === topic)) {
           dimensions.value.push({ name: topic, value: 60, category: 'interest' })
@@ -224,10 +259,13 @@ export const useProfileStore = defineStore('profile', () => {
   }
 
   return {
-    courses, activeCourseId, activeCourse, switchCourse,
+    // 课程
+    courses, activeCourseId, activeCourse, coursesLoading, coursesError,
+    fetchMyCourses, enrollCourse, leaveCourse, switchCourse, initCourses,
+    // 画像
     dimensions, profileVersion, updatedAt, fullProfile, lastDelta,
     radarData, tags, pace, preference,
     updateDimension, updateFromDialog,
-    applyDelta, applyDimensionChange, loadFromProfile, refreshProfile,
+    applyDelta, applyDimensionChange, loadFromProfile, refreshProfile, clearProfile,
   }
 })

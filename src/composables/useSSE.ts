@@ -10,6 +10,8 @@ export interface SSECallbacks {
   onAgentMessage?: (data: any) => void
   onTaskDone?: (data: { packId: string; topic: string; resourceTypes: string[]; plannerRationale: string }) => void
   onTaskFailed?: (data: { error: string; message: string }) => void
+  onSubTopicStarted?: (data: { index: number; total: number; title: string; description: string; itemCount: number }) => void
+  onSubTopicCompleted?: (data: { index: number; total: number; title: string; publishedItems: string[] }) => void
 }
 
 export function useSSE() {
@@ -61,6 +63,8 @@ export function useSSE() {
       'task.done': callbacks.onTaskDone,
       'task.failed': callbacks.onTaskFailed,
       'task.accepted': undefined,
+      'subtopic.started': callbacks.onSubTopicStarted,
+      'subtopic.completed': callbacks.onSubTopicCompleted,
     }
 
     Object.entries(handlers).forEach(([event, handler]) => {

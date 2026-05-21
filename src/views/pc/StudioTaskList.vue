@@ -1,6 +1,5 @@
 <template>
-  <div class="studio-list p-6">
-    <!-- 页面标题栏 -->
+  <div class="studio-list p-6" style="height: 100%; overflow-y: auto;">
     <div class="flex items-center justify-between mb-6">
       <div>
         <div class="flex items-center gap-3">
@@ -11,7 +10,6 @@
       </div>
     </div>
 
-    <!-- 工具栏：搜索 + 筛选 + 视图切换 -->
     <div class="flex items-center gap-3 mb-6 flex-wrap">
       <el-input
         v-model="searchText"
@@ -46,7 +44,6 @@
       </div>
     </div>
 
-    <!-- 加载骨架 -->
     <div v-if="loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
       <div v-for="i in 4" :key="i" class="rounded-xl p-5 animate-pulse" style="background-color: var(--lt-bg-card); border: 1px solid var(--lt-border);">
         <div class="h-3 w-16 rounded mb-3" style="background-color: var(--lt-bg-page);" />
@@ -56,7 +53,6 @@
       </div>
     </div>
 
-    <!-- 空状态 -->
     <EmptyState
       v-else-if="filteredTasks.length === 0 && !loading"
       :icon="!searchText && !statusFilter ? MagicStick : FolderOpened"
@@ -68,7 +64,6 @@
       @action="$router.push('/chat')"
     />
 
-    <!-- 卡片视图 -->
     <div v-else-if="viewMode === 'card'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
       <div
         v-for="(task, index) in filteredTasks"
@@ -78,13 +73,12 @@
       >
         <TaskCard
           :task="task"
-          :course-name="courseNameMap[task.courseId] || task.courseId"
+          :course-name="getCourseName(task.courseId)"
           @click="goToDetail(task.taskId)"
         />
       </div>
     </div>
 
-    <!-- 列表视图 -->
     <div v-else class="rounded-lg border overflow-hidden" style="border-color: var(--lt-border); background-color: var(--lt-bg-card);">
       <div class="grid grid-cols-12 gap-3 px-4 py-2.5 text-[11px] font-medium" style="color: var(--lt-text-auxiliary); background-color: var(--lt-bg-page); border-bottom: 1px solid var(--lt-border);">
         <span class="col-span-1">状态</span>
@@ -101,14 +95,11 @@
         style="border-bottom: 1px solid var(--lt-border);"
         @click="goToDetail(task.taskId)"
       >
-        <!-- 状态 -->
         <span class="col-span-1 flex items-center gap-1.5">
           <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ backgroundColor: getStatusConfig(task.status).color }" />
           <span class="text-[11px]" :style="{ color: getStatusConfig(task.status).color }">{{ getStatusConfig(task.status).label }}</span>
         </span>
-        <!-- 知识点 -->
         <span class="col-span-3 font-medium truncate" style="color: var(--lt-text-primary);">{{ task.topic || '未命名' }}</span>
-        <!-- 进度 -->
         <span class="col-span-2 text-[12px]" style="color: var(--lt-text-auxiliary);">
           <template v-if="task.status === 'RUNNING'">
             <div class="flex items-center gap-2">
@@ -128,15 +119,12 @@
             <span class="text-[11px]" style="color: var(--lt-text-placeholder);">等待中</span>
           </template>
         </span>
-        <!-- 资源 -->
         <span class="col-span-2 text-[12px]" style="color: var(--lt-text-auxiliary);">
           <template v-if="task.status === 'SUCCEEDED'">{{ task.resourceCount }} 项</template>
           <template v-else-if="task.status === 'RUNNING'">{{ task.resourceTypes?.length || 0 }} 类待生成</template>
           <template v-else>—</template>
         </span>
-        <!-- 时间 -->
         <span class="col-span-2 text-[11px]" style="color: var(--lt-text-placeholder);">{{ formatRelativeTime(task.createdAt) }}</span>
-        <!-- 操作 -->
         <span class="col-span-2">
           <el-button link type="primary" size="small" @click.stop="goToDetail(task.taskId)">
             查看详情 →
@@ -182,9 +170,28 @@ const inactiveToggleStyle = {
   border: 'none',
 }
 
-const courseNameMap: Record<string, string> = {
-  'course-ai-001': 'AI 导论',
-  'course-db-001': '数据库原理',
+const courseNameMap = ref<Record<string, string>>({})
+
+function getCourseName(courseId: string): string {
+  return courseNameMap.value[courseId] || profileStore.courses.find(c => c.id === courseId)?.name || courseId
+}
+
+async function loadCourseNames() {
+  const ids = [...new Set(tasks.value.map(t => t.courseId).filter(Boolean))]
+  const map: Record<string, string> = {}
+  for (const id of ids) {
+    const c = profileStore.courses.find(c => c.id === id)
+    if (c) map[id] = c.name
+  }
+  for (const id of ids) {
+    if (!map[id]) {
+      try {
+        const res = await apiFetch<{ id: string; name: string; emoji: string }>(`/courses/${id}`)
+        if (res.data) map[id] = res.data.name
+      } catch { /* ignore */ }
+    }
+  }
+  courseNameMap.value = map
 }
 
 function setViewMode(mode: 'card' | 'list') {
@@ -220,15 +227,14 @@ async function loadTasks() {
     const res = await apiFetch<TaskSummary[]>(url)
     if (res.data) {
       tasks.value = res.data
+      loadCourseNames()
     }
   } catch {
-    // silently handle - show empty state
+    // silently handle
   } finally {
     loading.value = false
   }
 }
 
-onMounted(() => {
-  loadTasks()
-})
+onMounted(() => { loadTasks() })
 </script>

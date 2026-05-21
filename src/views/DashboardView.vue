@@ -22,13 +22,13 @@ import {
   MagicStick
 } from '@element-plus/icons-vue'
 import { useProfileStore } from '@/stores/profile'
-import { usePathStore } from '@/stores/path'
+import { usePlanStore } from '@/stores/plan'
 import EmptyState from '@/components/EmptyState.vue'
 import DashboardIcon from '@/components/icons/DashboardIcon.vue'
 
 const router = useRouter()
 const profile = useProfileStore()
-const pathStore = usePathStore()
+const planStore = usePlanStore()
 
 echarts.use([RadarChart, CanvasRenderer])
 
@@ -146,10 +146,7 @@ const nextRecommendation = computed(() => ({
 
 // ===== 路径进度 =====
 const pathProgress = computed(() => {
-  const allNodes = pathStore.nodes.length
-  if (allNodes === 0) return 0
-  const mastered = pathStore.nodes.filter(n => n.status === 'mastered').length
-  return Math.round((mastered / allNodes) * 100)
+  return planStore.overallProgress
 })
 
 // ===== 最近资源包列表 =====
@@ -244,13 +241,18 @@ onMounted(() => {
             <div>
         <h1 class="text-2xl font-bold flex items-center gap-2" style="color: var(--lt-text-primary);">
             <DashboardIcon :size="36" :animated="true" />
-            <span>学习驾驶舱</span>
+            <span>学习总览</span>
           </h1>
           <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">基于多智能体画像驱动的个性化学习概览</p>
       </div>
-      <el-button size="small" plain :icon="RefreshRight" @click="refreshMetrics" class="!rounded-full">
-        刷新数据
-      </el-button>
+      <div class="flex items-center gap-3">
+        <el-button link type="primary" size="small" @click="router.push('/report')" style="color: var(--lt-brand);">
+          完整报告 <el-icon><Right /></el-icon>
+        </el-button>
+        <el-button size="small" plain :icon="RefreshRight" @click="refreshMetrics" class="!rounded-full">
+          刷新数据
+        </el-button>
+      </div>
     </div>
 
     <!-- ============ 空状态（无画像时展示） ============ -->
@@ -281,7 +283,7 @@ onMounted(() => {
       </el-card>
     </template>
 
-    <!-- ============ 完整驾驶舱（有画像） ============ -->
+    <!-- ============ 完整总览（有画像） ============ -->
     <template v-else>
             <!-- 1. 顶部概览条：4 个指标卡（增强版） -->
       <el-row :gutter="20">

@@ -6,7 +6,7 @@ export const RESOURCE_TYPE_LABEL: Record<string, string> = {
   quiz: '练习题',
   reading: '拓展阅读',
   code: '代码案例',
-  video_script: '视频脚本',
+  video: '视频脚本',
 }
 
 export const RESOURCE_TYPE_TAG: Record<string, string> = {
@@ -15,7 +15,7 @@ export const RESOURCE_TYPE_TAG: Record<string, string> = {
   quiz: 'success',
   reading: 'info',
   code: 'danger',
-  video_script: '',
+  video: '',
 }
 
 // ===== 置信度映射 =====
