@@ -7,9 +7,9 @@ const router = useRouter()
 
 function handleNotificationClick(item: any) {
   if (item.packId) {
-    router.push(`/studio?pack_id=${item.packId}`)
+    router.push(`/studio/${item.taskId || ''}?pack_id=${item.packId}`)
   } else if (item.taskId) {
-    router.push(`/studio?task_id=${item.taskId}`)
+    router.push(`/studio/${item.taskId}`)
   }
   notification.remove(item.id)
 }
@@ -108,8 +108,8 @@ body {
 /* 全局通知栈 */
 .notification-stack {
   position: fixed;
-  top: 24px;
-  right: 24px;
+  top: calc(24px + env(safe-area-inset-top, 0px));
+  right: 16px;
   z-index: 9999;
   display: flex;
   flex-direction: column;
@@ -118,7 +118,7 @@ body {
 }
 
 .notification-toast {
-  width: 360px;
+  width: min(360px, calc(100vw - 32px));
   display: flex;
   background: var(--lt-bg-card);
   border-radius: 12px;

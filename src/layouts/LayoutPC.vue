@@ -1,20 +1,44 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
-import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { computed, ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useProfileStore } from '@/stores/profile'
-import type { CourseInfo } from '@/stores/profile'
-import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, EditPen, DataLine, ArrowDown } from '@element-plus/icons-vue'
+import type { CourseInfo } from '@/types'
+import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, EditPen, DataLine, DataAnalysis, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
+import { useAuth } from '@/composables/useAuth'
 
 const route = useRoute()
+const router = useRouter()
 const userStore = useUserStore()
 const profileStore = useProfileStore()
+const { logout } = useAuth()
 const activeMenu = computed(() => route.path)
 const isCollapsed = ref(false)
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
 }
+
+function handleCourseCommand(cmd: { type: string; course?: CourseInfo }) {
+  if (cmd.type === 'switch' && cmd.course) {
+    profileStore.switchCourse(cmd.course)
+  } else if (cmd.type === 'add') {
+    router.push('/courses')
+  }
+}
+
+async function handleUserMenuCommand(command: string) {
+  if (command === 'profile') {
+    router.push('/profile')
+  } else if (command === 'logout') {
+    await logout()
+    router.push('/login')
+  }
+}
+
+onMounted(() => {
+  profileStore.refreshProfile()
+})
 </script>
 
 <template>
@@ -60,7 +84,7 @@ const toggleSidebar = () => {
         >
           <el-menu-item index="/">
             <el-icon><DataBoard /></el-icon>
-            <template #title>驾驶舱 (Dashboard)</template>
+            <template #title>学习总览</template>
           </el-menu-item>
           <el-menu-item index="/chat">
             <el-icon><ChatLineRound /></el-icon>
@@ -74,13 +98,17 @@ const toggleSidebar = () => {
             <el-icon><Guide /></el-icon>
             <template #title>学习路径</template>
           </el-menu-item>
-          <el-menu-item index="/practice">
-            <el-icon><EditPen /></el-icon>
-            <template #title>针对练习</template>
-          </el-menu-item>
           <el-menu-item index="/library">
             <el-icon><DataLine /></el-icon>
             <template #title>资源库</template>
+          </el-menu-item>
+          <el-menu-item index="/report">
+            <el-icon><DataAnalysis /></el-icon>
+            <template #title>学习报告</template>
+          </el-menu-item>
+          <el-menu-item index="/profile">
+            <el-icon><User /></el-icon>
+            <template #title>个人中心</template>
           </el-menu-item>
         </el-menu>
       </div>
@@ -92,14 +120,18 @@ const toggleSidebar = () => {
         style="border-top: 1px solid var(--nav-divider);"
       >
         <template v-if="isCollapsed">
-          <el-avatar :size="28" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">L</el-avatar>
+          <el-avatar :size="28" :src="userStore.userInfo?.avatarUrl" class="cursor-pointer" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));" @click="router.push('/profile')">
+            {{ userStore.userInfo?.displayName?.charAt(0) || userStore.userInfo?.username?.charAt(0) || 'L' }}
+          </el-avatar>
         </template>
         <template v-else>
-          <div class="flex items-center gap-3">
-            <el-avatar :size="32" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">L</el-avatar>
+          <div class="flex items-center gap-3 cursor-pointer rounded-lg p-1 -m-1 transition-colors hover:bg-[var(--lt-brand-lightest)]" @click="router.push('/profile')">
+            <el-avatar :size="32" :src="userStore.userInfo?.avatarUrl" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
+              {{ userStore.userInfo?.displayName?.charAt(0) || userStore.userInfo?.username?.charAt(0) || 'L' }}
+            </el-avatar>
             <div class="flex-1 min-w-0 text-sm">
-              <p class="font-medium truncate" style="color: var(--lt-text-primary);">{{ userStore.userInfo?.displayName || '测试用户' }}</p>
-              <p class="text-xs truncate" style="color: var(--lt-text-auxiliary);">{{ userStore.userInfo?.major || '软件工程专业' }}</p>
+              <p class="font-medium truncate" style="color: var(--lt-text-primary);">{{ userStore.userInfo?.displayName || userStore.userInfo?.username || '测试用户' }}</p>
+              <p class="text-xs truncate" style="color: var(--lt-text-auxiliary);">{{ userStore.userInfo?.major || '未设置专业' }}</p>
             </div>
           </div>
         </template>
@@ -137,18 +169,24 @@ const toggleSidebar = () => {
           </el-icon>
           <div class="text-sm text-gray-500 flex items-center gap-1">
             当前课程
-            <el-dropdown trigger="click" @command="(course: CourseInfo) => profileStore.switchCourse(course)">
+            <el-dropdown trigger="click" @command="handleCourseCommand">
               <span class="font-medium px-3 py-1.5 rounded-full text-sm ml-2 border cursor-pointer select-none hover:shadow-sm transition-all"
                 style="color: #5A5A72; background-color: #E8F0FE; border-color: #D6E4FF;">
-                <span class="mr-1">{{ profileStore.activeCourse.emoji }}</span>
-                {{ profileStore.activeCourse.name }}
+                <span class="mr-1">{{ profileStore.activeCourse?.emoji || '📚' }}</span>
+                {{ profileStore.activeCourse?.name || '未选择课程' }}
                 <el-icon :size="10" class="ml-0.5 text-gray-400"><ArrowDown /></el-icon>
               </span>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item v-for="c in profileStore.courses" :key="c.id" :command="c"
+                  <el-dropdown-item
+                    v-for="c in profileStore.courses" :key="c.id"
+                    :command="{ type: 'switch', course: c }"
                     :class="{ 'is-active': c.id === profileStore.activeCourseId }">
                     <span class="mr-1">{{ c.emoji }}</span>{{ c.name }}
+                    <span v-if="c.id === profileStore.activeCourseId" class="ml-1 text-blue-500">✓</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item divided :command="{ type: 'add' }">
+                    ＋ 添加课程
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -168,18 +206,26 @@ const toggleSidebar = () => {
             circle
             icon="Bell"
             class="header-icon-btn !border-0 !bg-transparent hover:!bg-gray-100"
+            @click="router.push('/profile?tab=notifications')"
           >
             <span class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white"></span>
           </el-button>
-          <el-button
-            circle
-            icon="Setting"
-            class="header-icon-btn !border-0 !bg-transparent hover:!bg-gray-100"
-          />
           <el-divider direction="vertical" class="!h-5 !mx-1" />
-          <el-avatar :size="32" class="cursor-pointer ring-2 ring-white shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
-            L
-          </el-avatar>
+          <el-dropdown trigger="click" @command="handleUserMenuCommand">
+            <el-avatar :size="32" :src="userStore.userInfo?.avatarUrl" class="cursor-pointer ring-2 ring-white shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
+              {{ userStore.userInfo?.displayName?.charAt(0) || userStore.userInfo?.username?.charAt(0) || 'L' }}
+            </el-avatar>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="profile">
+                  <el-icon><User /></el-icon> 个人中心
+                </el-dropdown-item>
+                <el-dropdown-item command="logout" divided>
+                  <el-icon><SwitchButton /></el-icon> 退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </header>
 
@@ -188,7 +234,7 @@ const toggleSidebar = () => {
         <!-- 路由匹配到的具体视图（如画像对话页/工作室页） -->
         <router-view v-slot="{ Component, route }">
           <transition name="page">
-            <div class="page-view" :key="route.fullPath">
+            <div class="page-view" :key="profileStore.activeCourseId">
               <component :is="Component" />
             </div>
           </transition>

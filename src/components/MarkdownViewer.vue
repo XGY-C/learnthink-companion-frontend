@@ -21,6 +21,7 @@
       ref="contentRef"
       class="markdown-content"
       v-html="sanitizedHtml"
+      @click="onContentClick"
     />
   </div>
 </template>
@@ -43,63 +44,90 @@ const props = withDefaults(defineProps<{
 const contentRef = ref<HTMLElement | null>(null)
 const activeHeadingId = ref('')
 
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// 事件委托：代码块复制按钮
+function onContentClick(e: MouseEvent) {
+  const btn = (e.target as HTMLElement).closest('.code-copy-btn')
+  if (!btn) return
+  const code = btn.getAttribute('data-code')
+  if (!code) return
+  const decoded = code.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+  navigator.clipboard.writeText(decoded).then(() => {
+    btn.classList.add('copied')
+    setTimeout(() => btn.classList.remove('copied'), 1500)
+  }).catch(() => {
+    // fallback: silent
+  })
+}
+
 // ===== Markdown 转 HTML =====
 const mdToHtml = (md: string): string => {
   let html = md
   const mathPlaceholders: { placeholder: string; html: string }[] = []
+  const codePlaceholders: { placeholder: string; html: string }[] = []
 
-  // ── 数学公式保护（在 markdown 处理前提取，避免 _ ^ 等被误解析）──
-  // 块级公式 $$...$$ 和 \[...\]
-  html = html.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
+  // ── 数学公式保护 ──
+  html = html.replace(/\$\$([\s\S]*?)\$\$/g, (_m, formula) => {
     const displayHtml = katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })
     const ph = `%%MATH_${mathPlaceholders.length}%%`
     mathPlaceholders.push({ placeholder: ph, html: displayHtml })
     return ph
   })
-  html = html.replace(/\\\[([\s\S]*?)\\\]/g, (match, formula) => {
+  html = html.replace(/\\\[([\s\S]*?)\\\]/g, (_m, formula) => {
     const displayHtml = katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })
     const ph = `%%MATH_${mathPlaceholders.length}%%`
     mathPlaceholders.push({ placeholder: ph, html: displayHtml })
     return ph
   })
-  // 行内公式 $...$ 和 \(...\)（不跨行，排除纯数字如 $100）
-  html = html.replace(/\$(.+?)\$/g, (match, formula) => {
-    if (/^\d+(\.\d+)?$/.test(formula.trim())) return match
+  html = html.replace(/\$(.+?)\$/g, (_m, formula) => {
+    if (/^\d+(\.\d+)?$/.test(formula.trim())) return _m
     const inlineHtml = katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false })
     const ph = `%%MATH_${mathPlaceholders.length}%%`
     mathPlaceholders.push({ placeholder: ph, html: inlineHtml })
     return ph
   })
-  html = html.replace(/\\\((.+?)\\\)/g, (match, formula) => {
+  html = html.replace(/\\\((.+?)\\\)/g, (_m, formula) => {
     const inlineHtml = katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false })
     const ph = `%%MATH_${mathPlaceholders.length}%%`
     mathPlaceholders.push({ placeholder: ph, html: inlineHtml })
     return ph
   })
 
-
-  // 代码块（必须优先处理，防止内部内容被其他规则匹配）
+  // ── 代码块 + 行内代码保护（占位符，避免 * _ # 等被后续正则破坏）──
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    const trimmedCode = code.replace(/</g, '&lt;').replace(/>/g, '&gt;')
     const langClass = lang ? ` class="language-${lang}"` : ''
-    return `<pre><code${langClass}>${trimmedCode}</code></pre>`
+    const ph = `%%CODE_${codePlaceholders.length}%%`
+    const escapedCode = code.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    codePlaceholders.push({
+      placeholder: ph,
+      html: `<div class="code-block-wrapper"><span class="code-copy-btn" data-code="${escapeAttr(escapedCode)}"><span class="code-copy-icon"></span></span><pre><code${langClass}>${escapedCode}</code></pre></div>`,
+    })
+    return ph
+  })
+  html = html.replace(/`([^`]+)`/g, (_m, code) => {
+    const ph = `%%CODE_${codePlaceholders.length}%%`
+    codePlaceholders.push({
+      placeholder: ph,
+      html: `<code>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code>`,
+    })
+    return ph
   })
 
-  // 行内代码
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-
-  // 表格（必须在标题和段落之前处理）
-  html = html.replace(/^\|(.+)\|\n\|[-| :]+\|\n((?:^\|.+\|\n?)+)/gm, (match, headerRow, bodyRows) => {
-    const hCells = headerRow.split('|').map(c => c.trim()).filter(c => c)
-    let tbl = '<table><thead><tr>' + hCells.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>'
-    bodyRows.trim().split('\n').forEach(row => {
-      const cells = row.split('|').map(c => c.trim()).filter(c => c)
-      tbl += '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>'
+  // 表格
+  html = html.replace(/^\|(.+)\|\n\|[-| :]+\|\n((?:^\|.+\|\n?)+)/gm, (_m, headerRow, bodyRows) => {
+    const hCells = headerRow.split('|').map((c: string) => c.trim()).filter((c: string) => c)
+    let tbl = '<table><thead><tr>' + hCells.map((c: string) => `<th>${c}</th>`).join('') + '</tr></thead><tbody>'
+    bodyRows.trim().split('\n').forEach((row: string) => {
+      const cells = row.split('|').map((c: string) => c.trim()).filter((c: string) => c)
+      tbl += '<tr>' + cells.map((c: string) => `<td>${c}</td>`).join('') + '</tr>'
     })
     return tbl + '</tbody></table>'
   })
 
-  // 标题（生成 id 用于锚点）
+  // 标题
   html = html.replace(/^#### (.+)$/gm, (_, text) => {
     const id = text.trim().replace(/\s+/g, '-').replace(/[^\w\u4e00-\u9fff-]/g, '')
     return `<h4 id="${id}">${text}</h4>`
@@ -122,10 +150,10 @@ const mdToHtml = (md: string): string => {
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
 
-  // 分割线（必须在列表之前，避免 --- 被吃掉）
+  // 分割线
   html = html.replace(/^---$/gm, '<hr />')
 
-  // 无序列表（兼容 - / -- 标记，有无空格均可；--- 已被上面处理）
+  // 无序列表
   html = html.replace(/^-{1,2} ?(.+)$/gm, '<li>$1</li>')
   html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
 
@@ -139,14 +167,15 @@ const mdToHtml = (md: string): string => {
   // 链接
   html = html.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
 
-  // 段落（包裹非块元素的文本）
+  // 段落（占位符 %%CODE_ 和 %%MATH_ 视为块级，不包裹 <p>）
   const blockPattern = /^<\/?(h[1-4]|ul|ol|li|pre|code|hr|table|blockquote)/m
+  const placeholderPattern = /^%%(CODE|MATH)_\d+%%/
   const lines = html.split('\n')
   const result: string[] = []
   let inBlock = false
   for (const line of lines) {
-    if (blockPattern.test(line) || line.trim() === '') {
-      inBlock = blockPattern.test(line)
+    if (blockPattern.test(line) || placeholderPattern.test(line) || line.trim() === '') {
+      inBlock = blockPattern.test(line) || placeholderPattern.test(line)
       result.push(line)
     } else if (!inBlock && line.trim()) {
       result.push(`<p>${line}</p>`)
@@ -156,10 +185,12 @@ const mdToHtml = (md: string): string => {
   }
   html = result.join('\n')
 
-
-  // ── 还原数学公式占位符 ──
+  // ── 还原占位符（先数学后代码）──
   for (const { placeholder, html: mathHtml } of mathPlaceholders) {
     html = html.replace(placeholder, mathHtml)
+  }
+  for (const { placeholder, html: codeHtml } of codePlaceholders) {
+    html = html.replace(placeholder, codeHtml)
   }
 
   return html
@@ -191,7 +222,7 @@ const headings = computed<Heading[]>(() => {
 const sanitizedHtml = computed(() => {
   const rawHtml = mdToHtml(props.content)
   return DOMPurify.sanitize(rawHtml, {
-    ADD_ATTR: ['target', 'rel'],
+    ADD_ATTR: ['target', 'rel', 'data-code'],
     ALLOWED_TAGS: [
       'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
       'p', 'br', 'hr',
@@ -380,6 +411,83 @@ onMounted(() => {
   padding: 0;
   color: #334155;
   font-size: 13px;
+}
+
+/* 代码块包装容器 + 复制按钮 */
+.markdown-content :deep(.code-block-wrapper) {
+  position: relative;
+}
+.markdown-content :deep(.code-copy-btn) {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, border-color 0.2s;
+  z-index: 1;
+}
+/* 用 CSS 绘制双矩形复制图标 */
+.markdown-content :deep(.code-copy-icon)::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid #94a3b8;
+  border-radius: 2px;
+  transition: border-color 0.2s;
+}
+.markdown-content :deep(.code-copy-icon)::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid #94a3b8;
+  border-radius: 2px;
+  background: #fff;
+  transition: border-color 0.2s;
+}
+.markdown-content :deep(.code-block-wrapper):hover .code-copy-btn {
+  opacity: 1;
+}
+.markdown-content :deep(.code-copy-btn):hover .code-copy-icon::before,
+.markdown-content :deep(.code-copy-btn):hover .code-copy-icon::after {
+  border-color: #334155;
+}
+.markdown-content :deep(.code-copy-btn.copied) {
+  border-color: #22c55e;
+  background: #f0fdf4;
+  opacity: 1;
+}
+.markdown-content :deep(.code-copy-btn.copied) .code-copy-icon::before {
+  display: none;
+}
+.markdown-content :deep(.code-copy-btn.copied) .code-copy-icon::after {
+  content: '✓';
+  top: 4px;
+  left: 6px;
+  width: auto;
+  height: auto;
+  border: none;
+  background: transparent;
+  color: #22c55e;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+.markdown-content :deep(.code-block-wrapper pre) {
+  margin: 0;
 }
 
 .markdown-content :deep(ul),

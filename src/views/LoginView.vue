@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useUserStore } from '@/stores/user'
 import { Lock, Message, Avatar } from '@element-plus/icons-vue'
 import LottieAnimation from '@/components/LottieAnimation.vue'
 import InteractiveParticles from '@/components/InteractiveParticles.vue'
@@ -17,11 +16,11 @@ import chatPulseLottie from '@/assets/lottie/chat-pulse-v2.json'
 import agentNetworkLottie from '@/assets/lottie/agent-network-v2.json'
 import trustShieldLottie from '@/assets/lottie/trust-shield-v2.json'
 import qualityLoopLottie from '@/assets/lottie/quality-loop-v2.json'
-import { apiFetch } from '@/utils/api'
+import { useAuth, validateEmail, validatePassword } from '@/composables/useAuth'
 
 const router = useRouter()
 const route = useRoute()
-const userStore = useUserStore()
+const { codeSending, codeSent, countdown, codeError, sendVerificationCode, login: authLogin, register: authRegister } = useAuth()
 
 // 状态：login | register
 const activeTab = ref<'login' | 'register'>('login')
@@ -93,56 +92,13 @@ const registerLoading = ref(false)
 const registerError = ref('')
 const registerFieldErrors = ref({ username: '', email: '', password: '', confirmPassword: '', verificationCode: '' })
 
-// 邮箱验证码相关
-const codeSending = ref(false)
-const codeSent = ref(false)
-const countdown = ref(0)
-let countdownTimer: ReturnType<typeof setInterval> | undefined
-
-const startCountdown = () => {
-  countdown.value = 60
-  codeSent.value = true
-  if (countdownTimer) clearInterval(countdownTimer)
-  countdownTimer = setInterval(() => {
-    countdown.value--
-    if (countdown.value <= 0) {
-      clearInterval(countdownTimer)
-      countdownTimer = undefined
-      codeSent.value = false
-    }
-  }, 1000)
-}
-
-const sendVerificationCode = async () => {
-  if (!registerForm.value.email) {
-    registerFieldErrors.value.email = '请先输入邮箱地址'
-    return
-  }
-  // 简单邮箱格式校验
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  if (!emailRegex.test(registerForm.value.email)) {
-    registerFieldErrors.value.email = '邮箱格式不正确'
-    return
-  }
-  registerFieldErrors.value.email = ''
-  
-  codeSending.value = true
-  try {
-    const data = await apiFetch<Record<string, unknown>>('/auth/send-verification-code', {
-      method: 'POST',
-      body: { email: registerForm.value.email },
-      skipAuth: true
-    })
-
-    if (data.code === 0 || data.code === 200) {
-      startCountdown()
-    } else {
-      registerFieldErrors.value.email = data.message || '验证码发送失败'
-    }
-  } catch (e) {
-    registerFieldErrors.value.email = '验证码发送失败，请重试'
-  } finally {
-    codeSending.value = false
+/** 发送验证码（包装 composable，处理字段错误映射） */
+async function handleSendCode() {
+  const { success, error } = await sendVerificationCode(registerForm.value.email)
+  if (!success) {
+    registerFieldErrors.value.email = error
+  } else {
+    registerFieldErrors.value.email = ''
   }
 }
 
@@ -241,24 +197,6 @@ const switchTab = async (tab: 'login' | 'register') => {
   }
 }
 
-const validateEmail = (email: string): string => {
-  if (!email) return '请输入邮箱地址'
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  if (!emailRegex.test(email)) return '邮箱格式不正确'
-  return ''
-}
-
-// 密码校验规则：8-32位，包含大写字母、小写字母与数字
-const validatePassword = (password: string): string => {
-  if (!password) return '请输入密码'
-  if (password.length < 8) return '密码至少 8 个字符'
-  if (password.length > 32) return '密码不超过 32 位'
-  if (!/[a-z]/.test(password)) return '需包含小写字母'
-  if (!/[A-Z]/.test(password)) return '需包含大写字母'
-  if (!/[0-9]/.test(password)) return '需包含数字'
-  return ''
-}
-
 const handleLogin = async () => {
   // 内联校验
   const errors = { email: '', password: '' }
@@ -266,89 +204,69 @@ const handleLogin = async () => {
   if (!loginForm.value.password) errors.password = '请输入密码'
   loginFieldErrors.value = errors
   loginError.value = ''
-  
+
   if (errors.email || errors.password) return
-  
+
   loginLoading.value = true
-  const success = await userStore.login(loginForm.value.email, loginForm.value.password)
+  const { success, error } = await authLogin(loginForm.value.email, loginForm.value.password)
   loginLoading.value = false
 
   if (success) {
-    // 模拟校验通过动画触发
     loginEmailValid.value = true
     loginPasswordValid.value = true
     const redirect = route.query.redirect as string
     router.push(redirect || '/')
   } else {
-    loginError.value = '邮箱或密码不正确'
+    loginError.value = error
   }
 }
 
 const handleRegister = async () => {
-    // 内联校验
+  // 内联校验
   const errors = { username: '', email: '', password: '', confirmPassword: '', verificationCode: '' }
-    if (!registerForm.value.username) errors.username = '请输入用户名'
-  
-  if (!registerForm.value.email) {
-    errors.email = '请输入邮箱地址'
-  } else {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(registerForm.value.email)) {
-      errors.email = '邮箱格式不正确'
-    }
-  }
-  
+  if (!registerForm.value.username) errors.username = '请输入用户名'
+
+  errors.email = validateEmail(registerForm.value.email)
+
   const pwdErr = validatePassword(registerForm.value.password)
   if (pwdErr) errors.password = pwdErr
-  
+
   if (registerForm.value.password !== registerForm.value.confirmPassword) {
     errors.confirmPassword = '两次输入的密码不一致'
   }
-  
+
   registerFieldErrors.value = errors
   registerError.value = ''
-  
-    if (!registerForm.value.agreement) {
+
+  if (!registerForm.value.agreement) {
     registerError.value = '请阅读并同意相关协议'
   }
-  
+
   // 校验验证码
   if (!registerForm.value.verificationCode) {
     errors.verificationCode = '请输入验证码'
   } else if (registerForm.value.verificationCode.length !== 6) {
     errors.verificationCode = '验证码长度应为6位'
   }
-  
-  if (Object.values(errors).some(Boolean) || registerError.value) return
-  
-  registerLoading.value = true
-  try {
-    const data = await apiFetch<{ accessToken: string; refreshToken?: string; user: unknown }>('/auth/register', {
-      method: 'POST',
-      body: {
-        username: registerForm.value.username,
-        email: registerForm.value.email,
-        password: registerForm.value.password,
-        verificationCode: registerForm.value.verificationCode
-      },
-      skipAuth: true
-    })
 
-    if (data.code === 0 || data.code === 200) {
-      // 模拟校验通过动画触发
-      registerUsernameValid.value = true
-      registerPasswordValid.value = true
-      registerConfirmValid.value = true
-      
-      await userStore.login(registerForm.value.email, registerForm.value.password)
-      router.push('/chat')
-    } else {
-      registerError.value = data.message || '注册失败'
-    }
-  } catch (e) {
-    registerError.value = '网络错误，请重试'
-  } finally {
-    registerLoading.value = false
+  if (Object.values(errors).some(Boolean) || registerError.value) return
+
+  registerLoading.value = true
+  const { success, error } = await authRegister({
+    username: registerForm.value.username,
+    email: registerForm.value.email,
+    password: registerForm.value.password,
+    verificationCode: registerForm.value.verificationCode,
+  })
+  registerLoading.value = false
+
+  if (success) {
+    registerUsernameValid.value = true
+    registerPasswordValid.value = true
+    registerConfirmValid.value = true
+    router.push('/chat')
+  } else {
+    registerError.value = error
   }
 }
 </script>
@@ -361,8 +279,8 @@ const handleRegister = async () => {
     <div class="absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full blur-[120px] pointer-events-none aurora-2" style="background-color: var(--lt-shadow-ai);"></div>
     <div class="absolute top-[40%] left-[30%] w-[35%] h-[35%] rounded-full blur-[100px] pointer-events-none aurora-3" style="background-color: var(--lt-ai-light-3); opacity: 0.15;"></div>
 
-        <!-- 交互式 Canvas 粒子网络 -->
-    <InteractiveParticles />
+        <!-- 交互式 Canvas 粒子网络（移动端禁用，性能优化） -->
+    <InteractiveParticles v-if="isDesktop" />
 
     <!-- 微井网格背景 -->
     <div class="absolute inset-0 z-0 pointer-events-none opacity-[0.04]"
@@ -370,7 +288,7 @@ const handleRegister = async () => {
     </div>
 
     <div ref="cardRef"
-         class="w-full max-w-[1040px] min-h-[640px] flex mx-4 backdrop-blur-sm border overflow-hidden relative z-10 card-breathing"
+         class="login-card-wrapper w-full max-w-[1040px] min-h-[640px] flex mx-4 backdrop-blur-sm border overflow-hidden relative z-10 card-breathing"
          style="background-color: var(--lt-bg-card); border-radius: var(--lt-radius-lg, 28px); box-shadow: var(--lt-shadow-elevated, 0 24px 60px -12px rgba(0,0,0,0.08)); border-color: var(--lt-border);"
          :style="[parallaxStyle, { transition: 'transform 0.15s ease-out' }]"
          @mousemove="handleMouseMove"
@@ -609,7 +527,7 @@ const handleRegister = async () => {
                         <template #append>
                           <el-button
                             :disabled="codeSending || codeSent"
-                            @click="sendVerificationCode"
+                            @click="handleSendCode"
                             size="default"
                             class="send-code-btn"
                           >
@@ -1120,5 +1038,43 @@ const handleRegister = async () => {
     }
 
   
+}
+
+/* ======================== */
+/* 移动端响应式调整 */
+/* ======================== */
+@media (max-width: 767px) {
+  .min-h-screen {
+    padding: 0;
+    align-items: flex-start;
+  }
+
+  .login-card-wrapper {
+    min-height: 100vh;
+    min-height: 100dvh;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    max-width: 100% !important;
+  }
+
+  :deep(.premium-input .el-input__wrapper) {
+    min-height: 48px;
+  }
+
+  :deep(.premium-input .el-input__inner) {
+    height: 48px !important;
+    font-size: 16px !important;
+  }
+
+  :deep(.btn-gradient) {
+    height: 52px !important;
+    font-size: 16px !important;
+  }
+
+  :deep(.send-code-btn) {
+    height: 48px !important;
+    font-size: 12px !important;
+    padding: 0 12px !important;
+  }
 }
 </style>

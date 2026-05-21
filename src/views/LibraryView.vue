@@ -160,8 +160,7 @@
                       @preview="previewResource(res, pack)"
                       @view-sources="viewSources(res)"
                       @regenerate="regenerateResource(res, pack)"
-                    />
-                  </div>
+                  /></div>
                   <!-- 操作按钮组 -->
                   <div class="flex justify-end gap-2">
                     <el-button size="small" plain @click.stop="continueLearning(pack)">
@@ -212,6 +211,17 @@
             <span style="color: #8E8EA0;">
               质量分 <strong style="color: #2B6FFF;">{{ currentPreview.qualityScore }}</strong>/100
             </span>
+            <el-dropdown v-if="currentPreview.type === 'doc' || currentPreview.type === 'reading'" size="small" @command="(cmd: string) => cmd === 'docx' ? downloadDocxResource(currentPreview) : downloadMdResource(currentPreview)">
+              <el-button size="small" type="primary">
+                <el-icon class="mr-1"><Download /></el-icon>下载 <el-icon class="ml-1"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="docx">下载 DOCX</el-dropdown-item>
+                  <el-dropdown-item command="md">下载 Markdown</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button link type="primary" size="small" @click="viewSources(currentPreview)">
               查看引用证据
             </el-button>
@@ -221,10 +231,21 @@
                 <!-- 内容体：根据类型渲染 -->
           <div class="min-h-[200px]">
             <!-- 思维导图 -->
-            <div v-if="currentPreview.type === 'mindmap'" class="h-96 border border-slate-200 rounded-lg overflow-hidden">
+            <div v-if="currentPreview.type === 'mindmap'" class="h-[600px] border border-slate-200 rounded-lg">
               <MindmapViewer
+                ref="mindmapViewerRef"
                 :content="previewMode === 'brief' ? currentPreview.brief || '# 暂无内容' : currentPreview.deepContent || currentPreview.brief || '# 暂无内容'"
-              />
+                :isJson="true"
+            />
+            </div>
+            <!-- 导出按钮 -->
+            <div v-if="currentPreview.type === 'mindmap'" class="flex gap-2 mt-3">
+              <el-button size="small" @click="mindmapViewerRef?.exportSvg(currentPreview.title + '.svg')">
+                <el-icon class="mr-1"><Download /></el-icon>导出 SVG
+              </el-button>
+              <el-button size="small" @click="mindmapViewerRef?.exportPng(currentPreview.title + '.png')">
+                <el-icon class="mr-1"><Download /></el-icon>导出 PNG
+              </el-button>
             </div>
             <!-- 练习题：用 Markdown 展示 -->
             <div v-else-if="currentPreview.type === 'quiz'" class="space-y-4">
@@ -233,19 +254,16 @@
                 :showToc="false"
               />
             </div>
-            <!-- 代码案例：代码块高亮 -->
+            <!-- 代码案例：Markdown 渲染（内容自带代码块） -->
             <div v-else-if="currentPreview.type === 'code'" class="border border-slate-200 rounded-lg overflow-hidden">
               <MarkdownViewer
-                :content="'```python\n' + (previewMode === 'brief' ? currentPreview.brief || '' : currentPreview.deepContent || currentPreview.brief || '') + '\n```'"
+                :content="previewMode === 'brief' ? currentPreview.brief || '' : currentPreview.deepContent || currentPreview.brief || ''"
                 :showToc="false"
               />
             </div>
             <!-- 视频脚本：Markdown 渲染 -->
-            <div v-else-if="currentPreview.type === 'video_script'" class="">
-              <MarkdownViewer
-                :content="'## 视频脚本\n\n' + (previewMode === 'brief' ? currentPreview.brief || '暂无内容' : currentPreview.deepContent || currentPreview.brief || '暂无内容')"
-                :showToc="false"
-              />
+            <div v-else-if="currentPreview.type === 'video'" class="">
+
             </div>
             <!-- 默认（doc/reading 等）：完整 Markdown 渲染 -->
             <div v-else class="">
@@ -310,12 +328,15 @@ import {
   Delete,
   Reading,
   DataBoard,
+  ArrowDown,
+  Download,
 } from '@element-plus/icons-vue'
 import type { ResourcePack } from '@/types'
 import ResourceCard from '@/components/ResourceCard.vue'
 import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
+import { markdownToDocxBlob, downloadDocx, preprocessLatexForMarkdown } from '@/utils/docxExport'
 
 const router = useRouter()
 
@@ -332,6 +353,7 @@ const currentPreview = ref<any>(null)
 const previewMode = ref('brief')
 
 const evidenceDrawer = ref<any>(null)
+const mindmapViewerRef = ref<{ exportSvg: (filename?: string) => void; exportPng: (filename?: string) => Promise<void> } | null>(null)
 
 // ==================== Mock 数据 ====================
 const packList = reactive<ResourcePack[]>([
@@ -393,7 +415,7 @@ const packList = reactive<ResourcePack[]>([
         id: 'res-001-5', title: '迷宫寻路实战案例', type: 'code', status: 'ready',
         confidence: 'high', sourcesCount: 5, qualityScore: 90,
         brief: 'Python 实现 A* 算法求解迷宫最短路径，附带可视化与性能对比。',
-        deepContent: '```python\nimport heapq\n\ndef astar(grid, start, goal):\n    open_set = [(0, start)]\n    came_from = {}\n    g_score = {start: 0}\n    f_score = {start: heuristic(start, goal)}\n    ...\n```',
+        deepContent: '``python\nimport heapq\n\ndef astar(grid, start, goal):\n    open_set = [(0, start)]\n    came_from = {}\n    g_score = {start: 0}\n    f_score = {start: heuristic(start, goal)}\n    ...\n```',
         pushReasons: ['偏好：代码实操优先', '薄弱点：算法实现'],
         sources: [
           { title: 'Python 算法实现示例集', locator: '搜索算法', quote: 'A* 的 Python 实现通常使用优先队列。', relevance: 'high' }
@@ -494,7 +516,7 @@ const packList = reactive<ResourcePack[]>([
     estimatedMinutes: 50,
     isActive: false,
     pushReason: '项目实战需要；兴趣方向：后端开发',
-    resourceTypes: ['doc', 'mindmap', 'quiz', 'reading', 'video_script'],
+    resourceTypes: ['doc', 'mindmap', 'quiz', 'reading', 'video'],
     resources: [
       {
         id: 'res-004-1', title: 'HTTP 核心概念精讲', type: 'doc', status: 'ready',
@@ -525,11 +547,8 @@ const packList = reactive<ResourcePack[]>([
         sources: []
       },
       {
-        id: 'res-004-5', title: '从 HTTP/1.1 到 HTTP/3 演进', type: 'video_script', status: 'ready',
-        confidence: 'medium', sourcesCount: 3, qualityScore: 85,
-        brief: '视频脚本：生动讲解 HTTP 各版本的演进与核心改进点。',
-        pushReasons: ['偏好：视频学习'],
-        sources: []
+        id: 'res-004-5', title: '从 HTTP/1.1 到 HTTP/3 演进', type: 'video', status: 'ready',
+
       }
     ]
   },
@@ -658,7 +677,7 @@ const resourceTypeTagType = (type: string) => {
     quiz: 'success',
     reading: 'info',
     code: 'danger',
-    video_script: 'default'
+    video: 'default'
   }
   return map[type] || 'info'
 }
@@ -670,7 +689,7 @@ const resourceTypeLabel = (type: string) => {
     quiz: '练习题',
     reading: '拓展阅读',
     code: '代码案例',
-    video_script: '视频脚本'
+    video: '视频脚本'
   }
   return map[type] || type
 }
@@ -679,6 +698,22 @@ const previewResource = (res: any, _pack: ResourcePack) => {
   currentPreview.value = res
   previewMode.value = 'brief'
   previewVisible.value = true
+}
+
+async function downloadDocxResource(res: any) {
+  const content = res.deepContent || res.brief || ''
+  const blob = await markdownToDocxBlob(content, res.title)
+  downloadDocx(blob, res.title || 'resource')
+}
+
+function downloadMdResource(res: any) {
+  const raw = res.deepContent || res.brief || ''
+  const content = preprocessLatexForMarkdown(raw)
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${res.title || 'resource'}.md`
+  a.click()
 }
 
 const viewSources = (res: any) => {
@@ -708,8 +743,13 @@ const continueLearning = (pack: ResourcePack) => {
   router.push(`/path?pack=${pack.id}`)
 }
 
-const openInStudio = (pack: ResourcePack) => {
-  router.push(`/studio?pack=${pack.id}`)
+const openInStudio = (pack: any) => {
+  const taskId = pack.task_id || pack.taskId
+  if (taskId) {
+    router.push(`/studio/${taskId}?pack_id=${pack.id}`)
+  } else {
+    router.push('/studio')
+  }
 }
 
 const deletePack = (pack: ResourcePack) => {

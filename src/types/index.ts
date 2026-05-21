@@ -1,10 +1,106 @@
+// ========== 用户（User）相关类型 ==========
+
+/** 用户完整信息（与后端 UserInfoResponse 对齐） */
+export interface UserInfo {
+  id: string
+  username: string
+  email: string
+  role: string
+  displayName?: string
+  avatarUrl?: string
+  bio?: string
+  major?: string
+  grade?: string
+  createdAt?: string
+}
+
+/** 个人资料更新请求 */
+export interface UpdateProfileRequest {
+  displayName?: string
+  bio?: string
+  major?: string
+  grade?: string
+}
+
+/** 学习统计（与后端 LearningStatsResponse 对齐） */
+export interface LearningStats {
+  totalHours: number
+  weekHours: number
+  resourcePackCount: number
+  weekResourcePacks: number
+  pathProgressPercent: number
+  weakCount: number
+  prevWeakCount: number
+  totalQuizScoreAvg?: number
+  radarData: { name: string; value: number }[]
+  weeklyActivity: { week: string; hours: number }[]
+  profileHistory: ProfileVersionSummary[]
+}
+
+/** 画像版本摘要 */
+export interface ProfileVersionSummary {
+  version: number
+  createdAt: string
+  trigger: string
+  summary: string[]
+}
+
+/** 后端通知（与 NotificationResponse 对齐） */
+export interface AppNotification {
+  id: string
+  type: string
+  title: string
+  message: string
+  isRead: boolean
+  isPushed: boolean
+  refId?: string
+  refType?: string
+  createdAt: string
+}
+
+// ========== 课程（Course）相关类型 ==========
+
+/** 课程信息（来自后端 API） */
+export interface CourseInfo {
+  id: string
+  name: string
+  emoji: string
+  enrolledAt?: string
+  progress?: {
+    tasksCompleted: number
+    resourcesGenerated: number
+    pathProgressPercent: number
+  }
+}
+
+/** 课程详情（含选课状态） */
+export interface CourseDetail {
+  id: string
+  name: string
+  description: string
+  emoji: string
+  enrolledCount: number
+  isEnrolled: boolean
+  createdAt: string
+}
+
+/** 可选课程列表项 */
+export interface AvailableCourse {
+  id: string
+  name: string
+  description: string
+  emoji: string
+  enrolledCount: number
+  createdAt: string
+}
+
 // ========== 资源包（Resource Pack）相关类型 ==========
 
 /** 单个资源项 */
 export interface ResourceItem {
   id: string
   title: string
-  type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video_script'
+  type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video'
   status: 'pending' | 'ready' | 'failed' | 'rejected'
   confidence?: 'high' | 'medium' | 'low'
   sourcesCount?: number
@@ -132,6 +228,24 @@ export interface TaskState {
   events: TaskEvent[]
 }
 
+/** 任务列表摘要（后端 GET /api/tasks 返回） */
+export interface TaskSummary {
+  taskId: string
+  topic: string
+  courseId: string
+  taskType: string
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
+  stage: string | null
+  percent: number
+  resourceTypes: string[]
+  packId: string | null
+  resourceCount: number
+  errorMessage: string | null
+  createdAt: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
 /** 任务事件 */
 export interface TaskEvent {
   type: 'stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'done'
@@ -157,6 +271,28 @@ export interface AgentThinkingTrace {
   timestamp: string
 }
 
+/** 前端思考链步骤（ChatPanel 用，由 SSE agent.thought 事件驱动） */
+export interface ThinkingStep {
+  label: string
+  icon: string
+  done: boolean
+  /** 原始阶段标识（CONTEXT | RETRIEVE | REFLECT | RAG | DECISION），用于步骤类型分类 */
+  phase?: string
+  /** 简短描述 */
+  detail?: string
+  /** 完整推理链字段 */
+  observation?: string
+  thought?: string
+  decision?: string
+  confidenceLevel?: string
+}
+
+/** 思考链记录（挂载在每条助手消息上） */
+export interface ThinkingRecord {
+  steps: ThinkingStep[]
+  expanded?: boolean
+}
+
 /** Agent 协作消息（SSE agent.message） */
 export interface AgentMessage {
   agent: string
@@ -175,7 +311,7 @@ export interface PlannerDecision {
   rationale: string
   items: PlanItem[]
   totalEstimatedMinutes: number
-  difficulty: string
+  difficulty: number  // 1-5 五级难度
 }
 
 export interface PlanItem {
@@ -183,14 +319,36 @@ export interface PlanItem {
   title: string
   reason: string
   priority: number
-  difficulty: string
+  difficulty: number  // 1-5 五级难度
   focusAreas: string[]
   estimatedMinutes: number
   styleHint: string
 }
 
+// ========== 练习题（Quiz Question）相关类型 ==========
+
+/** 题目类型枚举 */
+export type QuestionType = 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TRUE_FALSE' | 'FILL_IN_BLANK' | 'SHORT_ANSWER'
+
+/** 单道练习题（对应后端 quiz JSON 格式） */
+export interface Question {
+  id: number
+  type: QuestionType
+  content: string              // 题干，支持 LaTeX（$...$ / $$...$$）
+  options: string[] | null     // 选择题/判断题必填，填空/简答为 null
+  answer: string               // 选择题填选项字母，多选填字母串，填空填具体值，简答填关键步骤
+  analysis: string             // 详细解析：解题思路 + 关键步骤 + 干扰项分析 + 难度层级说明
+  difficulty: number           // 1-5 五级难度标准
+  knowledgePoint: string       // 对应大纲知识点名称
+}
+
+/** 练习题集 */
+export interface QuizContent {
+  questions: Question[]
+}
+
 /** SSE 事件类型汇总 */
-export type SSEEventType = 'task.accepted' | 'task.stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'task.done' | 'task.failed'
+export type SSEEventType = 'task.accepted' | 'task.stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'task.done' | 'task.failed' | 'subtopic.started' | 'subtopic.completed'
 
 /** 全局通知项 */
 export interface NotificationItem {
@@ -237,4 +395,140 @@ export interface LearningPath {
   adjustments: PathAdjustment[]
   createdAt: string
   updatedAt: string
+}
+
+// ========== 学习计划 v3.0 (Plan) 相关类型 ==========
+
+/** 学习计划（大计划） */
+export interface Plan {
+  planId: string
+  version: number
+  profileVersion: number
+  courseId: string
+  status: string
+  createdAt: string | null
+  modules: Module[]
+  edges: Edge[]
+  summary: PlanSummary | null
+}
+
+export interface PlanSummary {
+  totalModules: number
+  coreModules: number
+  supplementaryModules: number
+  totalHours: number
+  completionEstimate: string
+}
+
+export interface Edge {
+  from: string
+  to: string
+  type: string
+}
+
+/** Module（大计划中的一个模块） */
+export interface Module {
+  moduleId: string
+  title: string
+  knowledgePoints: { kpId: string; name: string }[]
+  scope: 'core_curriculum' | 'supplementary' | 'extracurricular'
+  prerequisites: string[]
+  estimatedHours: number | null
+  depth: 'basic' | 'standard' | 'deep'
+  status: 'locked' | 'ready' | 'in_progress' | 'completed'
+  mastery: number | null
+  subPlanId: string | null
+  subPlan: SubPlan | null
+}
+
+/** 子计划（一个 module 的 activity 序列） */
+export interface SubPlan {
+  subPlanId: string
+  moduleId: string
+  version: number
+  activities: Activity[]
+  adjustments: any[]
+  stats: SubPlanStats | null
+  matchSummary: MatchSummary | null
+}
+
+export interface SubPlanStats {
+  completionPct: number
+  avgQuizScore: number | null
+  totalTimeSpent: number
+}
+
+export interface MatchSummary {
+  matchedCount: number
+  toGenerateCount: number
+  toGenerate: { type: string; topic: string; reason: string }[]
+}
+
+/** Activity（单个学习活动） */
+export interface Activity {
+  activityId: string
+  type: 'learn' | 'quiz' | 'explore'
+  title: string
+  description: string | null
+  requires: string[]
+  resource: ActivityResource | null
+  estimatedMinutes: number | null
+  order: number | null
+  completionCriteria: CompletionCriteria | null
+  status: 'locked' | 'ready' | 'in_progress' | 'completed' | 'failed' | 'skipped'
+  retryCount: number
+  result: ActivityResult | null
+}
+
+export interface ActivityResource {
+  source: 'matched' | 'generated'
+  resourcePackId: string | null
+  resourceType: string
+  generationStatus: string | null
+}
+
+export interface CompletionCriteria {
+  type: 'resource_open' | 'quiz_score'
+  threshold: number
+  met: boolean
+}
+
+export interface ActivityResult {
+  score: number | null
+  timeSpent: number | null
+  completedAt: string | null
+  weakTags: string[]
+}
+
+/** Quiz 答题结果 */
+export interface QuizQuestion {
+  questionId: string
+  type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TRUE_FALSE' | 'FILL_IN_BLANK' | 'SHORT_ANSWER'
+  content: string
+  options: string[] | null
+  answer: string
+  analysis: string
+  difficulty: number
+  tags?: { mistakes?: string[]; knowledge?: string[] }
+}
+
+/** Activity 提交响应 */
+export interface ActivitySubmitResponse {
+  activityId: string
+  activityCompleted: boolean
+  status?: string
+  score?: number
+  weakTags?: string[]
+  retryCount?: number
+  retryAllowed?: boolean
+  retriesRemaining?: number
+  moduleStatus?: string
+  moduleMastery?: number
+  autoAction?: AutoAction | null
+}
+
+export interface AutoAction {
+  type: string
+  reason: string
+  insertedActivities: { activityId: string; type: string; title: string }[]
 }
