@@ -12,6 +12,7 @@ import LottieAnimation from '@/components/LottieAnimation.vue'
 import liveChatbotLottie from '@/assets/lottie/live-chatbot.json'
 import GenerationCard from '@/components/GenerationCard.vue'
 import ProfilePanel from '@/components/Profile/ProfilePanel.vue'
+import PlanEditor from '@/components/PlanEditor.vue'
 
 const router = useRouter()
 const chat = useChatSSE()
@@ -19,6 +20,7 @@ const chat = useChatSSE()
 /** Mode options for the chat mode toggle */
 const modes = [
   { value: 'chat' as const, label: '💬 对话' },
+  { value: 'lecture' as const, label: '📖 讲解' },
   { value: 'resource' as const, label: '📝 资源' },
   { value: 'plan' as const, label: '🗺 规划' },
 ]
@@ -201,13 +203,27 @@ async function toggleAudio(msg: ChatMessage, idx: number) {
   }
   audioState.playingMsgIdx = -1
 
+  // Helper: create and play audio, returns true on success
+  async function playAudio(url: string): Promise<boolean> {
+    const el = new Audio(url)
+    audioState.el = el
+    el.onended = () => { audioState.el = null; audioState.playingMsgIdx = -1 }
+    try {
+      await el.play()
+      return true
+    } catch {
+      audioState.el = null
+      ElMessage.error('音频播放被浏览器阻止，请点击页面任意位置后再试')
+      return false
+    }
+  }
+
   // Use cached audio URL if available
   const cachedUrl = (msg as any)._audioUrl
   if (cachedUrl) {
-    audioState.el = new Audio(cachedUrl)
-    audioState.el.onended = () => { audioState.el = null; audioState.playingMsgIdx = -1 }
-    audioState.el.play()
-    audioState.playingMsgIdx = idx
+    if (await playAudio(cachedUrl)) {
+      audioState.playingMsgIdx = idx
+    }
     return
   }
 
@@ -218,16 +234,16 @@ async function toggleAudio(msg: ChatMessage, idx: number) {
       method: 'POST',
       body: { text: msg.text },
     })
-    if (res.data?.audioUrl) {
-      (msg as any)._audioUrl = res.data.audioUrl
-      audioState.el = new Audio(res.data.audioUrl)
-      audioState.el.onended = () => { audioState.el = null; audioState.playingMsgIdx = -1 }
-      audioState.el.play()
+    if (!res.data?.audioUrl) {
+      throw new Error(res.message || '语音合成服务返回为空，请检查阿里云 TTS 配置')
+    }
+    (msg as any)._audioUrl = res.data.audioUrl
+    if (await playAudio(res.data.audioUrl)) {
       audioState.playingMsgIdx = idx
     }
   } catch (err) {
     console.error('TTS error:', err)
-    ElMessage.error('语音合成失败')
+    ElMessage.error(`语音合成失败: ${err instanceof Error ? err.message : '未知错误'}`)
   } finally {
     audioState.loading = false
   }
@@ -248,7 +264,11 @@ function handleSendMessage() {
   const text = inputMessage.value.trim()
   if (!text || chat.isStreaming.value) return
   inputMessage.value = ''
-  chat.sendMessage(text)
+  if (chat.chatMode.value === 'lecture') {
+    chat.sendLectureMessage(text)
+  } else {
+    chat.sendMessage(text)
+  }
 }
 
 async function handleTriggerGenerate() {
@@ -342,6 +362,7 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
               v-for="m in modes" :key="m.value"
               class="mode-btn"
               :class="{ 'is-active': chat.chatMode.value === m.value }"
+              :disabled="chat.isStreaming.value"
               @click="chat.chatMode.value = m.value"
             >
               {{ m.label }}
@@ -415,7 +436,7 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
                 @update:expanded="msg.thinking.expanded = $event"
                 class="mb-3"
               />
-              <div v-if="!(msg as any)._generationCard" class="assistant-message-body">
+              <div v-if="!(msg as any)._generationCard && !msg._planOffer" class="assistant-message-body">
                 <MarkdownViewer v-if="!msg.isStreaming" :content="msg.text" :showToc="false" />
                 <pre v-else class="streaming-text whitespace-pre-wrap text-sm leading-relaxed" style="color: var(--lt-text-primary); font-family: inherit; margin: 0;">{{ msg.text }}</pre>
                 <span v-if="msg.isStreaming && msg.text" class="streaming-cursor" />
@@ -429,6 +450,72 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
                   class="mb-3"
                 />
               </template>
+
+              <!-- 方案确认卡片 — 资源类型 -->
+              <div v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.accepted" class="generation-offer-card">
+                <div class="offer-header">
+                  <div class="offer-header-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </div>
+                  <div class="offer-header-title">AI 为你规划了以下学习方案</div>
+                </div>
+                <div class="offer-topic-card">
+                  <div class="offer-topic-title">{{ msg._planOffer.topic }}</div>
+                  <div class="offer-topic-goal">{{ msg._planOffer.goalSummary }}</div>
+                  <div class="offer-topic-pills">
+                    <!-- 优化: 增加图标 -->
+                    <span v-if="msg._planOffer.difficulty" class="offer-pill pill-difficulty">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="mr-1"><path d="M2 13.54a9 9 0 010-3.08l.34-1.63a2 2 0 00-1.2-2.34L.36 5.2a9 9 0 013.08-3.08l1.63.34a2 2 0 002.34-1.2l.34-1.63A9 9 0 0112 0a9 9 0 014.88 1.36l.34 1.63a2 2 0 002.34 1.2l1.63-.34a9 9 0 013.08 3.08l-.78 1.34a2 2 0 00-1.2 2.34l.34 1.63a9 9 0 010 3.08l-.34 1.63a2 2 0 001.2 2.34l.78 1.34a9 9 0 01-3.08 3.08l-1.63-.34a2 2 0 00-2.34 1.2l-.34 1.63A9 9 0 0112 24a9 9 0 01-4.88-1.36l-.34-1.63a2 2 0 00-2.34-1.2L2.8 21.16a9 9 0 01-3.08-3.08l.78-1.34a2 2 0 001.2-2.34L2 13.54z" /><path d="M12 8v8" /><path d="M8 12h8" /></svg>
+                      {{ { beginner: '入门', basic: '基础', intermediate: '中级', advanced: '高级', expert: '专家' }[msg._planOffer.difficulty] || msg._planOffer.difficulty }}
+                    </span>
+                    <span v-if="msg._planOffer.items?.length" class="offer-pill pill-count">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="mr-1"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                      共 {{ msg._planOffer.items.length }} 份
+                    </span>
+                    <span v-if="msg._planOffer.coveredCount != null" class="offer-pill pill-profile">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="mr-1"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+                      画像覆盖 {{ msg._planOffer.coveredCount }}/7
+                    </span>
+                  </div>
+                </div>
+                <div v-if="msg._planOffer.items?.length" class="offer-plan-section">
+                  <div class="offer-plan-title">执行计划</div>
+                  <div class="offer-plan-timeline">
+                    <div v-for="(item, itemIdx) in msg._planOffer.items" :key="itemIdx" class="offer-plan-item">
+                      <div class="offer-plan-dot-wrapper">
+                        <div class="offer-plan-dot" :style="{ backgroundColor: {doc: '#2B6FFF', mindmap: '#7C5CFC', quiz: '#FF8C42', reading: '#34C759', code: '#FF3B30', video: '#FF9F0A'}[item.type] || '#8E8EA0' }"></div>
+                      </div>
+                      <div class="offer-plan-content">
+                        <div class="offer-plan-type">
+                          <span class="font-medium">{{ {doc: '讲解文档', quiz: '练习题', mindmap: '思维导图', code: '代码实操', reading: '拓展阅读', video: '讲解视频'}[item.type] || item.type }}</span>
+                          <span class="offer-plan-type-count">×1</span>
+                        </div>
+                        <div class="offer-plan-focus">{{ item.focus }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="offer-actions">
+                  <button class="offer-btn-primary" :disabled="chat.isGenerating.value" @click="chat.acceptGenerationOffer()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>确认启动
+                  </button>
+                  <button class="offer-btn-ghost" @click="chat.dismissGenerationOffer()">继续聊天</button>
+                </div>
+              </div>
+
+              <!-- 可编辑计划编辑器 — 计划类型（已确认的方案不消失，但禁用编辑） -->
+              <!-- v3.1: 支持 _pendingPlan（DB 加载）和 _planOffer（实时流）两种数据源 -->
+              <PlanEditor
+                v-if="(msg._planOffer && msg._planOffer.type === 'plan' && !msg._planOffer.dismissed) || (msg as any)._pendingPlan"
+                :modules="((msg as any)._pendingPlan?.modules?.length ? (msg as any)._pendingPlan.modules : (chat.planPreviewData.value?.modules || []))"
+                :edges="((msg as any)._pendingPlan?.edges?.length ? (msg as any)._pendingPlan.edges : (chat.planPreviewData.value?.edges || []))"
+                :loading="chat.planPreviewLoading.value && !(msg as any)._pendingPlan"
+                :confirmed="!!(msg._planOffer?.confirmed || (msg as any)._pendingPlan?.confirmed)"
+                :on-save="(planJson: string) => chat.updatePlanDraft(planJson)"
+                @confirm="(planJson: string) => chat.confirmEditedPlan(planJson, msg._planOffer?.requirementText || '', msg._planOffer?.launchTopic || '学习计划')"
+                @cancel="chat.dismissPlanOffer()"
+              />
+
               <div class="ai-action-bar">
                 <button class="ai-action-btn" title="复制" @click="copyMessage(msg)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -550,6 +637,7 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
         <el-button type="primary" :loading="chat.isGenerating.value" :disabled="!generateTopic.trim()" @click="handleTriggerGenerate">启动生成</el-button>
       </template>
     </el-dialog>
+
   </div>
 </template>
 
@@ -768,4 +856,217 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
   font-weight: 500;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
+.mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- New Generation Offer Card Styles --- */
+.generation-offer-card {
+  background: #FFFFFF;
+  border: 1px solid var(--lt-border);
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 12px;
+  box-shadow: 0 4px 16px -4px rgba(43, 111, 255, 0.08);
+  border-left: 3px solid var(--lt-brand);
+}
+
+.offer-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.offer-header-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(43, 111, 255, 0.08);
+  color: var(--lt-brand);
+}
+.offer-header-icon.icon-plan {
+  background: rgba(124, 92, 252, 0.1);
+  color: var(--lt-ai);
+}
+.offer-header-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--lt-text-primary);
+}
+
+.offer-topic-card {
+  background: var(--lt-bg-page);
+  border: 1px solid var(--lt-border-light);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+.offer-topic-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--lt-brand);
+  margin-bottom: 6px;
+}
+.offer-topic-goal {
+  font-size: 13px;
+  color: var(--lt-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+.offer-topic-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.offer-pill {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+}
+.pill-difficulty { background: rgba(43, 111, 255, 0.08); color: var(--lt-brand); }
+.pill-count { background: rgba(255, 140, 66, 0.08); color: var(--lt-orange); }
+.pill-profile { background: rgba(52, 199, 89, 0.08); color: var(--lt-success); }
+
+.offer-plan-section {
+  margin-bottom: 20px;
+}
+.offer-plan-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lt-text-auxiliary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+  padding-left: 4px;
+}
+.offer-plan-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.offer-plan-item {
+  display: flex;
+  gap: 12px;
+  position: relative;
+  /* 优化-start: 增加圆角、内边距和过渡效果 */
+  border-radius: 8px;
+  padding: 8px;
+  transition: all 0.2s ease-out;
+  /* 优化-end */
+}
+.offer-plan-item:hover {
+  /* 优化-start: 增加悬浮样式 */
+  background-color: var(--lt-bg-page);
+  transform: translateX(4px);
+  /* 优化-end */
+}
+.offer-plan-item::before {
+  content: '';
+  position: absolute;
+  left: 17px;
+  top: 18px;
+  /* 优化-start: 修复伪元素高度计算，确保连接线不断裂 */
+  height: calc(100% - 10px);
+  /* 优化-end */
+  width: 2px;
+  background-color: var(--lt-bg-page);
+}
+.offer-plan-item:last-child::before {
+  display: none;
+}
+.offer-plan-dot-wrapper {
+  /* 优化-start: 增加一个wrapper来垂直居中 */
+  flex-shrink: 0;
+  padding-top: 5px; /* 微调 */
+  /* 优化-end */
+}
+.offer-plan-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  z-index: 1;
+  border: 2px solid #fff;
+}
+.offer-plan-content {
+  flex: 1;
+}
+.offer-plan-type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--lt-text-primary);
+  margin-bottom: 2px;
+}
+.offer-plan-type-count {
+  font-size: 12px;
+  color: var(--lt-text-auxiliary);
+  background: var(--lt-bg-page);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.offer-plan-focus {
+  font-size: 13px;
+  color: var(--lt-text-secondary);
+  line-height: 1.45;
+}
+
+.offer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* 优化-start: 增加背景、调整边距和圆角，强化区域感 */
+  margin: 8px -20px -20px -20px;
+  padding: 16px 20px;
+  background-color: var(--lt-bg-page);
+  border-top: 1px solid var(--lt-border-light);
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
+  /* 优化-end */
+}
+.offer-btn-primary, .offer-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.offer-btn-primary {
+  background: var(--lt-brand);
+  color: #fff;
+  border-color: var(--lt-brand);
+}
+.offer-btn-primary:hover {
+  background: var(--lt-brand-dark);
+  border-color: var(--lt-brand-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(43, 111, 255, 0.25);
+}
+.offer-btn-ghost {
+  background: transparent;
+  color: var(--lt-text-secondary);
+  border-color: var(--lt-border);
+}
+.offer-btn-ghost:hover {
+  color: var(--lt-text-primary);
+  background: var(--lt-bg-page);
+  border-color: var(--lt-border-dark);
+}
 </style>
+

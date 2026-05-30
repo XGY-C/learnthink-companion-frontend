@@ -19,8 +19,10 @@ const emit = defineEmits<{
 // ── 步骤分类 ──
 const REASONING_PHASES = new Set(['CONTEXT', 'DECISION', 'PLANNING'])
 const TOOL_CALL_PHASES = new Set(['RETRIEVE', 'REFLECT', 'RAG'])
+const ERROR_PHASES = new Set(['ERROR'])
 
-function stepCategory(step: ThinkingStep): 'reasoning' | 'tool_call' | 'unknown' {
+function stepCategory(step: ThinkingStep): 'reasoning' | 'tool_call' | 'error' | 'unknown' {
+  if (step.phase && ERROR_PHASES.has(step.phase)) return 'error'
   if (step.phase && REASONING_PHASES.has(step.phase)) return 'reasoning'
   if (step.phase && TOOL_CALL_PHASES.has(step.phase)) return 'tool_call'
   if (step.observation || step.thought || step.decision) return 'reasoning'
@@ -454,6 +456,21 @@ function toggleExpanded() {
 .tct-cat-tool_call.tct-active .tct-label {
   color: var(--lt-ai, #7C5CFC);
   font-weight: 600;
+}
+
+/* error — 红色（done 状态覆盖） */
+.tct-cat-error .tct-dot {
+  background-color: rgba(245, 108, 108, 0.12);
+}
+.tct-cat-error .tct-dot-icon {
+  color: var(--lt-danger);
+}
+.tct-cat-error .tct-label {
+  color: var(--lt-danger);
+  font-weight: 600;
+}
+.tct-cat-error .tct-detail {
+  color: var(--lt-danger);
 }
 
 /* done */

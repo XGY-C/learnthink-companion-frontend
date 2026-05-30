@@ -14,6 +14,9 @@ export const useProfileStore = defineStore('profile', () => {
     courses.value.find(c => c.id === activeCourseId.value) ?? null
   )
 
+  /** 当前画像的数字版本号，供计划生成等接口使用 */
+  const currentProfileVersion = computed(() => fullProfile.value?.version ?? null)
+
   // ===== 课程 API 方法 =====
 
   /** 获取我的已选课程 */
@@ -260,7 +263,7 @@ export const useProfileStore = defineStore('profile', () => {
 
   return {
     // 课程
-    courses, activeCourseId, activeCourse, coursesLoading, coursesError,
+    courses, activeCourseId, activeCourse, currentProfileVersion, coursesLoading, coursesError,
     fetchMyCourses, enrollCourse, leaveCourse, switchCourse, initCourses,
     // 画像
     dimensions, profileVersion, updatedAt, fullProfile, lastDelta,

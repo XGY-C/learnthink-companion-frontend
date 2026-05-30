@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 const props = withDefaults(defineProps<{
   topic: string
   taskId: string
+  taskType?: 'resource' | 'plan'
   status?: 'generating' | 'done' | 'failed'
   progress?: number
   resourceTypes?: string[]
@@ -13,6 +14,7 @@ const props = withDefaults(defineProps<{
   message?: string
   errorMessage?: string
 }>(), {
+  taskType: 'resource',
   status: 'generating',
   progress: 0,
   resourceTypes: () => [],
@@ -24,10 +26,10 @@ const props = withDefaults(defineProps<{
 const router = useRouter()
 
 const typeIcons: Record<string, string> = {
-  doc: '📄', quiz: '📝', mindmap: '🧠', code: '💻', reading: '📚',
+  doc: '📄', quiz: '📝', mindmap: '🧠', code: '💻', reading: '📚', video: '🎬',
 }
 const typeLabels: Record<string, string> = {
-  doc: '讲解文档', quiz: '练习题', mindmap: '思维导图', code: '代码实操', reading: '拓展阅读',
+  doc: '讲解文档', quiz: '练习题', mindmap: '思维导图', code: '代码实操', reading: '拓展阅读', video: '讲解视频',
 }
 
 const resourceBadges = computed(() =>
@@ -61,8 +63,14 @@ const statusBgColor = computed(() => {
 
 const progressPercent = computed(() => Math.round(props.progress || 0))
 
+const isPlan = computed(() => props.taskType === 'plan')
+
 function handleClick() {
-  router.push(`/studio/${props.taskId}`)
+  if (isPlan.value) {
+    router.push('/path')
+  } else {
+    router.push(`/studio/${props.taskId}`)
+  }
 }
 </script>
 
@@ -73,9 +81,9 @@ function handleClick() {
       <div class="flex items-center text-[13px] gen-header-status">
         <span class="flex items-center gap-1.5">
           <span class="status-dot" :class="'dot-' + status"></span>
-          <span v-if="status === 'done'">已完成资源生成</span>
-          <span v-else-if="status === 'failed'">资源生成失败</span>
-          <span v-else>正在生成资源包</span>
+          <span v-if="status === 'done'">{{ isPlan ? '学习计划已就绪' : '已完成资源生成' }}</span>
+          <span v-else-if="status === 'failed'">{{ isPlan ? '计划生成失败' : '资源生成失败' }}</span>
+          <span v-else>{{ isPlan ? '正在生成学习计划' : '正在生成资源包' }}</span>
         </span>
       </div>
       <div class="gen-header-right">
@@ -109,7 +117,7 @@ function handleClick() {
         </div>
         <!-- 完成态：摘要 -->
         <div v-else-if="status === 'done'" class="gen-message gen-message-done">
-          已生成 {{ readyCount }}/{{ totalCount || resourceTypes.length }} 类资源，点击查看详情
+          {{ isPlan ? '学习计划已生成，共 ' + (totalCount || '?') + ' 个模块，点击查看详情' : '已生成 ' + readyCount + '/' + (totalCount || resourceTypes.length) + ' 类资源，点击查看详情' }}
         </div>
         <!-- 失败态 -->
         <div v-else-if="status === 'failed'" class="gen-message gen-message-failed">
@@ -157,8 +165,8 @@ function handleClick() {
     <!-- 底部详情 -->
     <div class="gen-footer">
       <span class="inline-block mr-1" :style="{ color: statusColor }">●</span>
-      <span v-if="status === 'generating'">多智能体流水线正在生成学习资源：检索 → 规划 → 生成 → 审查</span>
-      <span v-else-if="status === 'done'">资源包已生成，前往工作室查看完整内容</span>
+      <span v-if="status === 'generating'">{{ isPlan ? '四阶段流水线生成中：大计划 → 资源匹配 → 子计划 → 缺口生成' : '多智能体流水线正在生成学习资源：检索 → 规划 → 生成 → 审查' }}</span>
+      <span v-else-if="status === 'done'">{{ isPlan ? '学习计划已就绪，前往学习路径开始学习' : '资源包已生成，前往工作室查看完整内容' }}</span>
       <span v-else>生成过程出现异常，点击查看详情或重新生成</span>
     </div>
   </div>

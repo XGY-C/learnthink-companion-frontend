@@ -94,6 +94,22 @@ export interface AvailableCourse {
   createdAt: string
 }
 
+// ========== 教材信息（Textbook）相关类型 ==========
+
+/** 教材基本信息（来自 GET /courses/{id}/textbook） */
+export interface CourseTextbook {
+  title: string
+  author: string
+  introduction: string
+  toc: string  // JSON 字符串，前端使用时需 JSON.parse
+}
+
+/** 目录节点（解析后的 toc） */
+export interface ChapterNode {
+  title: string
+  children: ChapterNode[]
+}
+
 // ========== 资源包（Resource Pack）相关类型 ==========
 
 /** 单个资源项 */
@@ -271,13 +287,16 @@ export interface AgentThinkingTrace {
   timestamp: string
 }
 
+/** Agent 思考阶段 —— 与后端 ThinkingPhase.java 枚举同步 */
+export type ThinkingPhase = 'CONTEXT' | 'RETRIEVE' | 'RAG' | 'PLANNING' | 'DECISION' | 'REFLECT' | 'ERROR'
+
 /** 前端思考链步骤（ChatPanel 用，由 SSE agent.thought 事件驱动） */
 export interface ThinkingStep {
   label: string
   icon: string
   done: boolean
-  /** 原始阶段标识（CONTEXT | RETRIEVE | REFLECT | RAG | DECISION），用于步骤类型分类 */
-  phase?: string
+  /** 原始阶段标识，用于步骤类型分类 */
+  phase?: ThinkingPhase
   /** 简短描述 */
   detail?: string
   /** 完整推理链字段 */
@@ -348,7 +367,7 @@ export interface QuizContent {
 }
 
 /** SSE 事件类型汇总 */
-export type SSEEventType = 'task.accepted' | 'task.stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'task.done' | 'task.failed' | 'subtopic.started' | 'subtopic.completed'
+export type SSEEventType = 'task.accepted' | 'task.stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'task.done' | 'task.failed' | 'subtopic.started' | 'subtopic.completed' | 'checklist.created' | 'checklist.updated' | 'agent.generation.started' | 'agent.generation.done' | 'agent.generation.failed' | 'plan.gap_tasks'
 
 /** 全局通知项 */
 export interface NotificationItem {
@@ -467,11 +486,13 @@ export interface MatchSummary {
 /** Activity（单个学习活动） */
 export interface Activity {
   activityId: string
-  type: 'learn' | 'quiz' | 'explore'
+  type: 'learn' | 'explore'
   title: string
   description: string | null
   requires: string[]
+  /** @deprecated 使用 resources[] */
   resource: ActivityResource | null
+  resources: ActivityResource[]
   estimatedMinutes: number | null
   order: number | null
   completionCriteria: CompletionCriteria | null

@@ -160,6 +160,7 @@
                       @preview="previewResource(res, pack)"
                       @view-sources="viewSources(res)"
                       @regenerate="regenerateResource(res, pack)"
+                      @download="downloadVideoResource(res)"
                   /></div>
                   <!-- 操作按钮组 -->
                   <div class="flex justify-end gap-2">
@@ -261,9 +262,12 @@
                 :showToc="false"
               />
             </div>
-            <!-- 视频脚本：Markdown 渲染 -->
-            <div v-else-if="currentPreview.type === 'video'" class="">
-
+            <!-- 视频：HTML5 播放器 -->
+            <div v-else-if="currentPreview.type === 'video'" class="rounded-lg overflow-hidden bg-black">
+              <video v-if="videoPreviewUrl" :src="videoPreviewUrl" controls class="w-full" style="max-height: 500px;" />
+              <div v-else class="flex items-center justify-center py-16" style="color: var(--lt-text-auxiliary);">
+                <span>视频正在生成或 URL 暂不可用</span>
+              </div>
             </div>
             <!-- 默认（doc/reading 等）：完整 Markdown 渲染 -->
             <div v-else class="">
@@ -351,6 +355,23 @@ const activePackId = ref<string | null>(null)
 const previewVisible = ref(false)
 const currentPreview = ref<any>(null)
 const previewMode = ref('brief')
+
+const videoPreviewUrl = computed(() => {
+  if (currentPreview.value?.type !== 'video') return null
+  try {
+    const raw = currentPreview.value?.content || currentPreview.value?.brief || currentPreview.value?.deepContent
+    if (!raw) return null
+    const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed?.videoUrl) return parsed.videoUrl
+    } catch { /* JSON 损坏，走正则回退 */ }
+    const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
+})
 
 const evidenceDrawer = ref<any>(null)
 const mindmapViewerRef = ref<{ exportSvg: (filename?: string) => void; exportPng: (filename?: string) => Promise<void> } | null>(null)
@@ -689,7 +710,7 @@ const resourceTypeLabel = (type: string) => {
     quiz: '练习题',
     reading: '拓展阅读',
     code: '代码案例',
-    video: '视频脚本'
+    video: '讲解视频'
   }
   return map[type] || type
 }
@@ -704,6 +725,28 @@ async function downloadDocxResource(res: any) {
   const content = res.deepContent || res.brief || ''
   const blob = await markdownToDocxBlob(content, res.title)
   downloadDocx(blob, res.title || 'resource')
+}
+
+function extractVideoUrl(res: any): string | null {
+  const raw = res.videoUrl || res.content || res.deepContent || res.brief || ''
+  if (!raw) return null
+  if (typeof raw === 'string' && /^https?:\/\//.test(raw.trim())) return raw.trim()
+  const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed?.videoUrl) return parsed.videoUrl
+  } catch { /* JSON 损坏，走正则回退 */ }
+  const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
+  return m ? m[1] : null
+}
+
+function downloadVideoResource(res: any) {
+  const url = extractVideoUrl(res)
+  if (url) {
+    window.open(url, '_blank')
+  } else {
+    ElMessage.warning('视频 URL 暂不可用，请等待视频渲染完成')
+  }
 }
 
 function downloadMdResource(res: any) {
