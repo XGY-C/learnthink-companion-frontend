@@ -58,7 +58,7 @@
           v-for="res in stream.resources.value"
           :key="res.id"
           class="m-resource-card"
-          :class="{ pending: res.status === 'pending', failed: res.status === 'failed' }"
+          :class="{ pending: res.status === 'pending' || res.status === 'rendering', failed: res.status === 'failed' }"
           @click="previewResource(res)"
         >
           <div class="m-resource-icon-wrap">
@@ -68,7 +68,7 @@
             <h4 class="m-resource-title">{{ res.title || typeLabel(res.type) }}</h4>
             <div class="m-resource-meta">
               <span class="m-resource-status" :class="res.status">
-                {{ res.status === 'ready' ? '已就绪' : res.status === 'pending' ? '生成中' : res.status === 'failed' ? '失败' : '已驳回' }}
+                {{ res.status === 'ready' ? '已就绪' : res.status === 'rendering' ? '渲染中' : res.status === 'pending' ? '生成中' : res.status === 'failed' ? '失败' : '已驳回' }}
               </span>
               <span v-if="res.confidence" class="m-resource-confidence" :class="res.confidence">{{ confLabel(res.confidence) }}</span>
               <span v-if="res.qualityScore" class="m-resource-score">{{ res.qualityScore }}分</span>
@@ -94,6 +94,12 @@
             <div class="m-preview-body">
               <div v-if="currentPreview?.type === 'mindmap'" style="min-height: 300px;">
                 <MindmapViewer :content="currentPreview.deepContent || currentPreview.brief || ''" :is-json="true" />
+              </div>
+              <div v-else-if="currentPreview?.type === 'video'" class="bg-black rounded-lg overflow-hidden">
+                <video v-if="videoPreviewUrl" :src="videoPreviewUrl" controls class="w-full" style="max-height: 400px;" />
+                <div v-else class="flex items-center justify-center py-12" style="color: var(--lt-text-auxiliary);">
+                  <span>视频正在生成或 URL 暂不可用</span>
+                </div>
               </div>
               <div v-else>
                 <MarkdownViewer :content="previewContent" :show-toc="false" />
@@ -160,6 +166,23 @@ const pageSubtitle = computed(() => {
 const previewContent = computed(() => {
   if (!currentPreview.value) return ''
   return currentPreview.value.deepContent || currentPreview.value.brief || '暂无内容'
+})
+
+const videoPreviewUrl = computed(() => {
+  if (currentPreview.value?.type !== 'video') return null
+  try {
+    const raw = currentPreview.value?.content || currentPreview.value?.brief || currentPreview.value?.deepContent
+    if (!raw) return null
+    const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed?.videoUrl) return parsed.videoUrl
+    } catch { /* JSON 损坏，走正则回退 */ }
+    const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
 })
 
 function previewResource(res: any) {

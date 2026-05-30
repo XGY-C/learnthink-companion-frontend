@@ -9,6 +9,8 @@ import ThoughtChainTimeline from '@/components/ThoughtChainTimeline.vue'
 import LottieAnimation from '@/components/LottieAnimation.vue'
 import liveChatbotLottie from '@/assets/lottie/live-chatbot.json'
 import GenerationCard from '@/components/GenerationCard.vue'
+import PlanOfferCard from '@/components/PlanOfferCard.vue'
+import PlanEditor from '@/components/PlanEditor.vue'
 import ProfilePanel from '@/components/Profile/ProfilePanel.vue'
 
 const router = useRouter()
@@ -198,6 +200,30 @@ onBeforeUnmount(() => {
                 class="mobile-gen-card"
               />
             </template>
+
+            <!-- 方案卡片 — 资源类型 -->
+            <PlanOfferCard
+              v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.accepted"
+              :offer="msg._planOffer!"
+              compact
+              :loading="chat.isGenerating.value"
+              @confirm="chat.acceptGenerationOffer()"
+              @dismiss="chat.dismissGenerationOffer()"
+              class="mobile-plan-offer"
+            />
+
+            <!-- 可编辑计划编辑器 — 计划类型（已确认的方案不消失，但禁用编辑） -->
+            <!-- v3.1: 支持 _pendingPlan（DB 加载）和 _planOffer（实时流）两种数据源 -->
+            <PlanEditor
+              v-if="(msg._planOffer && msg._planOffer.type === 'plan' && !msg._planOffer.dismissed) || (msg as any)._pendingPlan"
+              :modules="((msg as any)._pendingPlan?.modules?.length ? (msg as any)._pendingPlan.modules : (chat.planPreviewData.value?.modules || []))"
+              :edges="((msg as any)._pendingPlan?.edges?.length ? (msg as any)._pendingPlan.edges : (chat.planPreviewData.value?.edges || []))"
+              :loading="chat.planPreviewLoading.value && !(msg as any)._pendingPlan"
+              :confirmed="!!(msg._planOffer?.confirmed || (msg as any)._pendingPlan?.confirmed)"
+              :on-save="(planJson: string) => chat.updatePlanDraft(planJson)"
+              @confirm="(planJson: string) => chat.confirmEditedPlan(planJson, msg._planOffer?.requirementText || '', msg._planOffer?.launchTopic || '学习计划')"
+              @cancel="chat.dismissPlanOffer()"
+            />
 
             <!-- 建议按钮 -->
             <div v-if="msg.suggestions && msg.suggestions.length > 0" class="mobile-suggestions">

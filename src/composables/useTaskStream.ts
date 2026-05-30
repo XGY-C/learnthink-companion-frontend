@@ -42,7 +42,7 @@ export interface PackResource {
 export function typeLabel(type: string): string {
   const map: Record<string, string> = {
     doc: '讲解文档', mindmap: '思维导图', quiz: '练习题',
-    reading: '拓展阅读', code: '代码案例',
+    reading: '拓展阅读', code: '代码案例', video: '讲解视频',
   }
   return map[type] || type
 }
@@ -80,7 +80,7 @@ const mockResources: Record<string, any[]> = {
 
 export function useTaskStream() {
   const taskStore = useTaskStore()
-  const { status: sseStatus, error: sseError, connect: sseConnect, disconnect: sseDisconnect } = useSSE()
+  const { status: sseStatus, error: sseError, retryCount: sseRetryCount, connect: sseConnect, disconnect: sseDisconnect } = useSSE()
 
   // ===== State =====
   const taskId = ref('')
@@ -96,6 +96,10 @@ export function useTaskStream() {
   const thinkingTraces = ref<AgentThinkingTrace[]>([])
   const plannerDecision = ref<PlannerDecision | null>(null)
   const showAllThoughts = ref(false)
+
+  // Phase 7: Checklist + Agent activity state
+  const checklist = ref<any>(null)
+  const activeAgents = ref<{ jobId: string; type: string; title: string; status: string }[]>([])
 
   // ===== Computed =====
   const resourceReadyCount = computed(() => resources.value.filter(r => r.status === 'ready').length)
@@ -113,6 +117,7 @@ export function useTaskStream() {
 
   const sseStatusText = computed(() => {
     if (isComplete.value) return 'done'
+    if (sseStatus.value === 'reconnecting') return 'reconnecting'
     return sseStatus.value
   })
 
@@ -209,7 +214,7 @@ export function useTaskStream() {
     hasStarted.value = true
     taskStore.createTask(tid)
 
-    const expectedTypes = ['doc', 'quiz', 'code', 'mindmap', 'reading']
+    const expectedTypes = ['doc', 'quiz', 'code', 'mindmap', 'reading', 'video']
     resources.value = expectedTypes.map((type, i) => ({
       id: `res-${i}`,
       title: '',
@@ -274,7 +279,12 @@ export function useTaskStream() {
           res.confidence = data.confidence as any
           res.sourcesCount = data.sources
           res.qualityScore = Math.floor(Math.random() * 15) + 85
-          res.brief = `已生成「${data.title}」`
+          if (data.content) {
+            res.deepContent = data.content
+            res.brief = data.content.length > 200 ? data.content.substring(0, 200) + '...' : data.content
+          } else {
+            res.brief = `已生成「${data.title}」`
+          }
         }
         taskStore.addResourceReady(tid, data)
       },
@@ -311,6 +321,37 @@ export function useTaskStream() {
           plannerDecision.value = data.detail as PlannerDecision
           taskStore.setPlannerDecision(tid, data.detail)
         }
+      },
+
+      // Phase 7: Checklist events
+      onChecklistCreated(data: any) {
+        checklist.value = data
+      },
+      onChecklistUpdated(data: any) {
+        if (checklist.value) {
+          checklist.value = { ...checklist.value, ...data }
+        }
+      },
+      onAgentGenerationStarted(data: any) {
+        activeAgents.value.push({
+          jobId: data.jobId || `job_${Date.now()}`,
+          type: data.resourceType || data.type,
+          title: data.title,
+          status: 'generating',
+        })
+      },
+      onAgentGenerationDone(data: any) {
+        const found = activeAgents.value.find(a => a.title === data.title)
+        if (found) {
+          found.status = 'done'
+          setTimeout(() => {
+            activeAgents.value = activeAgents.value.filter(a => a.title !== data.title)
+          }, 3000)
+        }
+      },
+      onAgentGenerationFailed(data: any) {
+        const found = activeAgents.value.find(a => a.title === data.title)
+        if (found) found.status = 'failed'
       },
 
       onTaskDone(data) {
@@ -423,6 +464,8 @@ export function useTaskStream() {
     thinkingTraces,
     plannerDecision,
     showAllThoughts,
+    checklist,
+    activeAgents,
 
     // Computed
     resourceReadyCount,
@@ -431,6 +474,7 @@ export function useTaskStream() {
     displayedTraces,
     sseStatusText,
     sseError,
+    sseRetryCount,
 
     // Methods
     connectTaskStream,

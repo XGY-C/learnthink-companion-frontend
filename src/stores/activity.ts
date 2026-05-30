@@ -39,12 +39,14 @@ export const useActivityStore = defineStore('activity', () => {
     return (timeOk || scrolledOk) && interactionDetected.value
   })
 
-  async function fetchActivity(activityId: string) {
+  /**
+   * Fetch resource pack content by pack ID.
+   * Returns { pack_id, topic, resources: [{ id, type, title, content, ... }] }
+   */
+  async function fetchResourcePack(packId: string) {
     loading.value = true
     try {
-      // Activity details are from the plan store's subPlans
-      // This fetches the resource content via resource-packs API
-      const res = await apiFetch<any>(`/resource-packs/placeholder`)
+      const res = await apiFetch<any>(`/resource-packs/${packId}`)
       return res.data
     } catch {
       return null
@@ -163,7 +165,7 @@ export const useActivityStore = defineStore('activity', () => {
     learnStartTime, interactionDetected, scrolledToBottom, loading,
     currentQuestion, answeredCount, totalCount, isLastQuestion,
     allQuestionsAnswered, elapsedSeconds, canCompleteLearn,
-    fetchActivity, startQuiz, selectAnswer, submitQuiz,
+    fetchResourcePack, startQuiz, selectAnswer, submitQuiz,
     startLearn, markInteraction, markScrolledToBottom, submitLearn,
     reset,
   }

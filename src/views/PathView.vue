@@ -1,278 +1,119 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
 import { usePlanStore } from '@/stores/plan'
+import { usePathInteraction } from '@/composables/usePathInteraction'
+import { typeIcon, typeColor, scopeLabel, depthLabel, moduleStatusLabel } from '@/utils/formatters'
 import type { Activity, Module } from '@/types'
 import {
-  ArrowRight, Refresh, Clock, CircleCheckFilled,
-  Lock, Right, ArrowDown, Search, Download,
-  MagicStick, Reading, EditPen, DataAnalysis,
+  ArrowRight, Refresh, CircleCheckFilled,
+  Lock, Right, ArrowDown, Search,
+  MagicStick, DataAnalysis,
 } from '@element-plus/icons-vue'
 import GenerationCard from '@/components/GenerationCard.vue'
-import EmptyState from '@/components/EmptyState.vue'
+import PathDag from '@/components/PathDag.vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const profile = useProfileStore()
 const planStore = usePlanStore()
 
-// ===== 交互状态 =====
-const dagExpanded = ref(false)
-const expandedModules = ref<Set<string>>(new Set())
-const exploreDrawerVisible = ref(false)
-const exploreActivity = ref<Activity | null>(null)
-const adjustmentHistoryVisible = ref(false)
+const {
+  expandedModules,
+  exploreDrawerVisible,
+  exploreActivity,
+  adjustmentHistoryVisible,
+  dagExpanded,
+  toggleModule,
+  goToLearn,
+  scrollToModule,
+} = usePathInteraction()
+
+// Auto-expand in-progress module on load
+watch(() => planStore.inProgressModule, (newModule) => {
+  if (newModule && !expandedModules.value.has(newModule.moduleId)) {
+    expandedModules.value.add(newModule.moduleId)
+  }
+}, { immediate: true })
+
+
 
 // ===== 生命周期 =====
 onMounted(async () => {
   if (profile.activeCourseId) {
+    // 如果已有生成任务在跑，不覆盖状态，让 SSE 回调自行切换到 ready
+    if (planStore.status === 'generating') return
     await planStore.fetchPlan(profile.activeCourseId)
-    // Default expand in-progress module
-    if (planStore.inProgressModule) {
-      expandedModules.value.add(planStore.inProgressModule.moduleId)
-    }
   }
 })
 
+
 // ===== 生成 =====
-function handleGenerate() {
-  if (profile.activeCourseId && profile.currentProfileVersion) {
-    planStore.generatePlan(profile.activeCourseId, profile.currentProfileVersion)
+async function handleGenerate() {
+  if (!profile.activeCourseId) {
+    ElMessage.warning('请先在 Dashboard 选择课程')
+    return
+  }
+  if (!profile.currentProfileVersion) {
+    await profile.refreshProfile()
+    if (!profile.currentProfileVersion) {
+      ElMessage.warning('请先完成画像测评，再生成学习计划')
+      return
+    }
+  }
+  const courseId = profile.activeCourseId
+  const pv = profile.currentProfileVersion!
+
+  const result = await planStore.generatePlan(courseId, pv)
+  if (!result) return
+
+  if (result.alreadyInProgress) {
+    try {
+      await ElMessageBox.confirm(
+        '检测到已有一个学习计划生成任务正在进行中。你可以查看当前进度，或者放弃当前任务并重新规划。',
+        '已有学习计划正在生成',
+        { confirmButtonText: '重新规划', cancelButtonText: '查看进度', type: 'warning' },
+      )
+      // 用户选择重新规划
+      planStore.generatePlan(courseId, pv, true)
+    } catch {
+      // 用户选择查看进度（取消/关闭弹窗）
+      planStore.generationTaskId = result.taskId
+      planStore.subscribeToGeneration(result.taskId, courseId)
+    }
   }
 }
 
 // ===== 导航 =====
-function goToLearn(activity: Activity) {
-  if (activity.type === 'explore') {
-    exploreActivity.value = activity
-    exploreDrawerVisible.value = true
-    return
-  }
-  router.push(`/learn/${activity.activityId}`)
-}
-
 function goToModuleReplan(moduleId: string) {
   planStore.refreshModule(moduleId)
 }
 
-function toggleModule(moduleId: string) {
-  if (expandedModules.value.has(moduleId)) {
-    expandedModules.value.delete(moduleId)
-  } else {
-    expandedModules.value.add(moduleId)
-  }
-}
 
-// ===== DAG 布局 =====
-interface DagNode {
-  id: string
-  title: string
-  status: Module['status']
-  x: number
-  y: number
-  cols: number
-}
-const dagNodes = computed(() => {
-  const modules = planStore.moduleList
-  if (modules.length === 0) return []
-
-  // Build topological layers
-  const inDegree: Record<string, number> = {}
-  const prereqMap: Record<string, string[]> = {}
-  modules.forEach(m => {
-    inDegree[m.moduleId] = 0
-    prereqMap[m.moduleId] = m.prerequisites || []
-  })
-  modules.forEach(m => (m.prerequisites || []).forEach(p => {
-    if (inDegree[m.moduleId] !== undefined) inDegree[m.moduleId]++
-  }))
-
-  const layers: string[][] = []
-  const visited = new Set<string>()
-  const queue = modules.filter(m => inDegree[m.moduleId] === 0).map(m => m.moduleId)
-  const tempInDegree = { ...inDegree }
-
-  while (queue.length > 0) {
-    const layer: string[] = []
-    for (let i = queue.length - 1; i >= 0; i--) {
-      const id = queue[i]
-      if (visited.has(id)) continue
-      visited.add(id)
-      layer.push(id)
-      queue.splice(i, 1)
-    }
-    layers.push(layer)
-
-    // Decrease in-degree for children
-    modules.forEach(m => {
-      if ((m.prerequisites || []).some(p => layer.includes(p))) {
-        tempInDegree[m.moduleId] = (tempInDegree[m.moduleId] || 0) - 1
-        if (tempInDegree[m.moduleId] <= 0 && !visited.has(m.moduleId)) {
-          queue.push(m.moduleId)
-        }
-      }
-    })
-  }
-
-  // Position nodes
-  const nodeMap = new Map<string, DagNode>()
-  const layerGap = 100
-  const nodeWidth = 160
-  const nodeHeight = 48
-  const hGap = 24
-  const startY = 30
-
-  layers.forEach((layer, li) => {
-    const totalW = layer.length * nodeWidth + (layer.length - 1) * hGap
-    const startX = Math.max(0, (600 - totalW) / 2)
-    layer.forEach((id, ni) => {
-      const m = modules.find(mm => mm.moduleId === id)
-      if (m) {
-        nodeMap.set(id, {
-          id: m.moduleId,
-          title: m.title.length > 10 ? m.title.slice(0, 10) + '…' : m.title,
-          status: m.status,
-          x: startX + ni * (nodeWidth + hGap),
-          y: 30 + li * (nodeHeight + layerGap),
-          cols: 1,
-        })
-      }
-    })
-  })
-
-  return [...nodeMap.values()]
-})
-
-const dagEdges = computed(() => {
-  const modules = planStore.moduleList
-  const edges: { from: DagNode; to: DagNode; path: string }[] = []
-  const nodes = dagNodes.value
-  const nodeMap = new Map(nodes.map(n => [n.id, n]))
-
-  modules.forEach(m => {
-    (m.prerequisites || []).forEach(p => {
-      const from = nodeMap.get(p)
-      const to = nodeMap.get(m.moduleId)
-      if (from && to) {
-        const mx1 = from.x + 80
-        const my1 = from.y + 48
-        const mx2 = to.x + 80
-        const my2 = to.y
-        const cy = (my1 + my2) / 2
-        edges.push({
-          from, to,
-          path: `M ${mx1} ${my1} C ${mx1} ${cy}, ${mx2} ${cy}, ${mx2} ${my2}`,
-        })
-      }
-    })
-  })
-  return edges
-})
-
-function getDagColor(status: Module['status']): string {
-  switch (status) {
-    case 'completed': return '#34C759'
-    case 'in_progress': return '#2B6FFF'
-    case 'locked': return '#B8B8C8'
-    default: return '#FFFFFF'
-  }
-}
-function getDagStroke(status: Module['status']): string {
-  switch (status) {
-    case 'completed': return '#34C759'
-    case 'in_progress': return '#2B6FFF'
-    case 'locked': return '#D0D0D8'
-    default: return '#A0A0B0'
-  }
-}
-
-function scrollToModule(moduleId: string) {
-  const el = document.getElementById(`module-${moduleId}`)
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-  dagExpanded.value = false
-}
-
-// ===== Helper =====
-function typeIcon(type: string): string {
-  switch (type) {
-    case 'learn': return '📖'
-    case 'quiz': return '📝'
-    case 'explore': return '📎'
-    default: return '📄'
-  }
-}
-function typeColor(type: string): string {
-  switch (type) {
-    case 'learn': return 'var(--lt-brand)'
-    case 'quiz': return 'var(--lt-orange)'
-    case 'explore': return 'var(--lt-text-auxiliary)'
-    default: return 'var(--lt-text-secondary)'
-  }
-}
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'completed': return '已完成'
-    case 'in_progress': return '进行中'
-    case 'locked': return '锁定'
-    case 'ready': return '未开始'
-    case 'failed': return '未达标'
-    case 'skipped': return '已跳过'
-    default: return status
-  }
-}
-function moduleStatusLabel(status: Module['status']): string {
-  switch (status) {
-    case 'completed': return '已完成'
-    case 'in_progress': return '进行中'
-    case 'locked': return '🔒 锁定'
-    case 'ready': return '未开始'
-  }
-}
-function scopeLabel(scope: string): string {
-  switch (scope) {
-    case 'core_curriculum': return '核心'
-    case 'supplementary': return '补充'
-    case 'extracurricular': return '拓展'
-    default: return scope
-  }
-}
-function depthLabel(depth: string): string {
-  switch (depth) {
-    case 'basic': return '概览'
-    case 'standard': return '标准'
-    case 'deep': return '深入'
-    default: return depth
-  }
-}
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col bg-gray-50/50">
     <!-- ==================== 空状态 ==================== -->
     <template v-if="planStore.status === 'empty'">
       <div class="flex-1 flex items-center justify-center p-8">
-        <div class="text-center max-w-md">
-          <div class="text-6xl mb-6">📋</div>
-          <h2 class="text-2xl font-bold mb-3" style="color: var(--lt-text-primary);">还没有学习计划</h2>
-          <p class="mb-6" style="color: var(--lt-text-auxiliary);">
-            在这里查看为你量身定制的学习路线，<br>
-            跟踪每个知识点的掌握进度。
-          </p>
-          <el-button
-            type="primary"
-            size="large"
-            :icon="MagicStick"
-            :loading="planStore.loading"
-            @click="handleGenerate"
-          >
-            生成我的学习计划
-          </el-button>
-          <p class="mt-4 text-xs" style="color: var(--lt-text-placeholder);">
-            也可以去对话页让 AI 帮你规划
-          </p>
-        </div>
+        <EmptyState
+          title="还没有学习计划"
+          message="在这里查看为你量身定制的学习路线，<br>跟踪每个知识点的掌握进度。"
+          button-text="生成我的学习计划"
+          :loading="planStore.loading"
+          @action="handleGenerate"
+        >
+          <template #icon>
+            <div class="text-6xl mb-6">📋</div>
+          </template>
+          <template #footer>
+            <p class="mt-4 text-xs text-gray-400">
+              也可以去对话页让 AI 帮你规划
+            </p>
+          </template>
+        </EmptyState>
       </div>
     </template>
 
@@ -283,10 +124,10 @@ function depthLabel(depth: string): string {
           <GenerationCard
             topic="学习计划生成"
             :task-id="planStore.generationTaskId"
+            task-type="plan"
             status="generating"
             :progress="planStore.generationPercent"
             :message="planStore.generationMessage"
-            resource-types="[]"
           />
           <p class="text-center text-sm mt-4" style="color: var(--lt-text-auxiliary);">
             {{ planStore.generationMessage || '正在分析课程结构与画像...' }}
@@ -366,54 +207,11 @@ function depthLabel(depth: string): string {
           </div>
 
           <!-- ===== DAG 缩略图 (可折叠) ===== -->
-          <div v-if="dagExpanded && dagNodes.length > 0" class="rounded-xl p-4" style="background: var(--lt-bg-card); border: 1px solid var(--lt-border);">
-            <svg :viewBox="`0 0 600 ${dagNodes.length > 0 ? Math.max(...dagNodes.map(n => n.y)) + 80 : 200}`" class="w-full" style="max-height: 300px;">
-              <!-- 边 -->
-              <path
-                v-for="(edge, i) in dagEdges"
-                :key="i"
-                :d="edge.path"
-                fill="none"
-                stroke="#C8C8D0"
-                stroke-width="1.5"
-                marker-end="url(#arrowhead)"
-              />
-              <!-- 节点 -->
-              <g
-                v-for="node in dagNodes"
-                :key="node.id"
-                :transform="`translate(${node.x}, ${node.y})`"
-                style="cursor: pointer;"
-                @click="scrollToModule(node.id)"
-              >
-                <rect
-                  width="160" height="48" rx="8"
-                  :fill="node.status === 'in_progress' ? '#E8F0FE' : 'white'"
-                  :stroke="getDagStroke(node.status)"
-                  stroke-width="2"
-                />
-                <circle
-                  cx="16" cy="24" r="6"
-                  :fill="getDagColor(node.status)"
-                />
-                <text x="28" y="29" font-size="12" fill="#1A1A2E" font-weight="500">
-                  {{ node.title }}
-                </text>
-              </g>
-              <!-- 箭头定义 -->
-              <defs>
-                <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                  <polygon points="0 0, 8 3, 0 6" fill="#C8C8D0" />
-                </marker>
-              </defs>
-            </svg>
-            <div class="flex items-center gap-4 mt-3 text-xs" style="color: var(--lt-text-auxiliary);">
-              <span><span class="inline-block w-3 h-3 rounded-full bg-[#34C759] mr-1"></span>已完成</span>
-              <span><span class="inline-block w-3 h-3 rounded-full bg-[#2B6FFF] mr-1"></span>进行中</span>
-              <span><span class="inline-block w-3 h-3 rounded border border-[#A0A0B0] bg-white mr-1"></span>未开始</span>
-              <span><span class="inline-block w-3 h-3 rounded-full bg-[#B8B8C8] mr-1"></span>锁定</span>
-            </div>
-          </div>
+          <PathDag 
+            v-if="dagExpanded && planStore.moduleList.length > 0"
+            :modules="planStore.moduleList"
+            @node-click="scrollToModule"
+          />
 
           <!-- ===== Module 卡片列表 ===== -->
           <div class="space-y-3">
@@ -422,7 +220,7 @@ function depthLabel(depth: string): string {
               :key="mod.moduleId"
               :id="`module-${mod.moduleId}`"
               class="rounded-xl overflow-hidden transition-all"
-              :style="{ border: '1px solid var(--lt-border)', background: 'var(--lt-bg-card)' }"
+              style="border: 1px solid var(--lt-border); background: var(--lt-bg-card);"
             >
               <!-- Module Header (可点击展开/折叠) -->
               <div
@@ -487,6 +285,23 @@ function depthLabel(depth: string): string {
                   </span>
                 </div>
 
+                <!-- Gap 资源生成进度 -->
+                <div
+                  v-for="gt in planStore.gapTasks.filter(t => t.moduleId === mod.moduleId)"
+                  :key="gt.taskId"
+                  class="flex items-center gap-2 mt-3 mb-2 px-3 py-2 rounded-lg text-xs"
+                  style="background: rgba(124,92,252,0.06); border: 1px solid rgba(124,92,252,0.15);"
+                >
+                  <span class="text-sm">⚡</span>
+                  <span style="color: var(--lt-text-secondary);">资源生成中 ({{ gt.resourceTypes.join(', ') }})</span>
+                  <el-button
+                    text
+                    size="small"
+                    @click="router.push(`/studio?taskId=${gt.taskId}`)"
+                    style="color: var(--lt-ai);"
+                  >查看进度</el-button>
+                </div>
+
                 <!-- Activity 列表 -->
                 <div class="space-y-2">
                   <div
@@ -535,12 +350,24 @@ function depthLabel(depth: string): string {
                       </div>
                       <div class="flex items-center gap-3 mt-1">
                         <span class="text-xs" style="color: var(--lt-text-auxiliary);">
-                          {{ act.type === 'learn' ? '学习' : act.type === 'quiz' ? '练习' : '拓展' }}
+                          {{ act.type === 'learn' ? '学习' : '拓展' }}
                           · {{ act.estimatedMinutes }}min
                         </span>
-                        <!-- 资源类型 -->
-                        <span v-if="act.resource" class="text-xs" :style="{ color: act.resource.source === 'matched' ? 'var(--lt-success)' : 'var(--lt-text-auxiliary)' }">
-                          {{ act.resource.source === 'matched' ? '📄 已匹配' : '⚡ 待生成' }}
+                        <!-- 资源类型标签 -->
+                        <template v-if="act.resources && act.resources.length > 0">
+                          <span
+                            v-for="(r, ri) in act.resources"
+                            :key="ri"
+                            class="text-xs px-1.5 py-0.5 rounded"
+                            :style="{
+                              background: r.source === 'matched' ? 'rgba(52,199,89,0.1)' : 'rgba(168,168,180,0.12)',
+                              color: r.source === 'matched' ? 'var(--lt-success)' : 'var(--lt-text-auxiliary)',
+                            }"
+                          >{{ r.resourceType }}</span>
+                        </template>
+                        <!-- 兼容旧数据：回退到单 resource -->
+                        <span v-else-if="act.resource" class="text-xs" :style="{ color: act.resource.source === 'matched' ? 'var(--lt-success)' : 'var(--lt-text-auxiliary)' }">
+                          {{ act.resource.source === 'matched' ? '📄 已匹配' : '⚡ ' + act.resource.resourceType }}
                         </span>
                         <!-- 得分 (quiz) -->
                         <span v-if="act.result?.score != null" class="text-xs font-medium" :style="{ color: (act.result.score || 0) >= 0.7 ? 'var(--lt-success)' : 'var(--lt-orange)' }">
@@ -590,7 +417,7 @@ function depthLabel(depth: string): string {
                 <!-- Module 底部统计 -->
                 <div class="flex items-center justify-between mt-3 pt-3 border-t" style="border-color: var(--lt-border);">
                   <span class="text-xs" style="color: var(--lt-text-auxiliary);">
-                    进度 {{ mod.subPlan?.activities.filter(a => a.status === 'completed').length || 0 }}/{{ mod.subPlan?.activities.length || 0 }}
+                    进度 {{ mod.subPlan?.activities.filter(a => a.status === 'completed').length || 0 }}/{{ mod.subPLan?.activities.length || 0 }}
                   </span>
                   <el-button text size="small" :icon="Refresh" @click="goToModuleReplan(mod.moduleId)">
                     重新规划此模块

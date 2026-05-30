@@ -4,7 +4,13 @@
           <el-skeleton animated :rows="3" />
           <span class="text-sm" style="color: var(--lt-text-auxiliary);">等待该资源生成...</span>
         </div>
-    
+
+        <div v-else-if="status === 'rendering'" class="h-full flex flex-col justify-center items-center py-6 gap-3">
+          <el-icon class="is-loading" :size="32" style="color: var(--lt-brand);"><VideoCamera /></el-icon>
+          <span class="text-sm font-medium" style="color: var(--lt-text-secondary);">视频渲染中...</span>
+          <span class="text-xs" style="color: var(--lt-text-auxiliary);">将在完成后自动更新</span>
+        </div>
+
         <div v-else class="h-full flex flex-col flex-grow">
           <!-- Header -->
           <div class="flex justify-between items-start mb-3">
@@ -46,7 +52,8 @@
         <div class="flex justify-end gap-2 pt-3" style="border-top: 1px solid var(--lt-border);">
           <template v-if="status === 'ready'">
             <el-button size="small" @click="$emit('preview')">预览</el-button>
-            <el-button v-if="type === 'code'" size="small" plain @click="$emit('download', 'py')">下载 .py</el-button>
+            <el-button v-if="type === 'video'" size="small" plain @click="$emit('download', 'video')">下载视频</el-button>
+            <el-button v-else-if="type === 'code'" size="small" plain @click="$emit('download', 'py')">下载 .py</el-button>
             <el-dropdown v-else-if="type === 'doc' || type === 'reading'" size="small" @command="(cmd: string) => $emit('download', cmd)">
               <el-button size="small" plain>
                 下载 <el-icon class="ml-1"><ArrowDown /></el-icon>
@@ -74,12 +81,12 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, VideoCamera } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   title: string
   type: string
-  status: 'pending' | 'ready' | 'failed' | 'rejected'
+  status: 'pending' | 'rendering' | 'ready' | 'failed' | 'rejected'
   confidence?: 'high' | 'medium' | 'low'
   sourcesCount?: number
   qualityScore?: number

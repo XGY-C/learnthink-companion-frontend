@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getConfidenceConfig, CONFIDENCE_CONFIG } from '@/constants'
 import * as echarts from 'echarts/core'
@@ -23,6 +23,8 @@ import {
 } from '@element-plus/icons-vue'
 import { useProfileStore } from '@/stores/profile'
 import { usePlanStore } from '@/stores/plan'
+import { apiFetch } from '@/utils/api'
+import type { CourseTextbook, ChapterNode } from '@/types'
 import EmptyState from '@/components/EmptyState.vue'
 import DashboardIcon from '@/components/icons/DashboardIcon.vue'
 
@@ -31,6 +33,37 @@ const profile = useProfileStore()
 const planStore = usePlanStore()
 
 echarts.use([RadarChart, CanvasRenderer])
+
+// ===== 教材信息 =====
+const activeCourseId = computed(() => profile.activeCourseId)
+
+const textbook = ref<CourseTextbook | null>(null)
+const textbookLoading = ref(false)
+const showTocDialog = ref(false)
+
+function parseToc(tocJson: string): ChapterNode[] {
+  try { return JSON.parse(tocJson) } catch { return [] }
+}
+
+const tocNodes = computed(() => {
+  if (!textbook.value) return []
+  return parseToc(textbook.value.toc)
+})
+
+async function fetchTextbook() {
+  if (!activeCourseId.value) { textbook.value = null; return }
+  textbookLoading.value = true
+  try {
+    const res = await apiFetch<CourseTextbook>(`/courses/${activeCourseId.value}/textbook`)
+    textbook.value = res.data ?? null
+  } catch {
+    textbook.value = null
+  } finally {
+    textbookLoading.value = false
+  }
+}
+
+watch(activeCourseId, () => { fetchTextbook() })
 
 // ===== 响应式数据 =====
 
@@ -230,7 +263,7 @@ function handleMetricClick(idx: number) {
 
 // ===== 模拟数据加载 =====
 onMounted(() => {
-  // 可在此发起 API 请求获取真实数据
+  fetchTextbook()
 })
 </script>
 
@@ -406,9 +439,43 @@ onMounted(() => {
           </el-card>
         </el-col>
 
-        <!-- 右：画像快照 -->
+        <!-- 右：教材信息 + 画像快照 -->
                                 <el-col :xs="24" :lg="10" class="mb-4">
-          <el-card shadow="never" class="h-full" style="border-radius: 12px; border: 1px solid var(--lt-border);">
+          <!-- 教材信息卡片 -->
+          <el-card shadow="never" class="mb-4" style="border-radius: 12px; border: 1px solid var(--lt-border);">
+            <template #header>
+              <div class="flex items-center justify-between">
+                <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
+                  <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--lt-warning), #FF8C42);">
+                    <el-icon size="14" color="white"><Reading /></el-icon>
+                  </div>
+                  教材信息
+                </span>
+                <el-button v-if="textbook && tocNodes.length > 0" link type="primary" size="small" @click="showTocDialog = true">
+                  查看完整目录 <el-icon><Right /></el-icon>
+                </el-button>
+              </div>
+            </template>
+            <!-- 加载中 -->
+            <div v-if="textbookLoading" class="space-y-2 animate-pulse">
+              <div class="h-5 w-3/4 rounded" style="background-color: var(--lt-bg-page);" />
+              <div class="h-3 w-1/2 rounded" style="background-color: var(--lt-bg-page);" />
+              <div class="h-3 w-full rounded" style="background-color: var(--lt-bg-page);" />
+            </div>
+            <!-- 有教材数据 -->
+            <div v-else-if="textbook" class="space-y-2.5">
+              <h4 class="text-base font-bold" style="color: var(--lt-text-primary);">《{{ textbook.title }}》</h4>
+              <p class="text-xs" style="color: var(--lt-text-auxiliary);" v-if="textbook.author">作者：{{ textbook.author }}</p>
+              <p class="text-sm leading-relaxed line-clamp-3" style="color: var(--lt-text-secondary);" v-if="textbook.introduction">{{ textbook.introduction }}</p>
+              <el-button v-if="textbook.introduction && textbook.introduction.length > 120" link type="primary" size="small" @click="showTocDialog = true">展开完整简介</el-button>
+            </div>
+            <!-- 无教材数据 -->
+            <div v-else class="text-center py-3">
+              <p class="text-sm" style="color: var(--lt-text-placeholder);">暂无教材信息</p>
+            </div>
+          </el-card>
+          <!-- 画像快照 -->
+          <el-card shadow="never" style="border-radius: 12px; border: 1px solid var(--lt-border);">
               <template #header>
                 <div class="flex items-center justify-between">
                   <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
@@ -572,6 +639,37 @@ onMounted(() => {
       </el-card>
     </template>
   </div>
+
+  <!-- 教材信息弹窗 -->
+  <el-dialog v-model="showTocDialog" :title="`教材信息 —《${textbook?.title}》`" width="560px" destroy-on-close>
+    <template v-if="textbook">
+      <div class="mb-4" v-if="textbook.introduction">
+        <h4 class="text-sm font-semibold mb-1.5" style="color: var(--lt-text-secondary);">内容简介</h4>
+        <p class="text-sm leading-relaxed" style="color: var(--lt-text-primary); white-space: pre-wrap;">{{ textbook.introduction }}</p>
+      </div>
+      <div v-if="tocNodes.length > 0">
+        <h4 class="text-sm font-semibold mb-2" style="color: var(--lt-text-secondary);">章节目录</h4>
+        <div class="max-h-96 overflow-y-auto">
+          <template v-for="node in tocNodes" :key="node.title">
+            <div class="toc-node" :style="{ paddingLeft: '0' }">
+              <span class="toc-chapter">{{ node.title }}</span>
+            </div>
+            <template v-if="node.children && node.children.length > 0">
+              <div v-for="child in node.children" :key="child.title" class="toc-node" style="padding-left: 24px;">
+                <span class="toc-section">{{ child.title }}</span>
+              </div>
+              <template v-for="child in node.children" :key="'sub-' + child.title">
+                <div v-for="sub in (child.children || [])" :key="sub.title" class="toc-node" style="padding-left: 48px;">
+                  <span class="toc-subsection">{{ sub.title }}</span>
+                </div>
+              </template>
+            </template>
+          </template>
+        </div>
+      </div>
+      <el-empty v-if="!textbook.introduction && tocNodes.length === 0" description="暂无教材信息" :image-size="60" />
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -621,4 +719,14 @@ onMounted(() => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   transform: translateY(-2px);
 }
+
+/* 教材目录树 */
+.toc-node {
+  padding: 3px 0;
+  border-bottom: 1px solid var(--lt-border);
+}
+.toc-node:last-child { border-bottom: none; }
+.toc-chapter { font-weight: 600; font-size: 13px; color: var(--lt-text-primary); }
+.toc-section { font-size: 13px; color: var(--lt-text-secondary); }
+.toc-subsection { font-size: 12px; color: var(--lt-text-auxiliary); }
 </style>

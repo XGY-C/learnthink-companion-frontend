@@ -4,7 +4,7 @@ import type { SSEEventType } from '@/types'
 
 export interface SSECallbacks {
   onStage?: (data: { stage: string; percent: number; message: string }) => void
-  onResourceReady?: (data: { type: string; title: string; confidence: string; sources: number; resourceId: string }) => void
+  onResourceReady?: (data: { type: string; title: string; content: string; confidence: string; sources: number; resourceId: string }) => void
   onReviewFlag?: (data: { type: string; action: string; message: string }) => void
   onAgentThought?: (data: any) => void
   onAgentMessage?: (data: any) => void
@@ -12,15 +12,22 @@ export interface SSECallbacks {
   onTaskFailed?: (data: { error: string; message: string }) => void
   onSubTopicStarted?: (data: { index: number; total: number; title: string; description: string; itemCount: number }) => void
   onSubTopicCompleted?: (data: { index: number; total: number; title: string; publishedItems: string[] }) => void
+  onChecklistCreated?: (data: any) => void
+  onChecklistUpdated?: (data: any) => void
+  onAgentGenerationStarted?: (data: any) => void
+  onAgentGenerationDone?: (data: any) => void
+  onAgentGenerationFailed?: (data: any) => void
+  onGapTasks?: (data: { tasks: { task_id: string; module_title: string; module_id: string; resource_types: string[] }[] }) => void
 }
 
 export function useSSE() {
-  const status = ref<'connected' | 'connecting' | 'disconnected'>('disconnected')
+  const status = ref<'connected' | 'connecting' | 'disconnected' | 'reconnecting'>('disconnected')
   const error = ref<string | null>(null)
+  const retryCount = ref(0)
   let eventSource: EventSource | null = null
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
   let reconnectAttempts = 0
-  const MAX_RECONNECT_MS = 10000
+  const MAX_RECONNECT_MS = 30000
 
   function connect(taskId: string, callbacks: SSECallbacks) {
     disconnect()
@@ -40,18 +47,16 @@ export function useSSE() {
     eventSource.onopen = () => {
       status.value = 'connected'
       reconnectAttempts = 0
+      retryCount.value = 0
       error.value = null
     }
 
     eventSource.onerror = () => {
-      status.value = 'disconnected'
-      if (reconnectAttempts < 5) {
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_MS)
-        reconnectAttempts++
-        reconnectTimeout = setTimeout(() => connect(taskId, callbacks), delay)
-      } else {
-        error.value = 'SSE 连接失败，请刷新页面'
-      }
+      status.value = 'reconnecting'
+      retryCount.value = reconnectAttempts + 1
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_MS)
+      reconnectAttempts++
+      reconnectTimeout = setTimeout(() => connect(taskId, callbacks), delay)
     }
 
     const handlers: Record<SSEEventType, ((data: any) => void) | undefined> = {
@@ -65,6 +70,12 @@ export function useSSE() {
       'task.accepted': undefined,
       'subtopic.started': callbacks.onSubTopicStarted,
       'subtopic.completed': callbacks.onSubTopicCompleted,
+      'checklist.created': callbacks.onChecklistCreated,
+      'checklist.updated': callbacks.onChecklistUpdated,
+      'agent.generation.started': callbacks.onAgentGenerationStarted,
+      'agent.generation.done': callbacks.onAgentGenerationDone,
+      'agent.generation.failed': callbacks.onAgentGenerationFailed,
+      'plan.gap_tasks': callbacks.onGapTasks,
     }
 
     Object.entries(handlers).forEach(([event, handler]) => {
@@ -91,11 +102,12 @@ export function useSSE() {
     }
     status.value = 'disconnected'
     reconnectAttempts = 0
+    retryCount.value = 0
   }
 
   onUnmounted(() => {
     disconnect()
   })
 
-  return { status, error, connect, disconnect }
+  return { status, error, retryCount, connect, disconnect }
 }

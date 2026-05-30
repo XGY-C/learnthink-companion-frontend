@@ -21,9 +21,10 @@
           </span>
           <el-tag v-if="stream.sseStatusText.value === 'connected'" type="success" size="small" effect="plain">SSE 已连接</el-tag>
           <el-tag v-else-if="stream.sseStatusText.value === 'connecting'" type="warning" size="small" effect="plain">SSE 连接中...</el-tag>
+          <el-tag v-else-if="stream.sseStatusText.value === 'reconnecting'" type="warning" size="small" effect="plain">SSE 重连中 ({{ stream.sseRetryCount.value }})</el-tag>
           <el-tag v-else-if="stream.sseStatusText.value === 'done'" type="info" size="small" effect="plain">已完成</el-tag>
-          <el-tag v-else-if="stream.sseError.value" type="danger" size="small" effect="plain" title="SSE 连接断开">⚠ SSE 已断开</el-tag>
-          <el-button v-if="stream.sseError.value && !stream.isComplete.value" size="small" @click="stream.manualRefresh()" :icon="Refresh" circle />
+          <el-tag v-else type="danger" size="small" effect="plain" title="SSE 未连接，仅依赖轮询更新">⚠ SSE 未连接</el-tag>
+          <el-button v-if="!stream.isComplete.value" size="small" @click="stream.manualRefresh()" :icon="Refresh" circle title="手动重连 SSE" />
         </div>
       </div>
 
@@ -53,6 +54,12 @@
       <!-- Summary bar -->
       <div v-if="stream.isComplete.value" class="mb-6 px-4 py-3 rounded-lg text-sm" style="background-color: #ECFDF3; border: 1px solid #BBF7D0; color: #166534;">
         ✅ 已生成 {{ stream.resourceReadyCount.value }} 份资源 · 引用 {{ stream.totalSources.value }} 条证据 · 平均质量 {{ stream.avgQuality.value }} 分
+      </div>
+
+      <!-- Phase 7: Checklist + Agent Activity -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <ChecklistPanel :checklist="stream.checklist.value" />
+        <AgentActivityPanel :agents="stream.activeAgents.value" />
       </div>
 
       <!-- Agent collaboration + PipelineStepper -->
@@ -122,7 +129,7 @@
       >
         <div v-if="currentPreview" class="min-h-[300px]">
           <div class="flex items-center gap-4 mb-4 border-b border-slate-100 pb-2">
-            <el-radio-group v-if="currentPreview.type === 'doc' || currentPreview.type === 'reading'" v-model="previewMode" size="small">
+            <el-radio-group v-if="currentPreview.type === 'doc' || currentPreview.type === 'reading' || currentPreview.type === 'video'" v-model="previewMode" size="small">
               <el-radio-button label="brief">速览版 (5分钟)</el-radio-button>
               <el-radio-button label="deep">深入版 (20分钟)</el-radio-button>
             </el-radio-group>
@@ -167,6 +174,12 @@
               @open-practice="() => {}"
             />
           </div>
+          <div v-else-if="currentPreview.type === 'video'" class="border border-slate-200 rounded-lg overflow-hidden bg-black">
+            <video v-if="videoPreviewUrl" :src="videoPreviewUrl" controls class="w-full" style="max-height: 500px;" />
+            <div v-else class="flex items-center justify-center py-16" style="color: var(--lt-text-auxiliary);">
+              <span>视频正在生成或 URL 暂不可用</span>
+            </div>
+          </div>
           <div v-else>
             <MarkdownViewer :content="previewContent" :showToc="previewMode === 'deep'" />
           </div>
@@ -181,9 +194,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { ArrowLeft, ArrowDown, Download, Refresh } from '@element-plus/icons-vue'
 import StudioIcon from '@/components/icons/StudioIcon.vue'
 import PipelineStepper from '@/components/PipelineStepper.vue'
+import ChecklistPanel from '@/components/ChecklistPanel.vue'
+import AgentActivityPanel from '@/components/AgentActivityPanel.vue'
 import ResourceCard from '@/components/ResourceCard.vue'
 import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
@@ -235,7 +251,49 @@ const previewContent = computed(() => {
   return currentPreview.value.deepContent || currentPreview.value.brief || '暂无内容'
 })
 
+const videoPreviewUrl = computed(() => {
+  if (currentPreview.value?.type !== 'video') return null
+  try {
+    const raw = currentPreview.value?.content || currentPreview.value?.brief || currentPreview.value?.deepContent
+    if (!raw) return null
+    const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
+    // 优先 JSON 解析
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed?.videoUrl) return parsed.videoUrl
+    } catch { /* JSON 损坏，走正则回退 */ }
+    // 正则回退：从损坏的 JSON 中直接提取 videoUrl 值
+    const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
+})
+
+function extractVideoUrl(res: any): string | null {
+  const raw = res.videoUrl || res.content || res.deepContent || res.brief || ''
+  if (!raw) return null
+  // 如果已经是纯 URL 字符串
+  if (typeof raw === 'string' && /^https?:\/\//.test(raw.trim())) return raw.trim()
+  const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed?.videoUrl) return parsed.videoUrl
+  } catch { /* JSON 损坏，走正则回退 */ }
+  const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
+  return m ? m[1] : null
+}
+
 async function downloadResource(res: any, format = 'docx') {
+  if (res.type === 'video' || format === 'video') {
+    const url = extractVideoUrl(res)
+    if (url) {
+      window.open(url, '_blank')
+    } else {
+      ElMessage.warning('视频 URL 暂不可用，请等待视频渲染完成')
+    }
+    return
+  }
   const content = res.deepContent || res.brief || ''
   if (res.type === 'code' || format === 'py') {
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })

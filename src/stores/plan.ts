@@ -7,7 +7,7 @@ import type { Plan, Module, SubPlan, Activity, ActivitySubmitResponse } from '@/
 export const usePlanStore = defineStore('plan', () => {
   const plan = ref<Plan | null>(null)
   const subPlans = ref<Map<string, SubPlan>>(new Map())
-  const status = ref<'empty' | 'generating' | 'ready' | 'completed'>('empty')
+  const status = ref<'empty' | 'generating' | 'pending_decision' | 'decided' | 'ready' | 'completed'>('empty')
   const loading = ref(false)
 
   // 生成进度
@@ -15,6 +15,7 @@ export const usePlanStore = defineStore('plan', () => {
   const generationPercent = ref(0)
   const generationMessage = ref('')
   const generationTaskId = ref('')
+  const gapTasks = ref<{ taskId: string; moduleTitle: string; moduleId: string; resourceTypes: string[] }[]>([])
 
   const { status: sseStatus, connect: sseConnect, disconnect: sseDisconnect } = useSSE()
 
@@ -97,9 +98,14 @@ export const usePlanStore = defineStore('plan', () => {
             subPlans.value.set(m.moduleId, m.subPlan)
           }
         }
-        status.value = 'ready'
-        if (res.data.modules.every(m => m.status === 'completed')) {
+        // 映射后端 plan status 到 store status
+        const backendStatus = res.data.status
+        if (backendStatus === 'pending_decision' || backendStatus === 'decided' || backendStatus === 'generating') {
+          status.value = backendStatus
+        } else if (res.data.modules.every((m: any) => m.status === 'completed')) {
           status.value = 'completed'
+        } else {
+          status.value = 'ready'
         }
       }
     } catch {
@@ -110,23 +116,37 @@ export const usePlanStore = defineStore('plan', () => {
     }
   }
 
-  async function generatePlan(courseId: string, profileVersion: number) {
+  interface GeneratePlanResult {
+    alreadyInProgress: boolean
+    taskId: string
+  }
+
+  async function generatePlan(courseId: string, profileVersion: number, force = false, requirementText?: string): Promise<GeneratePlanResult | null> {
     loading.value = true
     status.value = 'generating'
     try {
-      const res = await apiFetch<{ task_id: string }>('/plan/generate', {
+      const res = await apiFetch<{ task_id: string; already_in_progress?: boolean }>('/plan/generate', {
         method: 'POST',
-        body: { course_id: courseId, profile_version: profileVersion },
+        body: { courseId, profileVersion, force, requirementText: requirementText || '' },
       })
-      generationTaskId.value = res.data.task_id
-      subscribeToGeneration(res.data.task_id)
+      const taskId = res.data.task_id
+
+      if (res.data.already_in_progress) {
+        // 不自动订阅 SSE，由调用方弹窗让用户选择
+        return { alreadyInProgress: true, taskId }
+      }
+
+      generationTaskId.value = taskId
+      subscribeToGeneration(taskId, courseId)
+      return { alreadyInProgress: false, taskId }
     } catch {
       status.value = 'empty'
       loading.value = false
+      return null
     }
   }
 
-  function subscribeToGeneration(taskId: string) {
+  function subscribeToGeneration(taskId: string, courseId?: string) {
     sseConnect(taskId, {
       onStage(data) {
         generationStage.value = data.stage
@@ -134,17 +154,26 @@ export const usePlanStore = defineStore('plan', () => {
         generationMessage.value = data.message
       },
       onTaskDone() {
-        // Plan done — reload plan
         const store = usePlanStore()
-        if (plan.value?.courseId) {
-          store.fetchPlan(plan.value.courseId)
+        const cid = courseId || plan.value?.courseId
+        if (cid) {
+          store.fetchPlan(cid) // fetchPlan 内部会设置 status 和 plan
+        } else {
+          status.value = 'ready'
+          loading.value = false
         }
-        status.value = 'ready'
-        loading.value = false
       },
       onTaskFailed() {
         status.value = 'empty'
         loading.value = false
+      },
+      onGapTasks(data) {
+        gapTasks.value = data.tasks.map(t => ({
+          taskId: t.task_id,
+          moduleTitle: t.module_title,
+          moduleId: t.module_id,
+          resourceTypes: t.resource_types,
+        }))
       },
     })
   }
@@ -161,6 +190,51 @@ export const usePlanStore = defineStore('plan', () => {
         if (mod) mod.subPlan = res.data
       }
     } catch { /* ignore */ }
+  }
+
+  /**
+   * 预览大计划（同步）— v3.1: 后端立即落库，需传 chatId
+   */
+  async function previewPlan(courseId: string, profileVersion: number, requirementText: string, chatId?: string): Promise<any | null> {
+    try {
+      const res = await apiFetch<any>('/plan/preview', {
+        method: 'POST',
+        body: { courseId, profileVersion, requirementText, chatId },
+      })
+      return res.data
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 更新 pending_decision 计划草稿（PlanEditor 编辑时实时保存）
+   */
+  async function updatePlanDraft(planId: string | undefined, courseId: string, profileVersion: number, planJson: string, chatId?: string, requirementText?: string): Promise<any | null> {
+    try {
+      const res = await apiFetch<any>('/plan/update', {
+        method: 'POST',
+        body: { planId, courseId, profileVersion, planJson, chatId, requirementText },
+      })
+      return res.data
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 确认大计划并异步生成
+   */
+  async function confirmPlan(courseId: string, profileVersion: number, planJson: string, requirementText: string, chatId?: string): Promise<{ taskId: string } | null> {
+    try {
+      const res = await apiFetch<{ task_id: string }>('/plan/confirm', {
+        method: 'POST',
+        body: { courseId, profileVersion, planJson, requirementText, chatId },
+      })
+      return res.data ? { taskId: res.data.task_id } : null
+    } catch {
+      return null
+    }
   }
 
   async function regenerateActivity(moduleId: string, activityId: string) {
@@ -198,12 +272,12 @@ export const usePlanStore = defineStore('plan', () => {
   }
 
   return {
-    plan, subPlans, status, loading,
+    plan, subPlans, status, loading, gapTasks,
     generationStage, generationPercent, generationMessage, generationTaskId,
     moduleList, completedModules, inProgressModule,
     overallProgress, overallMastery, overallWeakTags,
     currentActivity, currentModule,
-    fetchPlan, generatePlan, subscribeToGeneration,
+    fetchPlan, generatePlan, previewPlan, updatePlanDraft, confirmPlan, subscribeToGeneration,
     refreshModule, regenerateActivity, submitActivity,
   }
 })
