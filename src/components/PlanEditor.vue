@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { reactive, computed, watch } from 'vue'
 
 interface KP { kp_id: string; name: string }
 interface Module {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
 import { DataBoard, ChatLineRound, MagicStick, User, ArrowLeft } from '@element-plus/icons-vue'

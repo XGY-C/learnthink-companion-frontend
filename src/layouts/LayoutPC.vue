@@ -4,7 +4,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useProfileStore } from '@/stores/profile'
 import type { CourseInfo } from '@/types'
-import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, EditPen, DataLine, DataAnalysis, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
+import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, DataLine, DataAnalysis, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
 import { useAuth } from '@/composables/useAuth'
 
 const route = useRoute()
@@ -14,6 +14,7 @@ const profileStore = useProfileStore()
 const { logout } = useAuth()
 const activeMenu = computed(() => route.path)
 const isCollapsed = ref(false)
+const hideSidebar = computed(() => route.meta.hideSidebar === true)
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
@@ -52,6 +53,7 @@ onMounted(() => {
       ============================================
     -->
     <div
+      v-if="!hideSidebar"
       class="flex flex-col flex-shrink-0 z-20 transition-all duration-300 relative"
       :class="isCollapsed ? 'w-16' : 'w-60'"
       style="background-color: var(--nav-bg); box-shadow: var(--nav-shadow);"
@@ -164,7 +166,7 @@ onMounted(() => {
       <!-- 顶部 Header -->
       <header class="h-16 flex items-center justify-between px-6 z-10" style="background-color: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border-bottom: 1px solid var(--lt-border); box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
         <div class="flex items-center gap-3">
-          <el-icon class="text-gray-300 cursor-pointer hover:text-[#2B6FFF] transition-colors text-lg" @click="isCollapsed = !isCollapsed">
+          <el-icon v-if="!hideSidebar" class="text-gray-300 cursor-pointer hover:text-[#2B6FFF] transition-colors text-lg" @click="isCollapsed = !isCollapsed">
             <Fold />
           </el-icon>
           <div class="text-sm text-gray-500 flex items-center gap-1">
@@ -232,8 +234,8 @@ onMounted(() => {
       <!-- 页面内容容器 -->
       <main class="flex-1 overflow-hidden relative">
         <!-- 路由匹配到的具体视图（如画像对话页/工作室页） -->
-        <router-view v-slot="{ Component, route }">
-          <transition name="page">
+        <router-view v-slot="{ Component }">
+          <transition name="page" mode="out-in">
             <div class="page-view" :key="profileStore.activeCourseId">
               <component :is="Component" />
             </div>
@@ -267,7 +269,7 @@ onMounted(() => {
   border-radius: 8px;
   margin: 2px 8px;
   padding: 0 12px !important;
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color 150ms cubic-bezier(0.4, 0, 0.2, 1), background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
   font-size: 0.9rem;
   color: var(--nav-item-default) !important;
 }
@@ -283,8 +285,16 @@ onMounted(() => {
 }
 :deep(.el-menu--collapse .el-menu-item) {
   margin: 2px 6px;
-  padding: 0 8px !important;
+  padding: 0 !important;
+  justify-content: center;
   border-radius: 6px;
+}
+:deep(.el-menu--collapse .el-menu-item .el-menu-tooltip__trigger) {
+  justify-content: center;
+  width: 100%;
+}
+:deep(.el-menu--collapse .el-menu-item .el-icon) {
+  margin: 0;
 }
 :deep(.el-menu--collapse .el-menu-item.is-active) {
   box-shadow: none;

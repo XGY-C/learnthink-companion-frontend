@@ -91,18 +91,18 @@ body {
 }
 
 .page-enter-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  transition: opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1), transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .page-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity 0.12s cubic-bezier(0.4, 0, 0.2, 1), transform 0.12s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .page-enter-from {
   opacity: 0;
-  transform: translateY(8px) scale(0.99);
+  transform: translateY(6px);
 }
 .page-leave-to {
   opacity: 0;
-  transform: translateY(-4px) scale(0.995);
+  transform: translateY(-3px);
 }
 
 /* 全局通知栈 */

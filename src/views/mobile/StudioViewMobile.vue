@@ -93,7 +93,7 @@
             </div>
             <div class="m-preview-body">
               <div v-if="currentPreview?.type === 'mindmap'" style="min-height: 300px;">
-                <MindmapViewer :content="currentPreview.deepContent || currentPreview.brief || ''" :is-json="true" />
+                <MindmapViewer ref="mindmapViewerRef" :content="currentPreview.deepContent || currentPreview.brief || ''" :is-json="true" />
               </div>
               <div v-else-if="currentPreview?.type === 'video'" class="bg-black rounded-lg overflow-hidden">
                 <video v-if="videoPreviewUrl" :src="videoPreviewUrl" controls class="w-full" style="max-height: 400px;" />
@@ -106,9 +106,25 @@
               </div>
             </div>
             <div class="m-preview-actions">
-              <button class="m-preview-source-btn" @click="viewSources(currentPreview)">
-                📚 引用证据
-              </button>
+              <div class="m-preview-action-row">
+                <button class="m-preview-source-btn" @click="viewSources(currentPreview)">
+                  📚 引用证据
+                </button>
+              </div>
+              <div v-if="currentPreview?.type === 'doc' || currentPreview?.type === 'reading'" class="m-preview-dl-row">
+                <button class="m-dl-btn" @click="downloadDocxResource(currentPreview)">📥 DOCX</button>
+                <button class="m-dl-btn" @click="downloadMdResource(currentPreview)">📥 MD</button>
+              </div>
+              <div v-else-if="currentPreview?.type === 'code'" class="m-preview-dl-row">
+                <button class="m-dl-btn" @click="downloadCodeResource(currentPreview)">📥 下载 .py</button>
+              </div>
+              <div v-else-if="currentPreview?.type === 'video'" class="m-preview-dl-row">
+                <button class="m-dl-btn" @click="downloadVideoResource(currentPreview)">📥 打开视频</button>
+              </div>
+              <div v-else-if="currentPreview?.type === 'mindmap'" class="m-preview-dl-row">
+                <button class="m-dl-btn" @click="mindmapViewerRef?.exportSvg(currentPreview.title + '.svg')">📥 SVG</button>
+                <button class="m-dl-btn" @click="mindmapViewerRef?.exportPng(currentPreview.title + '.png')">📥 PNG</button>
+              </div>
             </div>
           </div>
         </div>
@@ -127,6 +143,9 @@ import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
 import { useTaskStream, typeLabel } from '@/composables/useTaskStream'
+import { extractVideoUrl } from '@/utils/media'
+import { markdownToDocxBlob, downloadDocx, preprocessLatexForMarkdown } from '@/utils/docxExport'
+import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 const stream = useTaskStream()
@@ -135,6 +154,7 @@ const previewVisible = ref(false)
 const currentPreview = ref<any>(null)
 const showTraces = ref(false)
 const evidenceDrawerRef = ref<any>(null)
+const mindmapViewerRef = ref<{ exportSvg: (filename?: string) => void; exportPng: (filename?: string) => Promise<void> } | null>(null)
 
 function formatTime(iso: string): string {
   if (!iso) return ''
@@ -170,19 +190,7 @@ const previewContent = computed(() => {
 
 const videoPreviewUrl = computed(() => {
   if (currentPreview.value?.type !== 'video') return null
-  try {
-    const raw = currentPreview.value?.content || currentPreview.value?.brief || currentPreview.value?.deepContent
-    if (!raw) return null
-    const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
-    try {
-      const parsed = JSON.parse(text)
-      if (parsed?.videoUrl) return parsed.videoUrl
-    } catch { /* JSON 损坏，走正则回退 */ }
-    const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
-    return m ? m[1] : null
-  } catch {
-    return null
-  }
+  return extractVideoUrl(currentPreview.value)
 })
 
 function previewResource(res: any) {
@@ -201,6 +209,40 @@ function viewSources(res: any) {
     evidenceDrawerRef.value?.open([
       { title: '系统生成', locator: '—', quote: '此内容基于知识库证据与画像偏好生成。', relevance: 'medium' },
     ])
+  }
+}
+
+async function downloadDocxResource(res: any) {
+  const content = res.deepContent || res.brief || ''
+  const blob = await markdownToDocxBlob(content, res.title)
+  downloadDocx(blob, res.title || 'resource')
+}
+
+function downloadMdResource(res: any) {
+  const raw = res.deepContent || res.brief || ''
+  const content = preprocessLatexForMarkdown(raw)
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${res.title || 'resource'}.md`
+  a.click()
+}
+
+function downloadCodeResource(res: any) {
+  const content = res.deepContent || res.brief || ''
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${res.title || 'resource'}.py`
+  a.click()
+}
+
+function downloadVideoResource(res: any) {
+  const url = extractVideoUrl(res)
+  if (url) {
+    window.open(url, '_blank')
+  } else {
+    ElMessage.warning('视频 URL 暂不可用，请等待视频渲染完成')
   }
 }
 
@@ -380,6 +422,16 @@ onUnmounted(() => { stream.cleanup() })
   font-size: 14px; color: var(--lt-text-secondary); cursor: pointer;
   touch-action: manipulation;
 }
+.m-preview-action-row { margin-bottom: 6px; }
+.m-preview-dl-row {
+  display: flex; gap: 8px; margin-top: 8px;
+}
+.m-dl-btn {
+  flex: 1; padding: 10px 12px; border-radius: 10px;
+  border: 0.5px solid var(--lt-brand-lighter); background: var(--lt-brand-lightest);
+  color: var(--lt-brand); font-size: 13px; cursor: pointer; touch-action: manipulation;
+}
+.m-dl-btn:active { background: var(--lt-brand-lighter); }
 
 .btt-sheet-enter-active { transition: all 0.25s ease-out; }
 .btt-sheet-leave-active { transition: all 0.2s ease-in; }

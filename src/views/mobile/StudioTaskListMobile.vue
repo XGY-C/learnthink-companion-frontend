@@ -1,5 +1,18 @@
 <template>
-  <div class="m-studio-list">
+  <div ref="pullContainer" class="m-studio-list">
+    <!-- 下拉刷新指示器 -->
+    <div class="m-pull-indicator" :class="{ visible: pullState !== 'idle', refreshing: pullState === 'refreshing' }" :style="{ height: pullDistance + 'px' }">
+      <template v-if="pullState === 'refreshing'">
+        <div class="m-pull-spinner" />
+        <span>刷新中...</span>
+      </template>
+      <template v-else-if="pullDistance >= 60">
+        <span>释放刷新</span>
+      </template>
+      <template v-else>
+        <span>下拉刷新</span>
+      </template>
+    </div>
     <div class="m-studio-header">
       <h2 class="m-studio-title">资源工作室</h2>
       <p class="m-studio-subtitle">查看所有资源生成任务</p>
@@ -81,6 +94,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { usePullToRefresh } from '@/composables/usePullToRefresh'
 import type { TaskSummary } from '@/types'
 import { TASK_STATUS_CONFIG, formatRelativeTime } from '@/constants'
 import { apiFetch } from '@/utils/api'
@@ -94,6 +108,11 @@ const tasks = ref<TaskSummary[]>([])
 const loading = ref(true)
 const searchText = ref('')
 const statusFilter = ref('')
+
+const pullContainer = ref<HTMLElement | null>(null)
+const { pullState, pullDistance } = usePullToRefresh(pullContainer, async () => {
+  await loadTasks()
+})
 
 const filterOptions = [
   { label: '全部', value: '' },
@@ -228,4 +247,20 @@ onMounted(() => { loadTasks() })
   position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
   color: var(--lt-text-placeholder);
 }
+
+/* ===== Pull-to-refresh ===== */
+.m-pull-indicator {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 12px; color: var(--lt-text-auxiliary);
+  overflow: hidden; transition: height 0.1s;
+  height: 0;
+}
+.m-pull-indicator.visible { min-height: 0; }
+.m-pull-indicator.refreshing { color: var(--lt-brand); }
+.m-pull-spinner {
+  width: 16px; height: 16px;
+  border: 2px solid var(--lt-border); border-top-color: var(--lt-brand);
+  border-radius: 50%; animation: pull-spin 0.6s linear infinite;
+}
+@keyframes pull-spin { to { transform: rotate(360deg); } }
 </style>

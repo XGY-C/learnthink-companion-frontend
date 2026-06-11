@@ -31,7 +31,7 @@ interface AgentActivity {
 defineProps<{ agents: AgentActivity[] }>()
 
 const typeLabel = (t: string) => {
-  const m: Record<string, string> = { doc:'文档', quiz:'习题', reading:'阅读', code:'代码', mindmap:'思维导图' }
+  const m: Record<string, string> = { doc:'文档', quiz:'习题', reading:'阅读', code:'代码', mindmap:'思维导图', video:'视频' }
   return m[t] || t
 }
 </script>

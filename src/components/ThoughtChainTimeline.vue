@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import type { ThinkingStep } from '@/types'
+import MarkdownViewer from '@/components/MarkdownViewer.vue'
 
 const props = withDefaults(defineProps<{
   steps: ThinkingStep[]
@@ -132,15 +133,15 @@ function toggleExpanded() {
             >
               <div v-if="step.observation" class="tct-r-line">
                 <span class="tct-r-key">观察</span>
-                <span class="tct-r-val">{{ step.observation }}</span>
+                <MarkdownViewer :content="step.observation" :showToc="false" />
               </div>
               <div v-if="step.thought" class="tct-r-line">
                 <span class="tct-r-key">思考</span>
-                <span class="tct-r-val">{{ step.thought }}</span>
+                <MarkdownViewer :content="step.thought" :showToc="false" />
               </div>
               <div v-if="step.decision" class="tct-r-line">
                 <span class="tct-r-key">决策</span>
-                <span class="tct-r-val">{{ step.decision }}</span>
+                <MarkdownViewer :content="step.decision" :showToc="false" />
               </div>
             </div>
 
@@ -399,9 +400,11 @@ function toggleExpanded() {
   background-color: rgba(43, 111, 255, 0.08);
   color: var(--lt-brand);
 }
-.tct-r-val {
+.tct-r-line :deep(.markdown-body) {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
   color: var(--lt-text-secondary);
-  word-break: break-word;
 }
 
 /* ===== 工具步骤详情 ===== */

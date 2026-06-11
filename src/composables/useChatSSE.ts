@@ -1,10 +1,12 @@
 import { ref, computed, watch, reactive, onUnmounted } from 'vue'
 import { useProfileStore } from '@/stores/profile'
 import { usePlanStore } from '@/stores/plan'
+import { useVideoLectureStore } from '@/stores/videoLecture'
 import { apiFetch, ensureValidToken } from '@/utils/api'
 import { useSSE } from '@/composables/useSSE'
 import { ElMessageBox } from 'element-plus'
-import type { ThinkingStep, ThinkingRecord } from '@/types'
+import type { ThinkingStep, ThinkingRecord, ThinkingPhase } from '@/types'
+import type { SceneItemEvent } from '@/types/scene'
 
 // ===== Types =====
 
@@ -48,6 +50,17 @@ export interface ChatMessage {
     edges?: any[]
     summary?: any
     confirmed?: boolean
+  }
+  /** Video lecture record card — inserted after player closes */
+  _videoRecord?: {
+    type: 'video-record'
+    lectureId: string
+    topic: string
+    sceneCount: number
+    lastSceneIndex: number
+    completed: boolean
+    keyTakeaways: string[]
+    icon: 'text' | 'code' | 'diagram' | 'chat'
   }
 }
 
@@ -265,7 +278,7 @@ export function useChatSSE() {
         const stage = meta?.stage
         const items = meta?.items || []
         if (items.length > 0) {
-          pendingGenTypes.value = [...new Set(items.map((i: any) => i.type))]
+          pendingGenTypes.value = [...new Set<string>(items.map((i: any) => i.type as string))]
         } else if (meta?.preferences?.requestedTypes && Array.isArray(meta.preferences.requestedTypes)) {
           pendingGenTypes.value = meta.preferences.requestedTypes
         } else if (meta?.suggestedTypes) {
@@ -401,6 +414,23 @@ export function useChatSSE() {
               }
             }
             break
+          }
+        }
+      }
+
+      // 资源 offer 状态校准：有活跃/已完成资源任务时，标记 offer 为已接受
+      if (session) {
+        const hasActiveResourceTask = res.data?.activeTasks?.some(
+          t => t.taskType !== 'plan_generate' && (t.status === 'PENDING' || t.status === 'RUNNING')
+        )
+        const hasCompletedResourceTask = res.data?.activeTasks?.some(
+          t => t.taskType !== 'plan_generate' && t.status === 'SUCCEEDED'
+        )
+        for (const msg of session.messages) {
+          if (msg._planOffer && msg._planOffer.type === 'resource') {
+            if (hasActiveResourceTask || hasCompletedResourceTask) {
+              msg._planOffer.accepted = true
+            }
           }
         }
       }
@@ -599,7 +629,7 @@ export function useChatSSE() {
                 label: meta.label,
                 icon: meta.icon,
                 done: true,
-                phase: parsed.phase || undefined,
+                phase: (parsed.phase as ThinkingPhase) || undefined,
                 detail: parsed.observation || parsed.thought || '',
                 observation: parsed.observation || undefined,
                 thought: parsed.thought || undefined,
@@ -697,7 +727,7 @@ export function useChatSSE() {
           // Read items from generationMeta (backend sends List<{type, focus}>)
           const items: { type: string; focus: string }[] = meta?.items || []
           if (items.length > 0) {
-            pendingGenTypes.value = [...new Set(items.map((i: any) => i.type))]
+          pendingGenTypes.value = [...new Set<string>(items.map((i: any) => i.type))]
           } else if (prefs?.requestedTypes && Array.isArray(prefs.requestedTypes)) {
             pendingGenTypes.value = prefs.requestedTypes
           } else if (meta?.suggestedTypes) {
@@ -746,7 +776,7 @@ export function useChatSSE() {
     }
   }
 
-  // ===== Send Lecture Message (智能助手 / 讲解模式) =====
+  // ===== Send Lecture Message (智能助手 / 视频讲解模式) =====
 
   async function sendLectureMessage(text: string): Promise<void> {
     const content = text.trim()
@@ -764,6 +794,7 @@ export function useChatSSE() {
     }
 
     const targetSession = activeSession.value!
+    const videoStore = useVideoLectureStore()
 
     targetSession.messages.push({ role: 'user', text: content })
     if (targetSession.title === '新会话') {
@@ -772,11 +803,17 @@ export function useChatSSE() {
     targetSession.updatedAt = new Date().toISOString()
     isStreaming.value = true
 
+    // Start the video lecture loading phase
+    videoStore.startLoading(content)
+
+    // Push a placeholder message that will be removed when the player opens
     const msgIndex = targetSession.messages.length
     targetSession.messages.push({ role: 'assistant', text: '', isStreaming: true })
 
     await ensureValidToken()
     const token = localStorage.getItem('token') || ''
+
+    let lastSceneReceived = false
 
     try {
       const response = await fetch('/api/smart-assistant/answer', {
@@ -828,31 +865,67 @@ export function useChatSSE() {
           if (!dataStr) continue
 
           if (eventType === 'error') {
-            targetSession.messages[msgIndex].text = dataStr || '回答失败，请稍后重试。'
+            const errorMsg = dataStr || '回答失败，请稍后重试。'
+            targetSession.messages[msgIndex].text = errorMsg
             targetSession.messages[msgIndex].isStreaming = false
+            videoStore.reset()
+          } else if (eventType === 'item') {
+            try {
+              const parsed: SceneItemEvent = JSON.parse(dataStr)
+              videoStore.receiveScene(parsed)
+              lastSceneReceived = true
+            } catch {
+              // ignore parse errors
+            }
           } else if (eventType === 'done') {
-            // stream complete
+            videoStore.markStreamEnded()
           } else if (eventType === 'chunk' || !eventType) {
+            // Legacy chunk events — used as fallback text
             if (onStreamChunk) onStreamChunk()
-            const messages = targetSession.messages
-            messages.splice(msgIndex, 1, { ...messages[msgIndex], text: messages[msgIndex].text + dataStr })
           }
-          // 'connected' event is ignored (just handshake)
         }
       }
 
-      // Finalize
-      const doneMsg = targetSession.messages[msgIndex]
-      targetSession.messages.splice(msgIndex, 1, { ...doneMsg, isStreaming: false })
+      // If no scenes were received at all, show as text fallback
+      if (!lastSceneReceived) {
+        targetSession.messages[msgIndex].text = '抱歉，未能生成视频讲解，请重试。'
+      }
     } catch (err) {
       if (targetSession.messages[msgIndex]) {
         targetSession.messages[msgIndex].text = '抱歉，消息发送失败，请重试。'
-        targetSession.messages[msgIndex].isStreaming = false
       }
+      videoStore.reset()
       console.error('sendLectureMessage failed:', err)
     } finally {
+      // Remove the loading placeholder — the video player handles the display
+      if (!lastSceneReceived) {
+        targetSession.messages[msgIndex].isStreaming = false
+      } else {
+        // Remove placeholder message; the video record card will replace it on close
+        targetSession.messages.splice(msgIndex, 1)
+      }
       isStreaming.value = false
     }
+  }
+
+  /**
+   * Called when VideoLecturePlayer closes — insert record card into chat.
+   */
+  function onLecturePlayerClose() {
+    const videoStore = useVideoLectureStore()
+    const card = videoStore.lastRecord
+    if (!card) return
+
+    const session = activeSession.value
+    if (!session) return
+
+    // Push video record card message
+    session.messages.push({
+      role: 'assistant',
+      text: '',
+      // @ts-ignore - video record card marker
+      _videoRecord: card,
+    })
   }
 
   // ===== Task SSE =====
@@ -906,49 +979,6 @@ export function useChatSSE() {
         if (card) { card.status = 'failed'; card.errorMessage = data.message || '生成失败' }
         setCardMessageText(taskId, topic, taskType, 'failed', data.message || '未知错误')
       },
-    })
-  }
-
-  /** 追踪缺口资源任务，全部完成后将主卡片切为 done */
-  function trackGapTasks(planTaskId: string, topic: string) {
-    const card = taskCards.value[planTaskId]
-    if (!card || !card.gapTaskIds) return
-
-    const token = localStorage.getItem('token') || ''
-
-    card.gapTaskIds.forEach(gapTaskId => {
-      if (gapEventSources.has(gapTaskId)) return
-
-      const es = new EventSource(`/api/tasks/${gapTaskId}/events?token=${encodeURIComponent(token)}`)
-      es.addEventListener('task.done', () => {
-        const c = taskCards.value[planTaskId]
-        if (c) {
-          c.gapDone = (c.gapDone || 0) + 1
-          c.message = `学习计划已生成，缺口资源生成中 (${c.gapDone}/${c.gapTotal})`
-          if (c.gapDone >= (c.gapTotal || 0)) {
-            c.status = 'done'
-            c.message = `学习计划已生成完毕，共 ${c.totalCount || c.gapTotal} 个模块，点击查看详情`
-            setCardMessageText(planTaskId, topic, 'plan', 'done', '')
-            cleanupGapSources()
-          }
-        }
-      })
-      es.addEventListener('task.failed', () => {
-        const c = taskCards.value[planTaskId]
-        if (c) {
-          c.gapDone = (c.gapDone || 0) + 1
-          if (c.gapDone >= (c.gapTotal || 0)) {
-            c.status = 'done'
-            setCardMessageText(planTaskId, topic, 'plan', 'done', '')
-            cleanupGapSources()
-          }
-        }
-      })
-      es.onerror = () => {
-        es.close()
-        gapEventSources.delete(gapTaskId)
-      }
-      gapEventSources.set(gapTaskId, es)
     })
   }
 
@@ -1024,18 +1054,18 @@ export function useChatSSE() {
     ) || null
   }
 
-  async function acceptGenerationOffer(): Promise<string | null> {
+  async function acceptGenerationOffer(targetMsg?: ChatMessage): Promise<string | null> {
     if (isGenerating.value) return null
     const session = activeSession.value
     if (!session) return null
-    const msg = findPlanOfferMsg(session, 'resource')
+    const msg = targetMsg || findPlanOfferMsg(session, 'resource')
     if (!msg || !msg._planOffer) return null
     const offer = msg._planOffer
     offer.accepted = true
     const topic = offer.launchTopic || offer.topic
     session.messages.push({ role: 'user', text: `确认生成「${topic}」` })
     session.updatedAt = new Date().toISOString()
-    return triggerGenerate(topic)
+    return triggerGenerate(topic || '')
   }
 
   function dismissGenerationOffer() {
@@ -1356,6 +1386,7 @@ export function useChatSSE() {
     deleteSession,
     sendMessage,
     sendLectureMessage,
+    onLecturePlayerClose,
     connectTaskSSE,
     triggerGenerate,
     confirmGeneration,

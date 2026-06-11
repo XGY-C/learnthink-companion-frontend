@@ -113,12 +113,19 @@
       >
         {{ Math.round((activeStep + 1) / steps.length * 100) }}%
       </span>
+      <span
+        v-if="eta"
+        class="text-xs ml-2"
+        style="color: var(--lt-text-auxiliary);"
+      >
+        {{ eta }}
+      </span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps<{
   stage: string
@@ -126,6 +133,22 @@ const props = defineProps<{
   message: string
   taskId?: string
 }>()
+
+const startTime = ref(Date.now())
+watch(() => props.taskId, (tid) => {
+  if (tid) startTime.value = Date.now()
+}, { immediate: true })
+
+const eta = computed(() => {
+  const pct = props.percent || 0
+  if (pct <= 0 || pct >= 100) return ''
+  const elapsed = (Date.now() - startTime.value) / 1000
+  const total = elapsed / (pct / 100)
+  const remaining = Math.max(0, total - elapsed)
+  if (remaining < 5) return '即将完成'
+  if (remaining < 60) return `预计剩余 ${Math.round(remaining)} 秒`
+  return `预计剩余 ${Math.round(remaining / 60)} 分钟`
+})
 
 const steps = [
   { key: 'profile', label: '建画像' },
@@ -140,10 +163,27 @@ const steps = [
 // 个性化决策阶段（使用橙色）：profile / retrieve / review / publish
 const AI_STAGES = new Set(['plan', 'generate'])
 
-const isAiStep = computed(() => AI_STAGES.has(props.stage))
+// 后端使用 -ING 形式（如 GENERATING），前端 steps 使用名词形式（如 generate）
+const STAGE_MAP: Record<string, string> = {
+  profiling: 'profile',
+  retrieving: 'retrieve',
+  planning: 'plan',
+  plan_driven: 'plan',
+  generating: 'generate',
+  reviewing: 'review',
+  publishing: 'publish',
+  fallback: 'retrieve',
+}
+
+const normalizedStage = computed(() => {
+  const raw = props.stage.toLowerCase()
+  return STAGE_MAP[raw] || raw
+})
+
+const isAiStep = computed(() => AI_STAGES.has(normalizedStage.value))
 
 const activeStep = computed(() => {
-  const index = steps.findIndex(s => s.key === props.stage)
+  const index = steps.findIndex(s => s.key === normalizedStage.value)
   return index >= 0 ? index : 0
 })
 </script>

@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
 import { usePlanStore } from '@/stores/plan'
 import { usePathInteraction } from '@/composables/usePathInteraction'
 import { typeIcon, typeColor, scopeLabel, depthLabel, moduleStatusLabel } from '@/utils/formatters'
-import type { Activity, Module } from '@/types'
 import {
   ArrowRight, Refresh, CircleCheckFilled,
   Lock, Right, ArrowDown, Search,
-  MagicStick, DataAnalysis,
+  DataAnalysis,
 } from '@element-plus/icons-vue'
 import GenerationCard from '@/components/GenerationCard.vue'
 import PathDag from '@/components/PathDag.vue'
@@ -172,23 +171,24 @@ function goToModuleReplan(moduleId: string) {
         <!-- ===== 当前位置摘要条 (sticky) ===== -->
         <div
           v-if="planStore.currentActivity && planStore.status !== 'completed'"
-          class="sticky z-10 px-6 py-3"
-          style="top: 88px; background: linear-gradient(135deg, var(--lt-brand-lightest), #F0F5FF); border-bottom: 1px solid var(--lt-brand-lighter);"
+          class="current-position-bar sticky z-10"
         >
+          <div class="cp-accent"></div>
           <div class="max-w-5xl mx-auto flex items-center justify-between">
-            <div class="flex items-center gap-3 text-sm">
-              <span style="color: var(--lt-brand);">📍 当前位置</span>
-              <span style="color: var(--lt-text-primary); font-weight: 500;">
-                {{ planStore.currentModule?.title }} · {{ planStore.currentActivity.title }}
+            <div class="flex items-center gap-3 text-sm min-w-0">
+              <span class="cp-badge">当前位置</span>
+              <span class="cp-path truncate">
+                {{ planStore.currentModule?.title }} <span class="cp-sep">·</span> {{ planStore.currentActivity.title }}
               </span>
-              <span v-if="planStore.currentActivity.result?.score != null" style="color: var(--lt-orange);">
+              <span v-if="planStore.currentActivity.result?.score != null" class="cp-score">
                 上次得分 {{ Math.round(planStore.currentActivity.result.score * 100) }}%
               </span>
             </div>
             <el-button
               type="primary"
               size="small"
-              @click="goToLearn(planStore.currentActivity!)"
+              class="flex-shrink-0"
+              @click="goToLearn(planStore.currentActivity!, planStore.currentModule?.moduleId)"
             >
               继续学习 <el-icon class="ml-1"><ArrowRight /></el-icon>
             </el-button>
@@ -216,11 +216,11 @@ function goToModuleReplan(moduleId: string) {
           <!-- ===== Module 卡片列表 ===== -->
           <div class="space-y-3">
             <div
-              v-for="mod in planStore.moduleList"
+              v-for="(mod, modIdx) in planStore.moduleList"
               :key="mod.moduleId"
               :id="`module-${mod.moduleId}`"
-              class="rounded-xl overflow-hidden transition-all"
-              style="border: 1px solid var(--lt-border); background: var(--lt-bg-card);"
+              class="module-card rounded-xl overflow-hidden stagger-fade-in"
+              :style="{ animationDelay: `${modIdx * 60}ms` }"
             >
               <!-- Module Header (可点击展开/折叠) -->
               <div
@@ -270,6 +270,7 @@ function goToModuleReplan(moduleId: string) {
               </div>
 
               <!-- Module Expanded Content -->
+              <Transition name="module-expand">
               <div v-if="expandedModules.has(mod.moduleId)" class="px-5 pb-4 border-t" style="border-color: var(--lt-border);">
                 <!-- 掌握度 -->
                 <div v-if="mod.mastery != null" class="flex items-center gap-3 mt-3 mb-3">
@@ -303,18 +304,20 @@ function goToModuleReplan(moduleId: string) {
                 </div>
 
                 <!-- Activity 列表 -->
-                <div class="space-y-2">
+                <div class="space-y-1.5">
                   <div
                     v-for="act in (mod.subPlan?.activities || [])"
                     :key="act.activityId"
-                    class="flex items-center gap-3 px-4 py-3 rounded-lg transition-colors"
+                    class="activity-item flex items-center gap-3 px-3 py-2.5 transition-all"
                     :style="{
-                      borderLeft: `3px solid ${typeColor(act.type)}`,
-                      background: act.status === 'failed' ? 'rgba(255,59,48,0.04)' : 'transparent',
                       opacity: act.status === 'locked' ? 0.5 : 1,
                     }"
                   >
-                    <span class="text-lg flex-shrink-0">{{ typeIcon(act.type) }}</span>
+                    <div
+                      class="activity-dot flex-shrink-0"
+                      :style="{ background: typeColor(act.type) }"
+                    ></div>
+                    <span class="text-sm flex-shrink-0">{{ typeIcon(act.type) }}</span>
                     <div class="flex-1 min-w-0">
                       <div class="flex items-center gap-2">
                         <span class="text-sm font-medium truncate" style="color: var(--lt-text-primary);">
@@ -391,14 +394,14 @@ function goToModuleReplan(moduleId: string) {
                         type="primary"
                         size="small"
                         :disabled="act.type === 'explore'"
-                        @click="goToLearn(act)"
+                        @click="goToLearn(act, mod.moduleId)"
                       >
                         {{ act.status === 'in_progress' ? '继续' : '开始' }}
                       </el-button>
                       <el-button
                         v-if="act.status === 'failed'"
                         size="small"
-                        @click="goToLearn(act)"
+                        @click="goToLearn(act, mod.moduleId)"
                       >
                         重试
                       </el-button>
@@ -406,7 +409,7 @@ function goToModuleReplan(moduleId: string) {
                         v-if="act.type === 'explore' && act.status !== 'skipped' && act.status !== 'completed'"
                         text
                         size="small"
-                        @click="goToLearn(act)"
+                        @click="goToLearn(act, mod.moduleId)"
                       >
                         浏览
                       </el-button>
@@ -417,27 +420,41 @@ function goToModuleReplan(moduleId: string) {
                 <!-- Module 底部统计 -->
                 <div class="flex items-center justify-between mt-3 pt-3 border-t" style="border-color: var(--lt-border);">
                   <span class="text-xs" style="color: var(--lt-text-auxiliary);">
-                    进度 {{ mod.subPlan?.activities.filter(a => a.status === 'completed').length || 0 }}/{{ mod.subPLan?.activities.length || 0 }}
+                    进度 {{ mod.subPlan?.activities.filter(a => a.status === 'completed').length || 0 }}/{{ mod.subPlan?.activities.length || 0 }}
                   </span>
                   <el-button text size="small" :icon="Refresh" @click="goToModuleReplan(mod.moduleId)">
                     重新规划此模块
                   </el-button>
                 </div>
               </div>
+              </Transition>
             </div>
           </div>
 
           <!-- ===== 完成态提示 ===== -->
           <div
             v-if="planStore.status === 'completed'"
-            class="text-center py-8"
+            class="completion-card"
           >
-            <div class="text-5xl mb-4">🎉</div>
+            <div class="completion-circle">
+              <span class="completion-check">✓</span>
+            </div>
             <h2 class="text-xl font-bold mb-2" style="color: var(--lt-text-primary);">学习计划已完成！</h2>
-            <p class="text-sm mb-4" style="color: var(--lt-text-auxiliary);">
-              用时 {{ planStore.plan?.summary?.totalHours }} 小时 · 平均掌握度 {{ planStore.overallMastery != null ? Math.round(planStore.overallMastery * 100) : '-' }}%
-            </p>
-            <p v-if="planStore.overallWeakTags.length" class="text-xs mb-4" style="color: var(--lt-orange-text);">
+            <div class="completion-stats">
+              <div class="completion-stat">
+                <span class="cs-value">{{ planStore.plan?.summary?.totalHours || '-' }}</span>
+                <span class="cs-label">总用时(小时)</span>
+              </div>
+              <div class="completion-stat">
+                <span class="cs-value">{{ planStore.overallMastery != null ? Math.round(planStore.overallMastery * 100) + '%' : '-' }}</span>
+                <span class="cs-label">平均掌握度</span>
+              </div>
+              <div class="completion-stat">
+                <span class="cs-value">{{ planStore.completedModules.length }}/{{ planStore.moduleList.length }}</span>
+                <span class="cs-label">完成模块</span>
+              </div>
+            </div>
+            <p v-if="planStore.overallWeakTags.length" class="completion-weak-tags">
               薄弱点：{{ planStore.overallWeakTags.join('、') }}
             </p>
             <el-button type="primary" @click="router.push('/report')">
@@ -496,6 +513,154 @@ function goToModuleReplan(moduleId: string) {
 </template>
 
 <style scoped>
+/* ── Module Card ── */
+.module-card {
+  border: 1px solid var(--lt-border);
+  background: var(--lt-bg-card);
+  box-shadow: var(--lt-shadow-card);
+  transition: box-shadow var(--lt-transition-smooth), transform var(--lt-transition-smooth);
+}
+.module-card:hover {
+  box-shadow: var(--lt-shadow-hover);
+  transform: translateY(-1px);
+}
+
+/* ── Stagger fade-in ── */
+.stagger-fade-in {
+  animation: staggerFadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* ── Expand transition ── */
+.module-expand-enter-active {
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+.module-expand-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.module-expand-enter-from,
+.module-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* ── Current position bar ── */
+.current-position-bar {
+  top: 68px;
+  padding: 10px 24px;
+  background: linear-gradient(135deg, rgba(43,111,255,0.04), rgba(124,92,252,0.03));
+  border-bottom: 1px solid var(--lt-border);
+}
+.cp-accent {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--lt-brand);
+  border-radius: 0 2px 2px 0;
+}
+.cp-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lt-brand);
+  background: rgba(43,111,255,0.08);
+  border-radius: var(--lt-radius-full);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cp-path {
+  color: var(--lt-text-primary);
+  font-weight: 500;
+  min-width: 0;
+}
+.cp-sep {
+  color: var(--lt-text-auxiliary);
+  margin: 0 2px;
+}
+.cp-score {
+  color: var(--lt-orange);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Activity item ── */
+.activity-item {
+  border-radius: var(--lt-radius-md);
+  background: transparent;
+}
+.activity-item:hover {
+  background: rgba(43, 111, 255, 0.03);
+}
+.activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Completion ── */
+.completion-card {
+  text-align: center;
+  padding: 40px 24px;
+  background: linear-gradient(180deg, rgba(43,111,255,0.03), transparent);
+  border-radius: var(--lt-radius-lg);
+  border: 1px solid var(--lt-border);
+  margin-top: 8px;
+}
+.completion-circle {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--lt-brand), #5B8DFF);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 20px rgba(43,111,255,0.3);
+  animation: celebration-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.completion-check {
+  font-size: 36px;
+  font-weight: 700;
+}
+@keyframes celebration-pop {
+  0% { transform: scale(0); opacity: 0; }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.completion-stats {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  margin-bottom: 16px;
+}
+.completion-stat {
+  text-align: center;
+}
+.cs-value {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--lt-text-primary);
+}
+.cs-label {
+  font-size: 12px;
+  color: var(--lt-text-auxiliary);
+  margin-top: 2px;
+}
+.completion-weak-tags {
+  font-size: 13px;
+  color: var(--lt-orange-text);
+  margin-bottom: 20px;
+}
+
+/* ── Arrow rotation ── */
 .rotate-180 {
   transform: rotate(180deg);
   transition: transform 0.2s ease;
