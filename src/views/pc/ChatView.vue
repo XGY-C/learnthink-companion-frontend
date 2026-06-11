@@ -13,9 +13,13 @@ import liveChatbotLottie from '@/assets/lottie/live-chatbot.json'
 import GenerationCard from '@/components/GenerationCard.vue'
 import ProfilePanel from '@/components/Profile/ProfilePanel.vue'
 import PlanEditor from '@/components/PlanEditor.vue'
+import VideoLecturePlayer from '@/components/video/VideoLecturePlayer.vue'
+import VideoRecordCard from '@/components/video/VideoRecordCard.vue'
+import { useVideoLectureStore } from '@/stores/videoLecture'
 
 const router = useRouter()
 const chat = useChatSSE()
+const videoStore = useVideoLectureStore()
 
 /** Mode options for the chat mode toggle */
 const modes = [
@@ -297,6 +301,22 @@ onBeforeUnmount(() => {
   stopAudio()
 })
 
+// Watch video lecture close → insert record card
+let prevPhase: string = videoStore.phase
+watch(() => videoStore.phase, (newPhase) => {
+  if (prevPhase !== 'idle' && newPhase === 'idle' && videoStore.lastRecord && !videoStore._isReplaying) {
+    chat.onLecturePlayerClose()
+  }
+  prevPhase = newPhase
+})
+
+// Handle video lecture replay from record card
+function handleVideoReplay() {
+  const card = videoStore.lastRecord
+  if (!card) return
+  videoStore.replayFromCard(card)
+}
+
 // Watch messages to re-setup minimap observer
 watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], ([, isWelcome]) => {
   if (isWelcome) {
@@ -436,7 +456,7 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
                 @update:expanded="msg.thinking.expanded = $event"
                 class="mb-3"
               />
-              <div v-if="!(msg as any)._generationCard && !msg._planOffer" class="assistant-message-body">
+              <div v-if="!(msg as any)._generationCard && !(msg as any)._videoRecord" class="assistant-message-body">
                 <MarkdownViewer v-if="!msg.isStreaming" :content="msg.text" :showToc="false" />
                 <pre v-else class="streaming-text whitespace-pre-wrap text-sm leading-relaxed" style="color: var(--lt-text-primary); font-family: inherit; margin: 0;">{{ msg.text }}</pre>
                 <span v-if="msg.isStreaming && msg.text" class="streaming-cursor" />
@@ -452,7 +472,7 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
               </template>
 
               <!-- 方案确认卡片 — 资源类型 -->
-              <div v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.accepted" class="generation-offer-card">
+              <div v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.accepted && !msg._planOffer.dismissed" class="generation-offer-card">
                 <div class="offer-header">
                   <div class="offer-header-icon">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -496,11 +516,21 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
                   </div>
                 </div>
                 <div class="offer-actions">
-                  <button class="offer-btn-primary" :disabled="chat.isGenerating.value" @click="chat.acceptGenerationOffer()">
+                  <button class="offer-btn-primary" :disabled="chat.isGenerating.value" @click="chat.acceptGenerationOffer(msg)">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>确认启动
                   </button>
                   <button class="offer-btn-ghost" @click="chat.dismissGenerationOffer()">继续聊天</button>
                 </div>
+              </div>
+
+              <!-- 视频讲解记录卡片 -->
+              <div v-if="(msg as any)._videoRecord" class="video-record-wrapper">
+                <VideoRecordCard
+                  :topic="(msg as any)._videoRecord.topic"
+                  :scene-count="(msg as any)._videoRecord.sceneCount"
+                  :completed="(msg as any)._videoRecord.completed"
+                  @replay="handleVideoReplay"
+                />
               </div>
 
               <!-- 可编辑计划编辑器 — 计划类型（已确认的方案不消失，但禁用编辑） -->
@@ -516,7 +546,7 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
                 @cancel="chat.dismissPlanOffer()"
               />
 
-              <div class="ai-action-bar">
+              <div v-if="!(msg as any)._videoRecord" class="ai-action-bar">
                 <button class="ai-action-btn" title="复制" @click="copyMessage(msg)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 </button>
@@ -621,6 +651,9 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
         @toggle="toggleProfile"
       />
     </div>
+
+    <!-- 视频讲解播放器 -->
+    <VideoLecturePlayer />
 
     <!-- 生成资源弹窗 -->
     <el-dialog v-model="showGeneratePanel" title="生成个性化资源包" width="420px" :close-on-click-modal="false">

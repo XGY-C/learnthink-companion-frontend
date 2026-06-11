@@ -7,8 +7,6 @@ const TYPE_COLOR: Record<string, string> = {
   reading: '#34C759', code: '#FF3B30', video: '#FF9F0A',
 }
 
-const PLAN_STAGE_COLOR = ['#2B6FFF', '#7C5CFC', '#FF8C42', '#34C759']
-
 const DIFFICULTY_LABEL: Record<string, string> = {
   beginner: '入门', basic: '基础', intermediate: '中级', advanced: '高级', expert: '专家',
 }
@@ -60,15 +58,6 @@ const typeGroups = computed(() => {
 const totalCount = computed(() => {
   if (props.offer.items) return props.offer.items.length
   return 0
-})
-
-const planStages = computed(() => {
-  if (props.offer.type !== 'plan' || !props.offer.items) return []
-  // For plan, items represent stages/phases
-  return (props.offer.items || []).map((item, i) => ({
-    ...item,
-    color: PLAN_STAGE_COLOR[i % PLAN_STAGE_COLOR.length],
-  }))
 })
 
 const isResource = computed(() => props.offer.type === 'resource')

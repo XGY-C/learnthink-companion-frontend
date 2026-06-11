@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiFetch } from '@/utils/api'
 import { useSSE } from '@/composables/useSSE'
-import type { Plan, Module, SubPlan, Activity, ActivitySubmitResponse } from '@/types'
+import type { Plan, SubPlan, Activity, ActivitySubmitResponse } from '@/types'
 
 export const usePlanStore = defineStore('plan', () => {
   const plan = ref<Plan | null>(null)
@@ -17,7 +17,7 @@ export const usePlanStore = defineStore('plan', () => {
   const generationTaskId = ref('')
   const gapTasks = ref<{ taskId: string; moduleTitle: string; moduleId: string; resourceTypes: string[] }[]>([])
 
-  const { status: sseStatus, connect: sseConnect, disconnect: sseDisconnect } = useSSE()
+  const { connect: sseConnect } = useSSE()
 
   // ===== Getters =====
 
@@ -256,9 +256,10 @@ export const usePlanStore = defineStore('plan', () => {
 
   async function submitActivity(activityId: string, body: any): Promise<ActivitySubmitResponse | null> {
     try {
+      const { signal, ...requestBody } = body
       const res = await apiFetch<ActivitySubmitResponse>(
         `/plan/activities/${activityId}/submit`,
-        { method: 'POST', body }
+        { method: 'POST', body: requestBody, signal }
       )
       if (res.data) {
         // Refresh the plan to get updated state
@@ -267,7 +268,9 @@ export const usePlanStore = defineStore('plan', () => {
         }
         return res.data
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
+    }
     return null
   }
 

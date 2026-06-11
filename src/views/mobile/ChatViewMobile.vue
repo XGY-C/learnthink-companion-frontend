@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { ElMessage, ElDrawer } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useChatSSE } from '@/composables/useChatSSE'
 import type { ChatMessage, Suggestion } from '@/composables/useChatSSE'
@@ -11,7 +11,8 @@ import liveChatbotLottie from '@/assets/lottie/live-chatbot.json'
 import GenerationCard from '@/components/GenerationCard.vue'
 import PlanOfferCard from '@/components/PlanOfferCard.vue'
 import PlanEditor from '@/components/PlanEditor.vue'
-import ProfilePanel from '@/components/Profile/ProfilePanel.vue'
+import BottomSheet from '@/components/mobile/BottomSheet.vue'
+import ProfileSheet from '@/components/mobile/ProfileSheet.vue'
 
 const router = useRouter()
 const chat = useChatSSE()
@@ -49,7 +50,7 @@ function handleSuggestionClick(suggestion: Suggestion, msg: ChatMessage) {
   if (suggestion.sendAs.startsWith('__generate_plan__:')) {
     const topic = suggestion.sendAs.slice('__generate_plan__:'.length)
     msg.suggestions = undefined
-    chat.confirmPlanGeneration(topic)
+    chat.confirmPlanGeneration(topic, '')
   } else if (suggestion.sendAs.startsWith('__generate__:')) {
     const topic = suggestion.sendAs.slice('__generate__:'.length)
     msg.suggestions = undefined
@@ -96,11 +97,33 @@ onMounted(() => {
 
 // ===== SSE reconnection for mobile =====
 let cleanupReconnect: (() => void) | null = null
+
+// ===== visualViewport keyboard handling (iOS) =====
+let prevViewportHeight = 0
+let cleanupViewport: (() => void) | null = null
+
+function handleViewportResize() {
+  const vv = window.visualViewport
+  if (!vv) return
+  const isKeyboardOpen = vv.height < prevViewportHeight - 100
+  prevViewportHeight = vv.height
+  if (isKeyboardOpen) {
+    // 键盘弹出时，确保输入框可见
+    setTimeout(() => {
+      const inputEl = messageListRef.value
+      if (inputEl) inputEl.scrollTop = inputEl.scrollHeight
+    }, 300)
+  }
+}
+
 onMounted(() => {
   cleanupReconnect = chat.setupMobileReconnection()
+  prevViewportHeight = window.visualViewport?.height || window.innerHeight
+  window.visualViewport?.addEventListener('resize', handleViewportResize)
 })
 onBeforeUnmount(() => {
   if (cleanupReconnect) cleanupReconnect()
+  window.visualViewport?.removeEventListener('resize', handleViewportResize)
 })
 </script>
 
@@ -203,11 +226,11 @@ onBeforeUnmount(() => {
 
             <!-- 方案卡片 — 资源类型 -->
             <PlanOfferCard
-              v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.accepted"
+              v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.accepted && !msg._planOffer.dismissed"
               :offer="msg._planOffer!"
               compact
               :loading="chat.isGenerating.value"
-              @confirm="chat.acceptGenerationOffer()"
+              @confirm="chat.acceptGenerationOffer(msg)"
               @dismiss="chat.dismissGenerationOffer()"
               class="mobile-plan-offer"
             />
@@ -279,13 +302,12 @@ onBeforeUnmount(() => {
       </svg>
     </button>
 
-    <!-- ===== 会话列表抽屉 ===== -->
-    <ElDrawer
+    <!-- ===== 会话列表 BottomSheet ===== -->
+    <BottomSheet
       v-model="showSessions"
-      direction="ltr"
-      size="75%"
+      height="large"
       title="会话列表"
-      :with-header="true"
+      :show-close="true"
     >
       <div class="mobile-session-list">
         <button class="mobile-new-session-btn" @click="chat.createSession(); showSessions = false">
@@ -303,29 +325,19 @@ onBeforeUnmount(() => {
           <div class="mobile-session-meta">{{ sess.lastMessagePreview || (sess.messageCount ? sess.messageCount + ' 条消息' : '') }} · {{ chat.formatSessionTime(sess.updatedAt) }}</div>
         </div>
       </div>
-    </ElDrawer>
+    </BottomSheet>
 
-    <!-- ===== 画像面板抽屉 ===== -->
-    <ElDrawer
-      v-model="showProfile"
-      direction="rtl"
-      size="80%"
-      :with-header="false"
-    >
-      <ProfilePanel />
-    </ElDrawer>
+    <!-- ===== 画像面板 ProfileSheet ===== -->
+    <ProfileSheet v-model="showProfile" />
 
-    <!-- ===== 生成资源底部弹窗 ===== -->
-    <ElDrawer
+    <!-- ===== 生成资源 BottomSheet ===== -->
+    <BottomSheet
       v-model="showGenerateSheet"
-      direction="btt"
-      size="40%"
-      :with-header="false"
-      class="mobile-gen-drawer"
+      height="medium"
+      title="生成个性化资源包"
+      :show-close="true"
     >
       <div class="mobile-gen-sheet">
-        <div class="mobile-gen-handle" />
-        <h3 class="mobile-gen-title">生成个性化资源包</h3>
         <input
           v-model="generateTopic"
           class="mobile-gen-input"
@@ -341,7 +353,7 @@ onBeforeUnmount(() => {
           {{ chat.isGenerating.value ? '生成中...' : '启动生成' }}
         </button>
       </div>
-    </ElDrawer>
+    </BottomSheet>
   </div>
 </template>
 
@@ -741,26 +753,9 @@ onBeforeUnmount(() => {
 
 /* ===== 生成资源底部弹窗 ===== */
 .mobile-gen-sheet {
-  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.mobile-gen-handle {
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--lt-border);
-  margin: 0 auto;
-}
-
-.mobile-gen-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--lt-text-primary);
-  margin: 0;
-  text-align: center;
 }
 
 .mobile-gen-input {

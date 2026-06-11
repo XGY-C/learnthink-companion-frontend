@@ -42,11 +42,6 @@ function dimValue(key: ProfileDimensionKey): number {
   return Math.round(dim.confidence * 100)
 }
 
-function layerColor(layer: string): string {
-  if (layer === 'core') return '#2B6FFF'
-  if (layer === 'style') return '#FF9F0A'
-  return '#8E8EA0'
-}
 
 const radarOption = computed(() => ({
   radar: {

@@ -12,14 +12,40 @@
           <span class="font-bold text-primary text-lg">{{ filteredPacks.length }}</span>
           <span class="text-slate-500">个资源包</span>
         </div>
+        <el-button :type="isBatchMode ? 'warning' : 'default'" plain size="small" @click="toggleBatchMode">
+          {{ isBatchMode ? '退出批量' : '批量管理' }}
+        </el-button>
         <el-button type="primary" @click="$router.push('/studio')">
           <el-icon class="mr-1"><Plus /></el-icon>新建生成
         </el-button>
       </div>
     </div>
 
+    <!-- 批量操作栏 -->
+    <div v-if="isBatchMode" class="batch-action-bar mb-4">
+      <el-checkbox
+        :model-value="selectedPackIds.size === filteredPacks.length && filteredPacks.length > 0"
+        :indeterminate="selectedPackIds.size > 0 && selectedPackIds.size < filteredPacks.length"
+        @change="selectAllPacks"
+      >
+        全选
+      </el-checkbox>
+      <span class="text-sm" style="color: var(--lt-text-auxiliary);">已选 {{ selectedPackIds.size }} 项</span>
+      <el-popconfirm
+        title="确定删除选中的资源包？此操作不可恢复"
+        confirm-button-text="确认删除"
+        @confirm="batchDelete"
+      >
+        <template #reference>
+          <el-button size="small" type="danger" plain :disabled="selectedPackIds.size === 0">
+            <el-icon class="mr-1"><Delete /></el-icon>批量删除
+          </el-button>
+        </template>
+      </el-popconfirm>
+    </div>
+
     <!-- 搜索与筛选区域 -->
-    <el-card class="mb-6 shadow-sm" :body-style="{ padding: '16px 20px' }" style="border: 1px solid #E8ECF0;">
+    <el-card class="mb-6 shadow-sm" :body-style="{ padding: '16px 20px' }" style="border: 1px solid var(--lt-border);">
           <div class="flex items-center gap-4 flex-wrap">
         <el-input
           v-model="searchQuery"
@@ -46,10 +72,10 @@
     <!-- 空状态：未搜索到结果 -->
     <div v-if="filteredPacks.length === 0 && !loading" class="text-center py-16">
       <el-empty v-if="searchQuery || confidenceFilter" description="未找到匹配的资源包" />
-            <div v-else class="bg-white rounded-lg p-16 mx-auto max-w-lg" style="border: 1px dashed #A3C4FF;">
-        <el-icon class="text-5xl mb-4" style="color: #A3C4FF;"><FolderOpened /></el-icon>
-        <h3 class="text-lg font-medium mb-2" style="color: #5A5A72;">资源库为空</h3>
-        <p class="text-sm mb-6" style="color: #B8B8C8;">先去资源工作室生成您的第一个学习资源包吧！</p>
+            <div v-else class="bg-white rounded-lg p-16 mx-auto max-w-lg" style="border: 1px dashed var(--lt-brand-lighter);">
+        <el-icon class="text-5xl mb-4" style="color: var(--lt-brand-lighter);"><FolderOpened /></el-icon>
+        <h3 class="text-lg font-medium mb-2" style="color: var(--lt-text-secondary);">资源库为空</h3>
+        <p class="text-sm mb-6" style="color: var(--lt-text-placeholder);">先去资源工作室生成您的第一个学习资源包吧！</p>
         <el-button type="primary" size="large" @click="$router.push('/studio')">
           <el-icon class="mr-1"><MagicStick /></el-icon>前往工作室
         </el-button>
@@ -61,6 +87,15 @@
       <div v-for="n in 3" :key="n">
         <el-skeleton animated :rows="4" class="bg-white rounded-lg p-6" />
       </div>
+    </div>
+
+    <!-- 加载失败重试 -->
+    <div v-if="loadError && !loading" class="text-center py-16">
+      <el-empty description="加载失败">
+        <template #default>
+          <el-button type="primary" @click="retryLoadPacks">重新加载</el-button>
+        </template>
+      </el-empty>
     </div>
 
     <!-- 资源包列表 -->
@@ -75,6 +110,14 @@
           @click="selectPack(pack)"
         >
           <div class="flex items-start gap-5">
+            <!-- 批量选择框 -->
+            <el-checkbox
+              v-if="isBatchMode"
+              :model-value="selectedPackIds.has(pack.id)"
+              class="mt-1 shrink-0"
+              @click.stop
+              @change="togglePackSelection(pack.id)"
+            />
             <!-- 左侧：类型图标 + 时间线装饰 -->
             <div class="flex flex-col items-center pt-1">
               <div class="w-10 h-10 rounded-full flex items-center justify-center" :class="packIconClass(pack)">
@@ -150,7 +193,7 @@
 
                             <!-- 底部操作区：仅在展开时显示 -->
               <Transition name="expand">
-                <div v-if="activePackId === pack.id" class="mt-4 pt-4" style="border-top: 1px solid #E8ECF0;">
+                <div v-if="activePackId === pack.id" class="mt-4 pt-4" style="border-top: 1px solid var(--lt-border);">
                   <!-- 资源卡片网格 -->
                   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
                     <ResourceCard
@@ -209,8 +252,8 @@
             <el-tag size="small" :type="previewConfidenceStyle" effect="plain">
               {{ previewConfidenceLabel }}置信度
             </el-tag>
-            <span style="color: #8E8EA0;">
-              质量分 <strong style="color: #2B6FFF;">{{ currentPreview.qualityScore }}</strong>/100
+            <span style="color: var(--lt-text-auxiliary);">
+              质量分 <strong style="color: var(--lt-brand);">{{ currentPreview.qualityScore }}</strong>/100
             </span>
             <el-dropdown v-if="currentPreview.type === 'doc' || currentPreview.type === 'reading'" size="small" @command="(cmd: string) => cmd === 'docx' ? downloadDocxResource(currentPreview) : downloadMdResource(currentPreview)">
               <el-button size="small" type="primary">
@@ -255,11 +298,13 @@
                 :showToc="false"
               />
             </div>
-            <!-- 代码案例：Markdown 渲染（内容自带代码块） -->
-            <div v-else-if="currentPreview.type === 'code'" class="border border-slate-200 rounded-lg overflow-hidden">
-              <MarkdownViewer
+            <!-- 代码案例 -->
+            <div v-else-if="currentPreview.type === 'code'">
+              <CodeLearningViewer
                 :content="previewMode === 'brief' ? currentPreview.brief || '' : currentPreview.deepContent || currentPreview.brief || ''"
-                :showToc="false"
+                :title="currentPreview.title"
+                :quality-score="currentPreview.qualityScore"
+                :sources-count="currentPreview.sourcesCount"
               />
             </div>
             <!-- 视频：HTML5 播放器 -->
@@ -279,22 +324,22 @@
           </div>
 
                 <!-- 证据来源（内嵌折叠版） -->
-        <div v-if="currentPreview.sources && currentPreview.sources.length > 0" class="mt-6 pt-4" style="border-top: 1px solid #E8ECF0;">
+        <div v-if="currentPreview.sources && currentPreview.sources.length > 0" class="mt-6 pt-4" style="border-top: 1px solid var(--lt-border);">
           <div class="flex items-center gap-2 mb-3">
-            <el-icon style="color: #2B6FFF;"><Reading /></el-icon>
-            <span class="text-sm font-medium" style="color: #1A1A2E;">引用来源 ({{ currentPreview.sources.length }})</span>
+            <el-icon style="color: var(--lt-brand);"><Reading /></el-icon>
+            <span class="text-sm font-medium" style="color: var(--lt-text-primary);">引用来源 ({{ currentPreview.sources.length }})</span>
           </div>
           <div class="space-y-2">
             <div
               v-for="(source, idx) in currentPreview.sources"
               :key="idx"
-              class="rounded p-3 text-sm" style="background-color: #F5F7FA; border: 1px solid #E8ECF0;"
+              class="rounded p-3 text-sm" style="background-color: var(--lt-bg-page); border: 1px solid var(--lt-border);"
             >
               <div class="flex justify-between items-start mb-1">
-                <span class="font-medium" style="color: #5A5A72;">{{ source.title }}</span>
+                <span class="font-medium" style="color: var(--lt-text-secondary);">{{ source.title }}</span>
                 <el-tag size="small" type="info">{{ source.locator }}</el-tag>
               </div>
-              <p class="text-xs italic m-0" style="color: #8E8EA0;">"{{ source.quote }}"</p>
+              <p class="text-xs italic m-0" style="color: var(--lt-text-auxiliary);">"{{ source.quote }}"</p>
             </div>
           </div>
         </div>
@@ -315,7 +360,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, markRaw } from 'vue'
+import { ref, computed, onMounted, markRaw } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -340,7 +385,11 @@ import ResourceCard from '@/components/ResourceCard.vue'
 import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
+import CodeLearningViewer from '@/components/code/CodeLearningViewer.vue'
 import { markdownToDocxBlob, downloadDocx, preprocessLatexForMarkdown } from '@/utils/docxExport'
+import { extractVideoUrl } from '@/utils/media'
+import { useResourceStore } from '@/stores/resource'
+import { apiFetch } from '@/utils/api'
 
 const router = useRouter()
 
@@ -351,6 +400,56 @@ const confidenceFilter = ref('')
 const loading = ref(false)
 const activePackId = ref<string | null>(null)
 
+// 批量操作
+const isBatchMode = ref(false)
+const selectedPackIds = ref<Set<string>>(new Set())
+
+function toggleBatchMode() {
+  isBatchMode.value = !isBatchMode.value
+  if (!isBatchMode.value) {
+    selectedPackIds.value = new Set()
+  }
+}
+
+function togglePackSelection(packId: string) {
+  const next = new Set(selectedPackIds.value)
+  if (next.has(packId)) {
+    next.delete(packId)
+  } else {
+    next.add(packId)
+  }
+  selectedPackIds.value = next
+}
+
+function selectAllPacks() {
+  if (selectedPackIds.value.size === filteredPacks.value.length) {
+    selectedPackIds.value = new Set()
+  } else {
+    selectedPackIds.value = new Set(filteredPacks.value.map(p => p.id))
+  }
+}
+
+async function batchDelete() {
+  const ids = [...selectedPackIds.value]
+  if (ids.length === 0) return
+  let successCount = 0
+  for (const id of ids) {
+    try {
+      await resourceStore.removePack(id)
+      if (activePackId.value === id) activePackId.value = null
+      successCount++
+    } catch { /* skip */ }
+  }
+  if (successCount > 0) {
+    ElMessage.success(`已删除 ${successCount} 个资源包`)
+  }
+  if (successCount < ids.length) {
+    ElMessage.warning(`${ids.length - successCount} 个资源包删除失败`)
+  }
+  selectedPackIds.value = new Set()
+  isBatchMode.value = false
+}
+
 // 预览状态
 const previewVisible = ref(false)
 const currentPreview = ref<any>(null)
@@ -358,263 +457,19 @@ const previewMode = ref('brief')
 
 const videoPreviewUrl = computed(() => {
   if (currentPreview.value?.type !== 'video') return null
-  try {
-    const raw = currentPreview.value?.content || currentPreview.value?.brief || currentPreview.value?.deepContent
-    if (!raw) return null
-    const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
-    try {
-      const parsed = JSON.parse(text)
-      if (parsed?.videoUrl) return parsed.videoUrl
-    } catch { /* JSON 损坏，走正则回退 */ }
-    const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
-    return m ? m[1] : null
-  } catch {
-    return null
-  }
+  return extractVideoUrl(currentPreview.value)
 })
 
 const evidenceDrawer = ref<any>(null)
 const mindmapViewerRef = ref<{ exportSvg: (filename?: string) => void; exportPng: (filename?: string) => Promise<void> } | null>(null)
 
-// ==================== Mock 数据 ====================
-const packList = reactive<ResourcePack[]>([
-  {
-    id: 'pack-001',
-    title: 'A* 搜索算法全面解析',
-    knowledgePoint: 'A* 搜索算法',
-    createdAt: '2025-12-15T09:30:00Z',
-    avgConfidence: 'high',
-    avgQuality: 91,
-    resourceCount: 5,
-    estimatedMinutes: 45,
-    isActive: true,
-    pushReason: '针对薄弱点「启发式搜索」；偏好代码实操',
-    resourceTypes: ['doc', 'mindmap', 'quiz', 'reading', 'code'],
-    resources: [
-      {
-        id: 'res-001-1', title: 'A* 搜索算法核心讲解', type: 'doc', status: 'ready',
-        confidence: 'high', sourcesCount: 6, qualityScore: 92,
-        brief: '系统讲解 A* 搜索的核心原理：启发函数、代价计算、开闭集管理与最优性证明。结合图示分步拆解算法流程。',
-        deepContent: '# A* 搜索算法\n\n## 1. 基本原理\nA* (A-Star) 是一种启发式搜索算法...\n\n## 2. 启发函数设计\n满足可采纳性（Admissible）和一致性（Consistent）...\n\n## 3. 算法伪代码与复杂度分析...',
-        pushReasons: ['针对薄弱点：启发式搜索', '偏好：理论优先'],
-        sources: [
-          { title: '人工智能：一种现代方法', locator: 'Ch 3.5', quote: 'A* 搜索使用估价函数 f(n) = g(n) + h(n) 来评估节点。', relevance: 'high' },
-          { title: '算法导论 第4版', locator: 'Ch 22.3', quote: '启发函数 h 满足可采纳性时，A* 保证找到最优解。', relevance: 'high' },
-          { title: '大话数据结构', locator: 'Pg 124', quote: 'A* 在游戏寻路中广泛使用，通过启发函数减少搜索空间。', relevance: 'medium' }
-        ]
-      },
-      {
-        id: 'res-001-2', title: '搜索算法家族思维导图', type: 'mindmap', status: 'ready',
-        confidence: 'high', sourcesCount: 3, qualityScore: 88,
-        brief: '以思维导图形式梳理搜索算法分类：盲目搜索 vs 启发式搜索，DFS/BFS/A* 等对比。',
-        deepContent: '# 搜索算法\n- 盲目搜索\n  - DFS\n  - BFS\n  - 迭代加深\n- 启发式搜索\n  - A*\n  - IDA*\n  - 贪心最佳优先',
-        pushReasons: ['薄弱点：搜索算法分类', '节奏：速览版适合复习'],
-        sources: [
-          { title: '搜索算法综述', locator: '知识库', quote: '搜索算法分为盲目搜索和启发式搜索两大类。', relevance: 'high' }
-        ]
-      },
-      {
-        id: 'res-001-3', title: '基础概念与变式练习', type: 'quiz', status: 'ready',
-        confidence: 'high', sourcesCount: 4, qualityScore: 95,
-        brief: '包含 8 道精选练习题，覆盖 A* 核心概念、启发函数设计与算法追踪。',
-        deepContent: '## 练习题集\n### 选择题\n1. A* 搜索中 f(n) 代表什么？\n2. 启发函数 h(n) 需满足什么条件？\n### 填空题\n3. A* 是 ___ 搜索和 ___ 搜索的结合。',
-        pushReasons: ['薄弱点：算法理解', '偏好评测结合'],
-        sources: [
-          { title: '算法题库', locator: 'A* 专题', quote: '经典 A* 算法面试题整理。', relevance: 'high' }
-        ]
-      },
-      {
-        id: 'res-001-4', title: 'A* 演进史与高阶应用', type: 'reading', status: 'ready',
-        confidence: 'medium', sourcesCount: 2, qualityScore: 78,
-        brief: '拓展阅读：A* 的改进变种（IDA*, D* Lite）及在自动驾驶路径规划中的应用案例。',
-        pushReasons: ['节奏：深入版适合拓展', '兴趣方向：AI 应用'],
-        sources: [
-          { title: '机器人路径规划综述', locator: 'Section 4', quote: 'D* Lite 在动态环境中高效重规划路径。', relevance: 'medium' }
-        ]
-      },
-      {
-        id: 'res-001-5', title: '迷宫寻路实战案例', type: 'code', status: 'ready',
-        confidence: 'high', sourcesCount: 5, qualityScore: 90,
-        brief: 'Python 实现 A* 算法求解迷宫最短路径，附带可视化与性能对比。',
-        deepContent: '``python\nimport heapq\n\ndef astar(grid, start, goal):\n    open_set = [(0, start)]\n    came_from = {}\n    g_score = {start: 0}\n    f_score = {start: heuristic(start, goal)}\n    ...\n```',
-        pushReasons: ['偏好：代码实操优先', '薄弱点：算法实现'],
-        sources: [
-          { title: 'Python 算法实现示例集', locator: '搜索算法', quote: 'A* 的 Python 实现通常使用优先队列。', relevance: 'high' }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'pack-002',
-    title: 'Vue3 响应式原理与组合式 API',
-    knowledgePoint: 'Vue3 响应式原理',
-    createdAt: '2025-12-10T14:00:00Z',
-    avgConfidence: 'high',
-    avgQuality: 87,
-    resourceCount: 4,
-    estimatedMinutes: 35,
-    isActive: true,
-    pushReason: '当前学习阶段核心课题；偏好实战理解',
-    resourceTypes: ['doc', 'mindmap', 'quiz', 'code'],
-    resources: [
-      {
-        id: 'res-002-1', title: '响应式原理深入讲解', type: 'doc', status: 'ready',
-        confidence: 'high', sourcesCount: 5, qualityScore: 90,
-        brief: '深入剖析 Vue3 响应式系统的实现机制：Proxy、ref、reactive、依赖收集与触发更新。',
-        pushReasons: ['核心知识点', '偏好：理论+代码结合'],
-        sources: [
-          { title: 'Vue3 官方文档', locator: '响应式基础', quote: 'Vue 使用 Proxy 实现响应式数据。', relevance: 'high' }
-        ]
-      },
-      {
-        id: 'res-002-2', title: '响应式 vs 非响应式', type: 'mindmap', status: 'ready',
-        confidence: 'high', sourcesCount: 2, qualityScore: 85,
-        brief: 'Vue2 Object.defineProperty vs Vue3 Proxy 对比导图。',
-        pushReasons: ['薄弱点：底层原理'],
-        sources: []
-      },
-      {
-        id: 'res-002-3', title: '响应式原理随堂练习', type: 'quiz', status: 'ready',
-        confidence: 'high', sourcesCount: 3, qualityScore: 92,
-        brief: '6 题掌握 ref/reactive/watchEffect 的核心用法与陷阱。',
-        pushReasons: ['偏好评测结合'],
-        sources: []
-      },
-      {
-        id: 'res-002-4', title: '手写简易响应式系统', type: 'code', status: 'ready',
-        confidence: 'medium', sourcesCount: 4, qualityScore: 82,
-        brief: '从零实现一个简易的响应式系统，理解 Dep-Watcher 模式。',
-        pushReasons: ['偏好：代码实操', '薄弱点：实现细节'],
-        sources: []
-      }
-    ]
-  },
-  {
-    id: 'pack-003',
-    title: '二叉树遍历与递归思维',
-    knowledgePoint: '二叉树遍历',
-    createdAt: '2025-11-28T11:15:00Z',
-    avgConfidence: 'medium',
-    avgQuality: 76,
-    resourceCount: 3,
-    estimatedMinutes: 25,
-    isActive: false,
-    pushReason: '前置知识巩固；检测到递归薄弱',
-    resourceTypes: ['doc', 'quiz', 'code'],
-    resources: [
-      {
-        id: 'res-003-1', title: '二叉树遍历全解', type: 'doc', status: 'ready',
-        confidence: 'medium', sourcesCount: 3, qualityScore: 80,
-        brief: '前序/中序/后序/层序遍历详解，递归与迭代双版本。',
-        pushReasons: ['薄弱点：递归实现'],
-        sources: []
-      },
-      {
-        id: 'res-003-2', title: '遍历专项练习', type: 'quiz', status: 'ready',
-        confidence: 'high', sourcesCount: 2, qualityScore: 78,
-        brief: '5 道遍历顺序推导题，强化递归思维。',
-        pushReasons: ['薄弱点：递归'],
-        sources: []
-      },
-      {
-        id: 'res-003-3', title: '二叉树遍历实现', type: 'code', status: 'rejected',
-        confidence: 'low', sourcesCount: 1, qualityScore: 55,
-        brief: 'Python 实现四种遍历方式，包含递归与迭代。',
-        rejectReason: 'Reviewer: 迭代版解释不够清晰，缺少 Morris 遍历。',
-        pushReasons: ['偏好：代码实操'],
-        sources: []
-      }
-    ]
-  },
-  {
-    id: 'pack-004',
-    title: 'HTTP 协议与 RESTful API 设计',
-    knowledgePoint: 'HTTP 协议',
-    createdAt: '2025-11-20T16:45:00Z',
-    avgConfidence: 'high',
-    avgQuality: 94,
-    resourceCount: 5,
-    estimatedMinutes: 50,
-    isActive: false,
-    pushReason: '项目实战需要；兴趣方向：后端开发',
-    resourceTypes: ['doc', 'mindmap', 'quiz', 'reading', 'video'],
-    resources: [
-      {
-        id: 'res-004-1', title: 'HTTP 核心概念精讲', type: 'doc', status: 'ready',
-        confidence: 'high', sourcesCount: 7, qualityScore: 95,
-        brief: 'HTTP 协议发展史、请求/响应结构、状态码、缓存机制与 HTTPS 握手。',
-        pushReasons: ['核心基础', '兴趣方向'],
-        sources: []
-      },
-      {
-        id: 'res-004-2', title: 'API 设计规范导图', type: 'mindmap', status: 'ready',
-        confidence: 'high', sourcesCount: 3, qualityScore: 90,
-        brief: 'RESTful API 设计原则：资源命名、HTTP 动词、状态码规范。',
-        pushReasons: ['偏好：体系化学习'],
-        sources: []
-      },
-      {
-        id: 'res-004-3', title: 'HTTP 协议练习题', type: 'quiz', status: 'ready',
-        confidence: 'high', sourcesCount: 4, qualityScore: 93,
-        brief: '10 题涵盖 HTTP 状态码、缓存策略与 HTTPS 原理。',
-        pushReasons: ['偏好评测结合'],
-        sources: []
-      },
-      {
-        id: 'res-004-4', title: 'HTTP/2 与 HTTP/3 新特性', type: 'reading', status: 'ready',
-        confidence: 'high', sourcesCount: 5, qualityScore: 96,
-        brief: '多路复用、头部压缩、服务端推送与 QUIC 协议简介。',
-        pushReasons: ['节奏：深入版'],
-        sources: []
-      },
-      {
-        id: 'res-004-5', title: '从 HTTP/1.1 到 HTTP/3 演进', type: 'video', status: 'ready',
-
-      }
-    ]
-  },
-  {
-    id: 'pack-005',
-    title: '数据库索引原理与优化',
-    knowledgePoint: '数据库索引',
-    createdAt: '2025-11-05T08:30:00Z',
-    avgConfidence: 'medium',
-    avgQuality: 72,
-    resourceCount: 3,
-    estimatedMinutes: 30,
-    isActive: false,
-    pushReason: '项目性能优化需要',
-    resourceTypes: ['doc', 'quiz', 'code'],
-    resources: [
-      {
-        id: 'res-005-1', title: 'B+ 树索引详解', type: 'doc', status: 'ready',
-        confidence: 'medium', sourcesCount: 4, qualityScore: 75,
-        brief: 'B+ 树的结构、索引类型、聚簇索引与非聚簇索引对比。',
-        pushReasons: ['薄弱点：索引结构'],
-        sources: []
-      },
-      {
-        id: 'res-005-2', title: '索引优化练习', type: 'quiz', status: 'ready',
-        confidence: 'medium', sourcesCount: 2, qualityScore: 70,
-        brief: '通过 EXPLAIN 分析查询计划，判断索引使用情况。',
-        pushReasons: ['薄弱点：优化实践'],
-        sources: []
-      },
-      {
-        id: 'res-005-3', title: '慢查询优化实战', type: 'code', status: 'failed',
-        confidence: 'low', sourcesCount: 1, qualityScore: 60,
-        brief: '模拟慢查询场景，添加索引前后性能对比分析。',
-        rejectReason: '生成失败：数据库连接超时',
-        pushReasons: ['偏好：代码实操'],
-        sources: []
-      }
-    ]
-  }
-])
+// ==================== Data (API-driven with store) ====================
+const resourceStore = useResourceStore()
+const packList = computed(() => resourceStore.packs)
 
 // ==================== 计算属性 ====================
 const filteredPacks = computed(() => {
-  let list = [...packList]
+  let list = [...packList.value]
 
   // 搜索过滤（按标题或知识点）
   if (searchQuery.value.trim()) {
@@ -672,10 +527,6 @@ const formatDate = (dateStr: string) => {
   return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
-const selectPack = (pack: ResourcePack) => {
-  activePackId.value = activePackId.value === pack.id ? null : pack.id
-}
-
 const packIconClass = (pack: ResourcePack) => {
   if (pack.avgConfidence === 'high') return 'bg-success/10 text-success'
   if (pack.avgConfidence === 'medium') return 'bg-warning/10 text-warning'
@@ -727,19 +578,6 @@ async function downloadDocxResource(res: any) {
   downloadDocx(blob, res.title || 'resource')
 }
 
-function extractVideoUrl(res: any): string | null {
-  const raw = res.videoUrl || res.content || res.deepContent || res.brief || ''
-  if (!raw) return null
-  if (typeof raw === 'string' && /^https?:\/\//.test(raw.trim())) return raw.trim()
-  const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
-  try {
-    const parsed = JSON.parse(text)
-    if (parsed?.videoUrl) return parsed.videoUrl
-  } catch { /* JSON 损坏，走正则回退 */ }
-  const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
-  return m ? m[1] : null
-}
-
 function downloadVideoResource(res: any) {
   const url = extractVideoUrl(res)
   if (url) {
@@ -769,21 +607,27 @@ const viewSources = (res: any) => {
   }
 }
 
-const regenerateResource = (res: any, _pack: ResourcePack) => {
+const regenerateResource = async (res: any, pack: ResourcePack) => {
   res.status = 'pending'
   ElMessage.info(`正在重新生成「${res.title}」...`)
-  setTimeout(() => {
+  try {
+    const ok = await resourceStore.regenerateResource(pack.id, res.id)
+    if (!ok) {
+      res.status = 'ready'
+      ElMessage.error(`重新生成「${res.title}」失败，请稍后重试`)
+    }
+  } catch {
     res.status = 'ready'
-    res.confidence = 'high'
-    res.sourcesCount = Math.floor(Math.random() * 4) + 2
-    res.qualityScore = Math.floor(Math.random() * 10) + 85
-    res.rejectReason = undefined
-    ElMessage.success(`「${res.title}」重生成完成！`)
-  }, 2000)
+    ElMessage.error(`重新生成「${res.title}」失败，请稍后重试`)
+  }
 }
 
 const continueLearning = (pack: ResourcePack) => {
-  router.push(`/path?pack=${pack.id}`)
+  const params = new URLSearchParams()
+  params.set('pack', pack.id)
+  if ((pack as any).taskId) params.set('taskId', (pack as any).taskId)
+  if (pack.knowledgePoint) params.set('topic', pack.knowledgePoint)
+  router.push(`/path?${params.toString()}`)
 }
 
 const openInStudio = (pack: any) => {
@@ -795,16 +639,51 @@ const openInStudio = (pack: any) => {
   }
 }
 
-const deletePack = (pack: ResourcePack) => {
-  const idx = packList.findIndex(p => p.id === pack.id)
-  if (idx !== -1) {
-    packList.splice(idx, 1)
+const deletePack = async (pack: ResourcePack) => {
+  try {
+    await resourceStore.removePack(pack.id)
     if (activePackId.value === pack.id) {
       activePackId.value = null
     }
     ElMessage.success(`已删除资源包「${pack.title}」`)
+  } catch {
+    ElMessage.error(`删除「${pack.title}」失败，请稍后重试`)
   }
 }
+
+const selectPack = async (pack: ResourcePack) => {
+  if (activePackId.value === pack.id) {
+    activePackId.value = null
+    return
+  }
+  activePackId.value = pack.id
+  if (pack.resources.length === 0) {
+    await resourceStore.fetchPackDetail(pack.id)
+  }
+}
+
+const loadError = ref(false)
+
+async function loadPacks() {
+  loading.value = true
+  loadError.value = false
+  try {
+    await resourceStore.fetchPacks('default')
+  } catch {
+    loadError.value = true
+    ElMessage.warning('加载资源包列表失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+function retryLoadPacks() {
+  loadPacks()
+}
+
+onMounted(() => {
+  loadPacks()
+})
 </script>
 
 <style scoped>
@@ -812,14 +691,24 @@ const deletePack = (pack: ResourcePack) => {
   max-width: 1400px;
 }
 
+.batch-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--lt-bg-card);
+  border: 1px solid var(--lt-brand-lighter);
+  border-radius: var(--lt-radius-md);
+}
+
 .resource-pack-card {
-    border: 1px solid #E8ECF0;
+    border: 1px solid var(--lt-border);
   border-radius: 10px;
   transition: all 0.2s ease;
 }
 
 .resource-pack-card:hover {
-  border-color: #A3C4FF;
+  border-color: var(--lt-brand-lighter);
 }
 
 .resource-pack-card:active {

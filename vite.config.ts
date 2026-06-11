@@ -31,7 +31,7 @@ export default defineConfig({
               proxyReq.setHeader('Cache-Control', 'no-cache');
             }
           });
-          proxy.on('proxyRes', (proxyRes, req, res) => {
+          proxy.on('proxyRes', (_proxyRes, req, res) => {
             // SSE 端点强制修正 Content-Type，防止后端返回 text/plain 等非标准 MIME
             // 导致浏览器 EventSource 直接拒绝连接
             if (req.url?.includes('/events')) {

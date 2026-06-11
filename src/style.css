@@ -219,6 +219,96 @@
   --mobile-font-small: 11px;
 }
 
+/* ==================== 暗色模式 ==================== */
+html[data-theme="dark"] {
+  /* 品牌色（保持明亮，在暗色背景上更突出） */
+  --lt-brand: #2B6FFF;
+  --lt-brand-light: #6B9BFF;
+  --lt-brand-lighter: #4A6FA5;
+  --lt-brand-light-7: #1E2D4A;
+  --lt-brand-lightest: rgba(43, 111, 255, 0.15);
+  --lt-brand-dark: #5588FF;
+  --lt-brand-disabled: #2A3A55;
+
+  --lt-orange: #FF8C42;
+  --lt-orange-text: #FFD9B3;
+  --lt-orange-light-3: #6B4A2E;
+  --lt-orange-light-5: #4A3520;
+  --lt-orange-light-9: rgba(255, 140, 66, 0.12);
+
+  --lt-ai: #9B7FFF;
+  --lt-ai-light-3: #5A4A9E;
+  --lt-ai-light-5: #3E3570;
+  --lt-ai-light-7: #2A2550;
+  --lt-ai-light-9: rgba(124, 92, 252, 0.12);
+  --lt-ai-dark-2: #B8A3FF;
+
+  --lt-success: #34C759;
+  --lt-warning: #FF9F0A;
+  --lt-danger: #FF453A;
+
+  --lt-text-primary: #E8EAED;
+  --lt-text-secondary: #9AA0A8;
+  --lt-text-auxiliary: #6B7280;
+  --lt-text-placeholder: #4B5563;
+  --lt-text-disabled: #374151;
+  --lt-bg-page: #0F1117;
+  --lt-bg-card: #1A1D27;
+  --lt-border: #2D3140;
+  --lt-shadow: rgba(0, 0, 0, 0.3);
+  --lt-shadow-blue: rgba(43, 111, 255, 0.2);
+  --lt-shadow-ai: rgba(124, 92, 252, 0.2);
+
+  --el-color-primary: #2B6FFF;
+  --el-color-primary-light-3: #5588FF;
+  --el-color-primary-light-5: #4A6FA5;
+  --el-color-primary-light-7: #2A3A55;
+  --el-color-primary-light-8: #1E2D4A;
+  --el-color-primary-light-9: rgba(43, 111, 255, 0.15);
+  --el-color-primary-dark-2: #6B9BFF;
+  --el-color-primary-disabled: #2A3A55;
+  --el-color-success: #34C759;
+  --el-color-warning: #FF9F0A;
+  --el-color-danger: #FF453A;
+  --el-color-info: #6B7280;
+  --el-bg-color: #141620;
+  --el-bg-color-page: #0F1117;
+  --el-text-color-primary: #E8EAED;
+  --el-text-color-regular: #9AA0A8;
+  --el-text-color-secondary: #6B7280;
+  --el-text-color-placeholder: #4B5563;
+  --el-border-color: #2D3140;
+  --el-border-color-light: #2A2E3D;
+  --el-border-color-lighter: #222639;
+
+  --nav-bg: #1A1D27;
+  --nav-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --nav-item-default: #9AA0A8;
+  --nav-item-hover-bg: rgba(43, 111, 255, 0.1);
+  --nav-item-active: #2B6FFF;
+  --nav-item-active-bg: rgba(43, 111, 255, 0.15);
+  --nav-indicator: #2B6FFF;
+  --nav-divider: #2D3140;
+  --nav-logo: #E8EAED;
+
+  --lt-shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --lt-shadow-hover: 0 4px 16px rgba(43, 111, 255, 0.25);
+  --lt-shadow-elevated: 0 8px 32px rgba(43, 111, 255, 0.3);
+  --lt-shadow-ai-hover: 0 4px 16px rgba(124, 92, 252, 0.25);
+
+  --lt-chart-grid: #2D3140;
+  --lt-chart-split-bg-0: #141620;
+  --lt-chart-split-bg-1: #181A25;
+  --lt-chart-split-bg-2: #1A1D27;
+  --lt-chart-split-bg-3: #222639;
+  --lt-chart-axis-label: #6B7280;
+  --lt-chart-axis-line: #2D3140;
+
+  --mobile-ripple-color: rgba(43, 111, 255, 0.2);
+  --mobile-active-bg: rgba(43, 111, 255, 0.1);
+  --mobile-sheet-scrim: rgba(0, 0, 0, 0.6);
+}
+
 /* ---- 全局样式 ---- */
 body {
   margin: 0;
@@ -429,4 +519,49 @@ body {
 }
 .stagger-fade-in {
   animation: staggerFadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* ===================================================================
+   移动端交互工具类
+   =================================================================== */
+
+/* 涟漪触摸反馈 — 用于任意可点击元素 */
+@keyframes mobile-ripple {
+  0% { box-shadow: 0 0 0 0 var(--mobile-ripple-color); }
+  100% { box-shadow: 0 0 0 12px transparent; }
+}
+.mobile-ripple {
+  position: relative;
+  overflow: hidden;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-ripple::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.mobile-ripple:active::after {
+  animation: mobile-ripple 0.4s ease-out;
+  background: var(--mobile-ripple-color);
+}
+
+/* 按压缩放反馈 */
+.mobile-press {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s ease-out;
+}
+.mobile-press:active {
+  transform: scale(var(--mobile-press-scale, 0.97));
+}
+
+/* 安全区 padding 工具 */
+.safe-area-bottom {
+  padding-bottom: var(--mobile-safe-area-inset-bottom, 0px);
+}
+.safe-area-top {
+  padding-top: var(--mobile-safe-area-inset-top, 0px);
 }

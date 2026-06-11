@@ -20,7 +20,7 @@ import { useAuth, validateEmail, validatePassword } from '@/composables/useAuth'
 
 const router = useRouter()
 const route = useRoute()
-const { codeSending, codeSent, countdown, codeError, sendVerificationCode, login: authLogin, register: authRegister } = useAuth()
+const { codeSending, codeSent, countdown, sendVerificationCode, login: authLogin, register: authRegister } = useAuth()
 
 // 状态：login | register
 const activeTab = ref<'login' | 'register'>('login')

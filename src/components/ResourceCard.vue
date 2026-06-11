@@ -53,7 +53,7 @@
           <template v-if="status === 'ready'">
             <el-button size="small" @click="$emit('preview')">预览</el-button>
             <el-button v-if="type === 'video'" size="small" plain @click="$emit('download', 'video')">下载视频</el-button>
-            <el-button v-else-if="type === 'code'" size="small" plain @click="$emit('download', 'py')">下载 .py</el-button>
+            <el-button v-else-if="type === 'code'" size="small" plain @click="$emit('download', 'code')">下载代码</el-button>
             <el-dropdown v-else-if="type === 'doc' || type === 'reading'" size="small" @command="(cmd: string) => $emit('download', cmd)">
               <el-button size="small" plain>
                 下载 <el-icon class="ml-1"><ArrowDown /></el-icon>

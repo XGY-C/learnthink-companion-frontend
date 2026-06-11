@@ -53,13 +53,6 @@ const statusColor = computed(() => {
     case 'failed': return 'var(--lt-danger)'
   }
 })
-const statusBgColor = computed(() => {
-  switch (props.status) {
-    case 'generating': return 'rgba(43,111,255,0.08)'
-    case 'done': return 'rgba(52,199,89,0.08)'
-    case 'failed': return 'rgba(255,59,48,0.08)'
-  }
-})
 
 const progressPercent = computed(() => Math.round(props.progress || 0))
 

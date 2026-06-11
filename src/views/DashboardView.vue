@@ -23,14 +23,15 @@ import {
 } from '@element-plus/icons-vue'
 import { useProfileStore } from '@/stores/profile'
 import { usePlanStore } from '@/stores/plan'
+import { useResourceStore } from '@/stores/resource'
 import { apiFetch } from '@/utils/api'
-import type { CourseTextbook, ChapterNode } from '@/types'
-import EmptyState from '@/components/EmptyState.vue'
+import type { CourseTextbook, ChapterNode, ResourcePack } from '@/types'
 import DashboardIcon from '@/components/icons/DashboardIcon.vue'
 
 const router = useRouter()
 const profile = useProfileStore()
 const planStore = usePlanStore()
+const resourceStore = useResourceStore()
 
 echarts.use([RadarChart, CanvasRenderer])
 
@@ -161,28 +162,53 @@ const radarOption = computed(() => ({
 const profileVersion = computed(() => profile.profileVersion)
 const profileUpdatedAt = computed(() => profile.updatedAt)
 
-// ===== 下一步推荐 =====
-const nextRecommendation = computed(() => ({
-  title: 'A* 搜索算法详解',
-  knowledgePoint: 'A* 搜索算法',
-  reason: [
-    '针对薄弱点：架构设计 → 需掌握算法评估能力',
-    '偏好：代码实操优先 → 含可运行代码示例',
-    '节奏：15分钟/天 → 已生成速览版'
-  ] as string[],
-  estimatedMinutes: 15,
-  resourcePackId: 'RPK-001',
-  confidence: 'high' as const,
-  sourcesCount: 6,
-  qualityScore: 88
-}))
+// ===== 下一步推荐 (基于真实 Plan/Profile 数据) =====
+const nextRecommendation = computed(() => {
+  const currentAct = planStore.currentActivity
+  const currentMod = planStore.currentModule
+
+  if (currentAct && currentMod) {
+    const reasons: string[] = []
+    if (currentMod.title) reasons.push(`当前模块：${currentMod.title}`)
+    if (weakTags.value.length > 0) reasons.push(`薄弱项：${weakTags.value.slice(0, 2).join('、')}`)
+    if (profilePreference.value) reasons.push(`偏好：${profilePreference.value}`)
+
+    return {
+      title: currentAct.title || '推荐学习活动',
+      knowledgePoint: currentMod.title || '推荐知识点',
+      reason: reasons.length > 0 ? reasons : ['基于你的学习画像推荐'],
+      estimatedMinutes: currentAct.estimatedMinutes || 15,
+      resourcePackId: currentAct.resource?.resourcePackId || '',
+      confidence: 'high' as const,
+      sourcesCount: 0,
+      qualityScore: 0,
+    }
+  }
+
+  // Fallback: 无学习计划时基于薄弱项推荐
+  if (weakTags.value.length > 0) {
+    return {
+      title: `攻克「${weakTags.value[0]}」`,
+      knowledgePoint: weakTags.value[0],
+      reason: ['薄弱项练习', '个性化推荐'],
+      estimatedMinutes: profilePace.value,
+      resourcePackId: '',
+      confidence: 'medium' as const,
+      sourcesCount: 0,
+      qualityScore: 0,
+    }
+  }
+
+  // 无数据时返回空推荐
+  return null
+})
 
 // ===== 路径进度 =====
 const pathProgress = computed(() => {
   return planStore.overallProgress
 })
 
-// ===== 最近资源包列表 =====
+// ===== 最近资源包列表 (来自 ResourceStore) =====
 interface RecentPack {
   id: string
   title: string
@@ -194,38 +220,18 @@ interface RecentPack {
   isActive: boolean
 }
 
-const recentPacks = ref<RecentPack[]>([
-  {
-    id: 'RPK-003',
-    title: 'A\* 搜索算法学习包',
-    knowledgePoint: 'A* 搜索算法',
-    createdAt: '2026-05-05 14:30',
-    resourceCount: 5,
-    avgQuality: 92,
-    avgConfidence: 'high',
-    isActive: true
-  },
-  {
-    id: 'RPK-002',
-    title: 'Vue3 响应式原理学习包',
-    knowledgePoint: 'Vue3 响应式',
-    createdAt: '2026-05-04 10:15',
-    resourceCount: 4,
-    avgQuality: 85,
-    avgConfidence: 'high',
-    isActive: false
-  },
-  {
-    id: 'RPK-001',
-    title: 'JavaScript 闭包与作用域',
-    knowledgePoint: 'JS 闭包',
-    createdAt: '2026-05-03 09:00',
-    resourceCount: 6,
-    avgQuality: 78,
-    avgConfidence: 'medium',
-    isActive: false
-  }
-])
+const recentPacks = computed<RecentPack[]>(() =>
+  resourceStore.packs.slice(0, 10).map(p => ({
+    id: p.id,
+    title: p.title,
+    knowledgePoint: p.knowledgePoint,
+    createdAt: p.createdAt,
+    resourceCount: p.resourceCount,
+    avgQuality: p.avgQuality,
+    avgConfidence: p.avgConfidence as 'high' | 'medium' | 'low',
+    isActive: p.isActive,
+  }))
+)
 
 // ===== 空状态：引导创建画像 =====
 const emptyGuideSteps = [
@@ -250,8 +256,22 @@ const openPack = (pack: RecentPack) => {
   router.push({ name: 'library', query: { packId: pack.id } })
 }
 
-const refreshMetrics = () => {
-  ElMessage.success('已刷新仪表盘数据')
+const isRefreshing = ref(false)
+
+const refreshMetrics = async () => {
+  isRefreshing.value = true
+  try {
+    await Promise.allSettled([
+      planStore.fetchPlan('default'),
+      resourceStore.fetchPacks('default'),
+      fetchTextbook(),
+    ])
+    ElMessage.success('已刷新仪表盘数据')
+  } catch {
+    ElMessage.warning('部分数据刷新失败')
+  } finally {
+    isRefreshing.value = false
+  }
 }
 
 /** 指标卡点击跳转 */
@@ -261,9 +281,11 @@ function handleMetricClick(idx: number) {
   if (route) router.push(route)
 }
 
-// ===== 模拟数据加载 =====
+// ===== 初始化加载 =====
 onMounted(() => {
   fetchTextbook()
+  planStore.fetchPlan('default')
+  resourceStore.fetchPacks('default')
 })
 </script>
 
@@ -282,7 +304,7 @@ onMounted(() => {
         <el-button link type="primary" size="small" @click="router.push('/report')" style="color: var(--lt-brand);">
           完整报告 <el-icon><Right /></el-icon>
         </el-button>
-        <el-button size="small" plain :icon="RefreshRight" @click="refreshMetrics" class="!rounded-full">
+        <el-button size="small" plain :icon="RefreshRight" :loading="isRefreshing" @click="refreshMetrics" class="!rounded-full">
           刷新数据
         </el-button>
       </div>
@@ -367,6 +389,12 @@ onMounted(() => {
               </template>
 
               <div class="p-2">
+                <!-- 无推荐数据 -->
+                <div v-if="!nextRecommendation" class="text-center py-6">
+                  <p class="text-sm" style="color: var(--lt-text-auxiliary);">暂无推荐数据，快去对话建立学习画像吧</p>
+                  <el-button size="small" type="primary" class="mt-3" @click="goToChat">去对话</el-button>
+                </div>
+                <template v-else>
                                 <!-- 推荐知识点头部 -->
                 <div class="flex items-start justify-between mb-3">
                   <div>
@@ -380,13 +408,13 @@ onMounted(() => {
                   </el-tag>
                 </div>
 
-                                <!-- 证据行：来源用蓝色链接，质量分用中性色 -->
+                                <!-- 证据行 -->
                 <div class="flex items-center gap-4 text-xs mb-4 px-3 py-2 rounded-lg" style="color: var(--lt-text-auxiliary); background-color: var(--lt-bg-page);">
-                  <span class="flex items-center gap-1" style="color: var(--lt-brand);">
+                  <span v-if="nextRecommendation.sourcesCount" class="flex items-center gap-1" style="color: var(--lt-brand);">
                     <el-icon><Document /></el-icon>
                     来源 {{ nextRecommendation.sourcesCount }}
                   </span>
-                  <span class="flex items-center gap-1 quality-score">
+                  <span v-if="nextRecommendation.qualityScore" class="flex items-center gap-1 quality-score">
                     <el-icon><TrendCharts /></el-icon>
                     质量 <span style="color: var(--lt-text-secondary);">{{ nextRecommendation.qualityScore }}</span>/100
                   </span>
@@ -418,7 +446,7 @@ onMounted(() => {
 
                             <!-- 操作按钮 -->
               <div class="flex gap-3 mt-4">
-                <el-button type="primary" @click="goToStudio(nextRecommendation.knowledgePoint)">
+                <el-button type="primary" @click="nextRecommendation.knowledgePoint ? goToStudio(nextRecommendation.knowledgePoint) : goToStudio()">
                   去生成资源包
                   <el-icon class="ml-1"><MagicStick /></el-icon>
                 </el-button>
@@ -426,6 +454,7 @@ onMounted(() => {
                   查看路径位置
                 </el-button>
               </div>
+              </template>
 
               <!-- 进度条小提示 -->
                             <div class="mt-6 pt-4 border-t" style="border-color: var(--lt-border);">

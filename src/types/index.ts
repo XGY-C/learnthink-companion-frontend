@@ -117,7 +117,7 @@ export interface ResourceItem {
   id: string
   title: string
   type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video'
-  status: 'pending' | 'ready' | 'failed' | 'rejected'
+  status: 'pending' | 'ready' | 'failed' | 'rejected' | 'rendering'
   confidence?: 'high' | 'medium' | 'low'
   sourcesCount?: number
   qualityScore?: number
@@ -368,6 +368,29 @@ export interface QuizContent {
 
 /** SSE 事件类型汇总 */
 export type SSEEventType = 'task.accepted' | 'task.stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'task.done' | 'task.failed' | 'subtopic.started' | 'subtopic.completed' | 'checklist.created' | 'checklist.updated' | 'agent.generation.started' | 'agent.generation.done' | 'agent.generation.failed' | 'plan.gap_tasks'
+
+// ========== 代码运行相关类型 ==========
+
+/** 代码运行请求 */
+export interface CodeRunRequest {
+  source_code: string
+  language: string
+  stdin?: string
+  expected_output?: string
+  cpu_time_limit?: number
+  memory_limit?: number
+}
+
+/** 代码运行结果 */
+export interface CodeRunResult {
+  stdout: string | null
+  stderr: string | null
+  compile_output: string | null
+  status: string
+  status_code: number
+  time: number | null
+  memory: number | null
+}
 
 /** 全局通知项 */
 export interface NotificationItem {

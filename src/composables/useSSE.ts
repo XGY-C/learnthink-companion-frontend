@@ -18,6 +18,7 @@ export interface SSECallbacks {
   onAgentGenerationDone?: (data: any) => void
   onAgentGenerationFailed?: (data: any) => void
   onGapTasks?: (data: { tasks: { task_id: string; module_title: string; module_id: string; resource_types: string[] }[] }) => void
+  onTaskAccepted?: (data: { taskId: string; status: string }) => void
 }
 
 export function useSSE() {
@@ -67,7 +68,7 @@ export function useSSE() {
       'agent.message': callbacks.onAgentMessage,
       'task.done': callbacks.onTaskDone,
       'task.failed': callbacks.onTaskFailed,
-      'task.accepted': undefined,
+      'task.accepted': callbacks.onTaskAccepted,
       'subtopic.started': callbacks.onSubTopicStarted,
       'subtopic.completed': callbacks.onSubTopicCompleted,
       'checklist.created': callbacks.onChecklistCreated,

@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { AgentThinkingTrace, PlannerDecision, ResourceItem } from '@/types'
 import { useTaskStore } from '@/stores/task'
+import { usePlanStore } from '@/stores/plan'
 import { useSSE } from '@/composables/useSSE'
 import { apiFetch } from '@/utils/api'
 
@@ -9,7 +10,7 @@ import { apiFetch } from '@/utils/api'
 
 export interface TaskResource extends ResourceItem {
   id: string
-  status: 'pending' | 'ready' | 'failed' | 'rejected'
+  status: 'pending' | 'ready' | 'failed' | 'rejected' | 'rendering'
   confidence?: 'high' | 'medium' | 'low'
   sourcesCount?: number
   qualityScore?: number
@@ -80,6 +81,7 @@ const mockResources: Record<string, any[]> = {
 
 export function useTaskStream() {
   const taskStore = useTaskStore()
+  const planStore = usePlanStore()
   const { status: sseStatus, error: sseError, retryCount: sseRetryCount, connect: sseConnect, disconnect: sseDisconnect } = useSSE()
 
   // ===== State =====
@@ -99,7 +101,7 @@ export function useTaskStream() {
 
   // Phase 7: Checklist + Agent activity state
   const checklist = ref<any>(null)
-  const activeAgents = ref<{ jobId: string; type: string; title: string; status: string }[]>([])
+  const activeAgents = ref<{ jobId: string; type: string; title: string; status: 'started' | 'generating' | 'done' | 'failed' }[]>([])
 
   // ===== Computed =====
   const resourceReadyCount = computed(() => resources.value.filter(r => r.status === 'ready').length)
@@ -138,15 +140,20 @@ export function useTaskStream() {
     pollTimer = setInterval(async () => {
       if (isComplete.value || pollAttempts >= MAX_POLL_ATTEMPTS) {
         stopPolling()
+        if (pollAttempts >= MAX_POLL_ATTEMPTS) {
+          currentMessage.value = '轮询超时，请手动刷新查看结果'
+        }
         return
       }
       pollAttempts++
+      currentMessage.value = `正在检查任务状态... (${pollAttempts}/${MAX_POLL_ATTEMPTS})`
       try {
         const res = await apiFetch<any>(`/tasks/${tid}`)
         if (res.data) {
           const d = res.data
           if (d.stage) currentStage.value = d.stage
           if (d.percent) currentPercent.value = d.percent
+          if (d.message) currentMessage.value = d.message
 
           if (d.status === 'SUCCEEDED') {
             isComplete.value = true
@@ -162,7 +169,7 @@ export function useTaskStream() {
             currentMessage.value = d.error_message || '生成失败'
           }
         }
-      } catch { /* ignore */ }
+      } catch { /* SSE will catch up */ }
     }, 5000)
   }
 
@@ -214,13 +221,7 @@ export function useTaskStream() {
     hasStarted.value = true
     taskStore.createTask(tid)
 
-    const expectedTypes = ['doc', 'quiz', 'code', 'mindmap', 'reading', 'video']
-    resources.value = expectedTypes.map((type, i) => ({
-      id: `res-${i}`,
-      title: '',
-      type: type as TaskResource['type'],
-      status: 'pending' as const,
-    }))
+    resources.value = []
 
     // Poll current state to restore after page refresh
     try {
@@ -260,6 +261,15 @@ export function useTaskStream() {
     } catch { /* SSE will catch up */ }
 
     sseConnect(tid, {
+      onTaskAccepted(data: any) {
+        currentMessage.value = '任务已接收，正在分配 Agent...'
+        taskStore.updateTask(tid, {
+          stage: 'accepted' as any,
+          percent: 0,
+          message: '任务已接收',
+        })
+      },
+
       onStage(data) {
         currentStage.value = data.stage
         currentPercent.value = data.percent
@@ -272,19 +282,35 @@ export function useTaskStream() {
       },
 
       onResourceReady(data) {
-        const res = resources.value.find(r => r.type === data.type && r.status === 'pending')
-        if (res) {
-          res.status = 'ready'
-          res.title = data.title
-          res.confidence = data.confidence as any
-          res.sourcesCount = data.sources
-          res.qualityScore = Math.floor(Math.random() * 15) + 85
-          if (data.content) {
-            res.deepContent = data.content
-            res.brief = data.content.length > 200 ? data.content.substring(0, 200) + '...' : data.content
-          } else {
-            res.brief = `已生成「${data.title}」`
-          }
+        // 如果已存在该类型资源（如回合生成），则更新；否则新增
+        const existing = resources.value.find(r => r.type === data.type)
+        const res: TaskResource = existing || {
+          id: data.resourceId || `res-${resources.value.length}`,
+          type: data.type as TaskResource['type'],
+          title: '',
+          status: 'pending',
+        }
+        res.status = data.type === 'video' ? 'rendering' : 'ready'
+        res.title = data.title
+        res.confidence = data.confidence as any
+        res.sourcesCount = data.sources
+        // Use backend quality_score if available, otherwise confidence-based fallback
+        if (typeof data.quality_score === 'number') {
+          res.qualityScore = data.quality_score
+        } else if (data.qualityScore !== undefined) {
+          res.qualityScore = data.qualityScore
+        } else {
+          const confidenceMap: Record<string, number> = { high: 90, medium: 75, low: 55 }
+          res.qualityScore = confidenceMap[data.confidence] ?? 70
+        }
+        if (data.content) {
+          res.deepContent = data.content
+          res.brief = data.content.length > 200 ? data.content.substring(0, 200) + '...' : data.content
+        } else {
+          res.brief = `已生成「${data.title}」`
+        }
+        if (!existing) {
+          resources.value.push(res)
         }
         taskStore.addResourceReady(tid, data)
       },
@@ -328,9 +354,7 @@ export function useTaskStream() {
         checklist.value = data
       },
       onChecklistUpdated(data: any) {
-        if (checklist.value) {
-          checklist.value = { ...checklist.value, ...data }
-        }
+        checklist.value = data
       },
       onAgentGenerationStarted(data: any) {
         activeAgents.value.push({
@@ -341,16 +365,16 @@ export function useTaskStream() {
         })
       },
       onAgentGenerationDone(data: any) {
-        const found = activeAgents.value.find(a => a.title === data.title)
+        const found = activeAgents.value.find(a => a.jobId === data.jobId)
         if (found) {
           found.status = 'done'
           setTimeout(() => {
-            activeAgents.value = activeAgents.value.filter(a => a.title !== data.title)
-          }, 3000)
+            activeAgents.value = activeAgents.value.filter(a => a.jobId !== data.jobId)
+          }, 12000)
         }
       },
       onAgentGenerationFailed(data: any) {
-        const found = activeAgents.value.find(a => a.title === data.title)
+        const found = activeAgents.value.find(a => a.jobId === data.jobId)
         if (found) found.status = 'failed'
       },
 
@@ -407,6 +431,17 @@ export function useTaskStream() {
               res.brief = `子主题 ${data.index + 1} 已发布`
             }
           })
+        }
+      },
+
+      onGapTasks(data: any) {
+        if (data.tasks && Array.isArray(data.tasks)) {
+          planStore.gapTasks = data.tasks.map((t: any) => ({
+            taskId: t.task_id,
+            moduleTitle: t.module_title,
+            moduleId: t.module_id,
+            resourceTypes: t.resource_types,
+          }))
         }
       },
     })

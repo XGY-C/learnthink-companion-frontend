@@ -203,4 +203,31 @@ onMounted(async () => {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ===== 移动端响应式 ===== */
+@media (max-width: 767px) {
+  header {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+  header .text-lg {
+    font-size: 16px !important;
+  }
+  header .text-sm {
+    display: none;
+  }
+  header .el-button {
+    font-size: 13px !important;
+    padding: 8px 16px !important;
+    min-height: 40px;
+  }
+  .course-card {
+    transform: none !important;
+  }
+  .course-card:hover {
+    transform: none !important;
+    box-shadow: none !important;
+    border-color: var(--lt-border) !important;
+  }
+}
 </style>

@@ -19,13 +19,13 @@ export function usePathInteraction() {
     }
   }
 
-  function goToLearn(activity: Activity) {
+  function goToLearn(activity: Activity, moduleId?: string) {
     if (activity.type === 'explore') {
       exploreActivity.value = activity
       exploreDrawerVisible.value = true
       return
     }
-    router.push(`/learn/${activity.activityId}`)
+    router.push({ path: `/learn/${activity.activityId}`, query: moduleId ? { moduleId } : undefined })
   }
   
   function scrollToModule(moduleId: string) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import type { QuizContent, QuestionType } from '@/types'
+import { ref, computed, reactive } from 'vue'
+import type { QuizContent, QuestionType, Question } from '@/types'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 
 const props = defineProps<{
@@ -33,6 +33,67 @@ function goTo(idx: number) {
   if (idx >= 0 && idx < questions.value.length) activeIdx.value = idx
 }
 
+// ---- 用户作答状态 ----
+// key: question id, value: 用户选择的答案（单选为 "A"，多选为 "AB"，填空/简答为文本）
+const userAnswers = reactive<Record<number, string>>({})
+// key: question id, value: 多选题暂存中的选项集合
+const multiSelectTemp = reactive<Record<number, Set<string>>>({})
+// 已确认提交的题目 id 集合
+const submittedIds = reactive(new Set<number>())
+
+function getUserAnswer(q: Question): string | undefined {
+  return userAnswers[q.id]
+}
+
+function isSubmitted(q: Question): boolean {
+  return submittedIds.has(q.id)
+}
+
+function isCorrect(q: Question): boolean {
+  const ua = getUserAnswer(q)
+  if (ua === undefined) return false
+  return ua.trim().toUpperCase() === q.answer.trim().toUpperCase()
+}
+
+// ---- 单选题/判断题：点击选项 ----
+function selectOption(q: Question, letter: string) {
+  if (isSubmitted(q)) return // 已提交则不允许修改
+  userAnswers[q.id] = letter
+  submittedIds.add(q.id)
+}
+
+// ---- 多选题：切换选项 ----
+function toggleMultiOption(q: Question, letter: string) {
+  if (isSubmitted(q)) return
+  if (!multiSelectTemp[q.id]) {
+    multiSelectTemp[q.id] = new Set()
+  }
+  const set = multiSelectTemp[q.id]
+  if (set.has(letter)) {
+    set.delete(letter)
+  } else {
+    set.add(letter)
+  }
+}
+
+function confirmMultiSelect(q: Question) {
+  const set = multiSelectTemp[q.id]
+  if (!set || set.size === 0) return
+  // 排序后拼接，如 "ABD"
+  userAnswers[q.id] = [...set].sort().join('')
+  submittedIds.add(q.id)
+}
+
+// ---- 填空/简答：输入文本 ----
+const openAnswerInputs = reactive<Record<number, string>>({})
+
+function submitOpenAnswer(q: Question) {
+  const text = openAnswerInputs[q.id]?.trim()
+  if (!text) return
+  userAnswers[q.id] = text
+  submittedIds.add(q.id)
+}
+
 // ---- 工具 ----
 const QUESTION_TYPE_CONFIG: Record<QuestionType, { label: string; icon: string }> = {
   SINGLE_CHOICE:   { label: '单选题', icon: '○' },
@@ -51,26 +112,46 @@ const DIFFICULTY_CONFIG: Record<number, { label: string; color: string }> = {
 }
 
 function optionLabel(index: number): string {
-  return String.fromCharCode(65 + index) // A, B, C, D...
+  return String.fromCharCode(65 + index)
 }
+
+// 统计
+const answeredCount = computed(() => submittedIds.size)
+const correctCount = computed(() => {
+  let c = 0
+  for (const q of questions.value) {
+    if (isSubmitted(q) && isCorrect(q)) c++
+  }
+  return c
+})
 </script>
 
 <template>
   <div v-if="quiz && questions.length > 0" class="quiz-preview">
-    <!-- 顶部元信息 -->
+    <!-- 顶部元信息 + 统计 -->
     <div class="quiz-meta">
       <span>共 {{ questions.length }} 题</span>
       <span>· 预计 {{ Math.round(questions.length * 1.5) }} 分钟</span>
       <span v-if="qualityScore != null">· 质量 {{ qualityScore }}/100</span>
+      <span v-if="answeredCount > 0" class="quiz-score">
+        · 已答 {{ answeredCount }}/{{ questions.length }}
+        <template v-if="answeredCount > 0">
+          · 正确 {{ correctCount }}/{{ answeredCount }}
+        </template>
+      </span>
     </div>
 
-    <!-- 题目导航条 -->
+    <!-- 题目导航条（含作答状态） -->
     <div class="quiz-navbar">
       <button
         v-for="(q, i) in questions"
         :key="q.id ?? i"
         class="quiz-nav-dot"
-        :class="{ active: i === activeIdx }"
+        :class="{
+          active: i === activeIdx,
+          correct: isSubmitted(q) && isCorrect(q),
+          wrong: isSubmitted(q) && !isCorrect(q),
+        }"
         :title="`第${i + 1}题 · ${QUESTION_TYPE_CONFIG[q.type]?.label ?? q.type}`"
         @click="goTo(i)"
       >
@@ -105,28 +186,90 @@ function optionLabel(index: number): string {
         <MarkdownViewer :content="activeQuestion.content" :showToc="false" />
       </div>
 
-      <!-- 选项（选择题/判断题） -->
+      <!-- 选项（单选题/判断题/多选题） -->
       <div v-if="activeQuestion.options && activeQuestion.options.length > 0" class="question-options">
         <div
           v-for="(opt, oi) in activeQuestion.options"
           :key="oi"
           class="option-item"
+          :class="{
+            clickable: !isSubmitted(activeQuestion) && activeQuestion.type !== 'MULTIPLE_CHOICE',
+            'multi-clickable': !isSubmitted(activeQuestion) && activeQuestion.type === 'MULTIPLE_CHOICE',
+            selected: isSubmitted(activeQuestion)
+              ? getUserAnswer(activeQuestion) === optionLabel(oi)
+              : activeQuestion.type === 'MULTIPLE_CHOICE'
+                ? multiSelectTemp[activeQuestion.id]?.has(optionLabel(oi))
+                : getUserAnswer(activeQuestion) === optionLabel(oi),
+            correct:
+              isSubmitted(activeQuestion) &&
+              optionLabel(oi) === activeQuestion.answer.trim().toUpperCase(),
+            wrong:
+              isSubmitted(activeQuestion) &&
+              getUserAnswer(activeQuestion) === optionLabel(oi) &&
+              optionLabel(oi) !== activeQuestion.answer.trim().toUpperCase(),
+            dimmed:
+              isSubmitted(activeQuestion) &&
+              getUserAnswer(activeQuestion) !== optionLabel(oi) &&
+              optionLabel(oi) !== activeQuestion.answer.trim().toUpperCase(),
+          }"
+          @click="activeQuestion.type === 'MULTIPLE_CHOICE'
+            ? toggleMultiOption(activeQuestion, optionLabel(oi))
+            : selectOption(activeQuestion, optionLabel(oi))"
         >
           <span class="option-letter">{{ optionLabel(oi) }}</span>
           <span class="option-text">{{ opt }}</span>
+          <span v-if="isSubmitted(activeQuestion) && optionLabel(oi) === activeQuestion.answer.trim().toUpperCase()" class="option-mark correct-mark">✓</span>
+          <span v-if="isSubmitted(activeQuestion) && getUserAnswer(activeQuestion) === optionLabel(oi) && optionLabel(oi) !== activeQuestion.answer.trim().toUpperCase()" class="option-mark wrong-mark">✗</span>
         </div>
+        <!-- 多选确认按钮 -->
+        <button
+          v-if="activeQuestion.type === 'MULTIPLE_CHOICE' && !isSubmitted(activeQuestion)"
+          class="multi-confirm-btn"
+          :disabled="!multiSelectTemp[activeQuestion.id] || multiSelectTemp[activeQuestion.id]?.size === 0"
+          @click="confirmMultiSelect(activeQuestion)"
+        >
+          确认选择
+        </button>
       </div>
 
-      <!-- 填空/简答占位 -->
-      <div v-else class="question-open-placeholder">
-        <div class="placeholder-box">
-          {{ activeQuestion.type === 'FILL_IN_BLANK' ? '填空作答区域' : '简答作答区域' }}
-        </div>
+      <!-- 填空/简答输入 -->
+      <div v-else class="question-open-input">
+        <template v-if="!isSubmitted(activeQuestion)">
+          <textarea
+            v-model="openAnswerInputs[activeQuestion.id]"
+            class="open-answer-textarea"
+            :placeholder="activeQuestion.type === 'FILL_IN_BLANK' ? '请输入你的答案...' : '请输入你的回答...'"
+            rows="3"
+            @keydown.enter.ctrl="submitOpenAnswer(activeQuestion)"
+          ></textarea>
+          <button
+            class="multi-confirm-btn"
+            :disabled="!openAnswerInputs[activeQuestion.id]?.trim()"
+            @click="submitOpenAnswer(activeQuestion)"
+          >
+            提交答案
+          </button>
+          <span class="shortcut-hint">Ctrl+Enter 提交</span>
+        </template>
       </div>
 
-      <!-- 答案隐藏 -->
-      <div class="answer-locked">
-        🔒 答案与解析在练习模式下查看
+      <!-- 作答结果反馈 + 解析 -->
+      <div v-if="isSubmitted(activeQuestion)" class="answer-feedback" :class="{ correct: isCorrect(activeQuestion), wrong: !isCorrect(activeQuestion) }">
+        <div class="feedback-header">
+          <span v-if="isCorrect(activeQuestion)" class="feedback-badge correct">✓ 回答正确</span>
+          <span v-else class="feedback-badge wrong">✗ 回答错误</span>
+        </div>
+        <div class="feedback-answer">
+          <span class="feedback-label">正确答案：</span>
+          <span class="feedback-value">{{ activeQuestion.answer }}</span>
+          <span v-if="!isCorrect(activeQuestion) && getUserAnswer(activeQuestion)" class="feedback-your">
+            （你的答案：{{ getUserAnswer(activeQuestion) }}）
+          </span>
+        </div>
+        <div v-if="activeQuestion.analysis" class="feedback-analysis">
+          <span class="feedback-label">解析：</span>
+          <MarkdownViewer :content="activeQuestion.analysis" :showToc="false" />
+        </div>
       </div>
 
       <!-- Reviewer 审校记录（如果有） -->
@@ -169,6 +312,10 @@ function optionLabel(index: number): string {
   display: flex; gap: 4px; flex-wrap: wrap;
   font-size: 13px; color: var(--lt-text-secondary);
 }
+.quiz-score {
+  color: var(--lt-brand);
+  font-weight: 500;
+}
 
 /* ---- 导航条 ---- */
 .quiz-navbar {
@@ -192,6 +339,14 @@ function optionLabel(index: number): string {
   background-color: var(--lt-brand-lightest);
   color: var(--lt-brand);
   font-weight: 600;
+}
+.quiz-nav-dot.correct {
+  border-color: var(--lt-success);
+  background: color-mix(in srgb, var(--lt-success) 12%, transparent);
+}
+.quiz-nav-dot.wrong {
+  border-color: var(--lt-danger);
+  background: color-mix(in srgb, var(--lt-danger) 12%, transparent);
 }
 .nav-num { min-width: 16px; text-align: center; }
 .nav-icon { font-size: 10px; }
@@ -242,36 +397,144 @@ function optionLabel(index: number): string {
   display: flex; align-items: flex-start; gap: 10px;
   padding: 10px 12px; border-radius: 8px;
   border: 1px solid var(--lt-border);
-  transition: background-color var(--lt-transition-base);
+  transition: all var(--lt-transition-base);
+  position: relative;
+}
+.option-item.clickable {
+  cursor: pointer;
+}
+.option-item.clickable:hover {
+  border-color: var(--lt-brand-lighter);
+  background-color: var(--lt-brand-lightest);
+}
+.option-item.multi-clickable {
+  cursor: pointer;
+}
+.option-item.multi-clickable:hover {
+  border-color: var(--lt-brand-lighter);
+  background-color: var(--lt-brand-lightest);
+}
+.option-item.selected {
+  border-color: var(--lt-brand);
+  background-color: var(--lt-brand-lightest);
+}
+.option-item.correct {
+  border-color: var(--lt-success);
+  background: color-mix(in srgb, var(--lt-success) 12%, transparent);
+}
+.option-item.wrong {
+  border-color: var(--lt-danger);
+  background: color-mix(in srgb, var(--lt-danger) 12%, transparent);
+}
+.option-item.dimmed {
+  opacity: 0.5;
 }
 .option-letter {
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border-radius: 50%;
   background-color: var(--lt-bg-page); color: var(--lt-text-secondary);
   font-size: 13px; font-weight: 600; flex-shrink: 0;
+  transition: all var(--lt-transition-base);
+}
+.option-item.correct .option-letter {
+  background-color: var(--lt-success);
+  color: #fff;
+}
+.option-item.wrong .option-letter {
+  background-color: var(--lt-danger);
+  color: #fff;
+}
+.option-item.selected:not(.correct):not(.wrong) .option-letter {
+  background-color: var(--lt-brand);
+  color: #fff;
 }
 .option-text {
   font-size: 14px; color: var(--lt-text-primary); line-height: 1.6;
-  padding-top: 2px;
+  padding-top: 2px; flex: 1;
+}
+.option-mark {
+  font-size: 16px; font-weight: 700;
+  flex-shrink: 0; align-self: center;
+}
+.correct-mark { color: var(--lt-success); }
+.wrong-mark { color: var(--lt-danger); }
+
+/* ---- 多选确认按钮 ---- */
+.multi-confirm-btn {
+  margin-top: 4px;
+  padding: 8px 20px; border-radius: 8px; border: none;
+  background-color: var(--lt-brand); color: #fff;
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  align-self: flex-start;
+  transition: all var(--lt-transition-base);
+}
+.multi-confirm-btn:hover {
+  background-color: var(--lt-brand-dark);
+}
+.multi-confirm-btn:disabled {
+  opacity: 0.4; cursor: default;
+}
+.shortcut-hint {
+  font-size: 11px; color: var(--lt-text-auxiliary);
+  margin-left: 8px;
 }
 
-/* ---- 填空/简答占位 ---- */
-.question-open-placeholder {
+/* ---- 填空/简答输入 ---- */
+.question-open-input {
   padding: 0 16px 16px;
+  display: flex; flex-direction: column; gap: 8px;
 }
-.placeholder-box {
-  border: 2px dashed var(--lt-border); border-radius: 8px;
-  padding: 24px; text-align: center;
-  font-size: 13px; color: var(--lt-text-placeholder);
+.open-answer-textarea {
+  width: 100%; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--lt-border);
+  font-size: 13px; line-height: 1.6; resize: vertical;
+  background: var(--lt-bg-card); color: var(--lt-text-primary);
+  outline: none; transition: border-color var(--lt-transition-base);
+}
+.open-answer-textarea:focus {
+  border-color: var(--lt-brand);
 }
 
-/* ---- 答案隐藏 ---- */
-.answer-locked {
+/* ---- 答案反馈 ---- */
+.answer-feedback {
   margin: 0 16px 16px;
   padding: 12px 16px; border-radius: 8px;
-  background-color: var(--lt-bg-page);
-  border: 1px dashed var(--lt-border);
-  text-align: center; font-size: 13px; color: var(--lt-text-auxiliary);
+  border-left: 3px solid;
+}
+.answer-feedback.correct {
+  background: color-mix(in srgb, var(--lt-success) 12%, transparent);
+  border-color: var(--lt-success);
+}
+.answer-feedback.wrong {
+  background: color-mix(in srgb, var(--lt-danger) 12%, transparent);
+  border-color: var(--lt-danger);
+}
+.feedback-header {
+  margin-bottom: 8px;
+}
+.feedback-badge {
+  font-size: 14px; font-weight: 600;
+}
+.feedback-badge.correct { color: var(--lt-success); }
+.feedback-badge.wrong { color: var(--lt-danger); }
+.feedback-answer {
+  font-size: 13px; color: var(--lt-text-primary); margin-bottom: 6px;
+}
+.feedback-label {
+  font-weight: 600; color: var(--lt-text-primary);
+}
+.feedback-value {
+  font-weight: 600;
+}
+.feedback-your {
+  color: var(--lt-text-auxiliary);
+}
+.feedback-analysis {
+  margin-top: 8px;
+  font-size: 13px; color: var(--lt-text-secondary); line-height: 1.7;
+}
+.feedback-analysis :deep(.markdown-content) {
+  font-size: 13px;
 }
 
 /* ---- Reviewer 审校 ---- */

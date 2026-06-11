@@ -164,8 +164,13 @@
               <el-icon class="mr-1"><Download /></el-icon>导出 PNG
             </el-button>
           </div>
-          <div v-else-if="currentPreview.type === 'code'" class="bg-slate-50 rounded-lg overflow-hidden">
-            <MarkdownViewer :content="currentPreview.deepContent || currentPreview.brief || ''" :showToc="false" />
+          <div v-else-if="currentPreview.type === 'code'">
+            <CodeLearningViewer
+              :content="currentPreview.deepContent || currentPreview.brief || ''"
+              :title="currentPreview.title"
+              :quality-score="currentPreview.qualityScore"
+              :sources-count="currentPreview.sourcesCount"
+            />
           </div>
           <div v-else-if="currentPreview.type === 'quiz'">
             <QuizPreview
@@ -205,8 +210,10 @@ import EvidenceDrawer from '@/components/EvidenceDrawer.vue'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
 import QuizPreview from '@/components/QuizPreview.vue'
+import CodeLearningViewer from '@/components/code/CodeLearningViewer.vue'
 import { useTaskStream, typeLabel } from '@/composables/useTaskStream'
 import { markdownToDocxBlob, downloadDocx, preprocessLatexForMarkdown } from '@/utils/docxExport'
+import { extractVideoUrl } from '@/utils/media'
 
 const route = useRoute()
 const stream = useTaskStream()
@@ -253,36 +260,8 @@ const previewContent = computed(() => {
 
 const videoPreviewUrl = computed(() => {
   if (currentPreview.value?.type !== 'video') return null
-  try {
-    const raw = currentPreview.value?.content || currentPreview.value?.brief || currentPreview.value?.deepContent
-    if (!raw) return null
-    const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
-    // 优先 JSON 解析
-    try {
-      const parsed = JSON.parse(text)
-      if (parsed?.videoUrl) return parsed.videoUrl
-    } catch { /* JSON 损坏，走正则回退 */ }
-    // 正则回退：从损坏的 JSON 中直接提取 videoUrl 值
-    const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
-    return m ? m[1] : null
-  } catch {
-    return null
-  }
+  return extractVideoUrl(currentPreview.value)
 })
-
-function extractVideoUrl(res: any): string | null {
-  const raw = res.videoUrl || res.content || res.deepContent || res.brief || ''
-  if (!raw) return null
-  // 如果已经是纯 URL 字符串
-  if (typeof raw === 'string' && /^https?:\/\//.test(raw.trim())) return raw.trim()
-  const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
-  try {
-    const parsed = JSON.parse(text)
-    if (parsed?.videoUrl) return parsed.videoUrl
-  } catch { /* JSON 损坏，走正则回退 */ }
-  const m = text.match(/"videoUrl"\s*:\s*(https?:\/\/[^"]+)/)
-  return m ? m[1] : null
-}
 
 async function downloadResource(res: any, format = 'docx') {
   if (res.type === 'video' || format === 'video') {

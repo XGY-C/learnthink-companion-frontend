@@ -12,7 +12,7 @@ const mobileRoutes = [
       {
         path: '',
         name: 'dashboard-m',
-        component: () => import('@/views/DashboardView.vue'),
+        component: () => import('@/views/mobile/DashboardMobile.vue'),
         meta: { title: '学习总览' }
       },
       {
@@ -36,7 +36,7 @@ const mobileRoutes = [
       {
         path: 'path',
         name: 'path-m',
-        component: () => import('@/views/PathView.vue'),
+        component: () => import('@/views/mobile/PathMobile.vue'),
         meta: { title: '学习路径' }
       },
       {
@@ -48,19 +48,19 @@ const mobileRoutes = [
       {
         path: 'library',
         name: 'library-m',
-        component: () => import('@/views/LibraryView.vue'),
+        component: () => import('@/views/mobile/LibraryMobile.vue'),
         meta: { title: '资源库' }
       },
       {
         path: 'report',
         name: 'report-m',
-        component: () => import('@/views/ReportView.vue'),
+        component: () => import('@/views/mobile/ReportMobile.vue'),
         meta: { title: '学习报告' }
       },
       {
         path: 'profile',
         name: 'profile-m',
-        component: () => import('@/views/ProfileView.vue'),
+        component: () => import('@/views/mobile/ProfileMobile.vue'),
         meta: { title: '个人中心', requiresAuth: true }
       },
     ]
@@ -102,7 +102,7 @@ const pcRoutes = [
         path: 'learn/:activityId',
         name: 'learn',
         component: () => import('@/views/LearnView.vue'),
-        meta: { title: '学习' }
+        meta: { title: '学习', hideSidebar: true }
       },
       {
         path: 'library',
