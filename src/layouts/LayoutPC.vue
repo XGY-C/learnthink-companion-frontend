@@ -3,14 +3,16 @@ import { useRoute, useRouter } from 'vue-router'
 import { computed, ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useProfileStore } from '@/stores/profile'
+import { usePushStore } from '@/stores/push'
 import type { CourseInfo } from '@/types'
-import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, DataLine, DataAnalysis, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
+import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, DataLine, DataAnalysis, ArrowDown, SwitchButton, Bell } from '@element-plus/icons-vue'
 import { useAuth } from '@/composables/useAuth'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const profileStore = useProfileStore()
+const pushStore = usePushStore()
 const { logout } = useAuth()
 const activeMenu = computed(() => route.path)
 const isCollapsed = ref(false)
@@ -39,6 +41,10 @@ async function handleUserMenuCommand(command: string) {
 
 onMounted(() => {
   profileStore.refreshProfile()
+  // 初始化推送通知数量
+  if (profileStore.activeCourseId) {
+    pushStore.fetchNotifications(profileStore.activeCourseId)
+  }
 })
 </script>
 
@@ -204,14 +210,59 @@ onMounted(() => {
               class="search-input"
             />
           </div>
-          <el-button
-            circle
-            icon="Bell"
-            class="header-icon-btn !border-0 !bg-transparent hover:!bg-gray-100"
-            @click="router.push('/profile?tab=notifications')"
-          >
-            <span class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white"></span>
-          </el-button>
+          <el-dropdown trigger="click" @command="(cmd: string) => { if (cmd === 'all') router.push('/notifications') }">
+            <el-button
+              circle
+              class="header-icon-btn !border-0 !bg-transparent hover:!bg-gray-100"
+              @click="pushStore.fetchNotifications(profileStore.activeCourseId ?? '')"
+            >
+              <el-icon><Bell /></el-icon>
+              <span
+                v-if="pushStore.unreadCount > 0"
+                class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1 ring-2 ring-white"
+              >
+                {{ pushStore.unreadCount > 99 ? '99+' : pushStore.unreadCount }}
+              </span>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu class="w-80 max-h-96 overflow-y-auto">
+                <div class="px-3 py-2 border-b" style="border-color: var(--lt-border);">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-semibold" style="color: var(--lt-text-primary);">通知中心</span>
+                    <el-button
+                      v-if="pushStore.unreadCount > 0"
+                      link
+                      size="small"
+                      type="primary"
+                      @click="pushStore.markAllAsRead()"
+                    >全部已读</el-button>
+                  </div>
+                </div>
+                <div v-if="pushStore.notifications.length === 0" class="px-3 py-6 text-center text-sm" style="color: var(--lt-text-auxiliary);">
+                  暂无推送通知
+                </div>
+                <el-dropdown-item
+                  v-for="notif in pushStore.notifications.slice(0, 5)"
+                  :key="notif.id"
+                  :command="notif.refId"
+                  class="!py-2 !px-3"
+                  @click="router.push(notif.refId ? `/library?packId=${notif.refId}` : '/library')"
+                >
+                  <div class="flex flex-col gap-0.5">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-xs" style="color: var(--lt-warning);">{{ notif.type.startsWith('push_') ? '🎯' : '📝' }}</span>
+                      <span class="text-xs font-medium" style="color: var(--lt-text-primary);">{{ notif.title }}</span>
+                      <span v-if="!notif.isRead" class="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+                    </div>
+                    <span class="text-xs truncate" style="color: var(--lt-text-auxiliary);">{{ notif.message }}</span>
+                  </div>
+                </el-dropdown-item>
+                <el-dropdown-item command="all" divided class="text-center">
+                  <span class="text-xs" style="color: var(--lt-brand);">查看全部通知</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <el-divider direction="vertical" class="!h-5 !mx-1" />
           <el-dropdown trigger="click" @command="handleUserMenuCommand">
             <el-avatar :size="32" :src="userStore.userInfo?.avatarUrl" class="cursor-pointer ring-2 ring-white shadow-sm" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">

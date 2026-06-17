@@ -39,12 +39,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
+import MarkdownIt from 'markdown-it'
 
 const props = withDefaults(defineProps<{
   content: string
@@ -92,182 +93,128 @@ function onContentClick(e: MouseEvent) {
   })
 }
 
-// ===== Markdown 转 HTML =====
-const mdToHtml = (md: string): string => {
-  let html = md
-  const mathPlaceholders: { placeholder: string; html: string }[] = []
-  const codePlaceholders: { placeholder: string; html: string }[] = []
+// ===== markdown-it 实例 =====
+const md = new MarkdownIt({
+  html: false,
+  linkify: true,
+  typographer: false,
+  breaks: false,
+  highlight(str: string, lang: string): string {
+    const langClass = lang ? ` class="language-${lang}"` : ''
+    const escapedCode = str.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return `<div class="code-block-wrapper"><span class="code-copy-btn" data-code="${escapeAttr(str)}"><span class="code-copy-icon"></span></span><pre><code${langClass}>${escapedCode}</code></pre></div>`
+  }
+})
 
-  // ── 数学公式保护 ──
+// 自定义任务列表插件
+function taskListsPlugin(md: MarkdownIt) {
+  md.core.ruler.after('inline', 'task-lists', (state) => {
+    const tokens = state.tokens
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i].type === 'inline') {
+        const content = tokens[i].content
+        const match = content.match(/^\[([ xX])\]\s*/)
+        if (match) {
+          const checked = match[1].toLowerCase() === 'x'
+          const checkbox = `<input type="checkbox" disabled${checked ? ' checked' : ''}>`
+          tokens[i].content = content.slice(match[0].length)
+          tokens[i].children = md.utils.arrayReplaceAt(tokens[i].children!, 0, [
+            Object.assign(new state.Token('html_inline', '', 0), { content: checkbox }),
+            Object.assign(new state.Token('text', '', 0), { content: ' ' })
+          ].concat(tokens[i].children!.slice(1)))
+
+          // 给父 <li> 加 class
+          const listToken = tokens[i - 2]
+          if (listToken?.type === 'list_item_open') {
+            listToken.attrSet('class', 'task-list-item')
+          }
+        }
+      }
+    }
+  })
+}
+
+md.use(taskListsPlugin)
+
+// 给渲染出的 <h1>~<h6> 添加 id 属性，与 headings computed 保持一致
+function headingIdPlugin(md: MarkdownIt) {
+  const defaultRender = md.renderer.rules.heading_open || ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
+  md.renderer.rules.heading_open = (tokens, idx, options, env, self) => {
+    const inlineToken = tokens[idx + 1]
+    if (inlineToken?.type === 'inline') {
+      const text = stripInlineMarkdown(inlineToken.content)
+      const id = text.replace(/\s+/g, '-').replace(/[^\w\u4e00-\u9fff-]/g, '') || 'heading'
+      tokens[idx].attrSet('id', id)
+    }
+    return defaultRender(tokens, idx, options, env, self)
+  }
+}
+md.use(headingIdPlugin)
+
+// ===== 数学公式预处理（在 markdown-it 之前） =====
+const processMath = (text: string): { html: string; placeholders: Map<string, string> } => {
+  const placeholders = new Map<string, string>()
+  let idx = 0
+  const ph = () => `%%MATH_${idx++}%%`
+
+  let html = text
+
+  // 块级公式 $$...$$
   html = html.replace(/\$\$([\s\S]*?)\$\$/g, (_m, formula) => {
-    const displayHtml = katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })
-    const ph = `%%MATH-${mathPlaceholders.length}%%`
-    mathPlaceholders.push({ placeholder: ph, html: displayHtml })
-    return ph
+    const key = ph()
+    placeholders.set(key, katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false }))
+    return key
   })
+  // 块级公式 \[...\]
   html = html.replace(/\\\[([\s\S]*?)\\\]/g, (_m, formula) => {
-    const displayHtml = katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })
-    const ph = `%%MATH-${mathPlaceholders.length}%%`
-    mathPlaceholders.push({ placeholder: ph, html: displayHtml })
-    return ph
+    const key = ph()
+    placeholders.set(key, katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false }))
+    return key
   })
+  // 行内公式 $...$
   html = html.replace(/\$(.+?)\$/g, (_m, formula) => {
     const trimmed = formula.trim()
-    // skip currency amounts like $100, $5.99M
     if (/^\d[\d.,]*[kMBT]?$/.test(trimmed)) return _m
-    // skip text with spaces but no LaTeX symbols (e.g. mis-matched $ pairs)
     if (/\s/.test(trimmed) && !/[\\^_{}]/.test(trimmed)) return _m
     try {
-      const inlineHtml = katex.renderToString(trimmed, { displayMode: false, throwOnError: true })
-      const ph = `%%MATH-${mathPlaceholders.length}%%`
-      mathPlaceholders.push({ placeholder: ph, html: inlineHtml })
-      return ph
+      const key = ph()
+      placeholders.set(key, katex.renderToString(trimmed, { displayMode: false, throwOnError: true }))
+      return key
     } catch {
       return _m
     }
   })
+  // 行内公式 \(...\)
   html = html.replace(/\\\((.+?)\\\)/g, (_m, formula) => {
-    const inlineHtml = katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false })
-    const ph = `%%MATH-${mathPlaceholders.length}%%`
-    mathPlaceholders.push({ placeholder: ph, html: inlineHtml })
-    return ph
+    const key = ph()
+    placeholders.set(key, katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false }))
+    return key
   })
 
-  // ── 代码块 + 行内代码保护（占位符，避免 * _ # 等被后续正则破坏）──
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    const langClass = lang ? ` class="language-${lang}"` : ''
-    const ph = `%%CODE-${codePlaceholders.length}%%`
-    const escapedCode = code.replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    codePlaceholders.push({
-      placeholder: ph,
-      html: `<div class="code-block-wrapper"><span class="code-copy-btn" data-code="${escapeAttr(code)}"><span class="code-copy-icon"></span></span><pre><code${langClass}>${escapedCode}</code></pre></div>`,
-    })
-    return ph
-  })
-  html = html.replace(/`([^`]+)`/g, (_m, code) => {
-    const ph = `%%CODE-${codePlaceholders.length}%%`
-    codePlaceholders.push({
-      placeholder: ph,
-      html: `<code>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code>`,
-    })
-    return ph
-  })
+  return { html, placeholders }
+}
 
-  // 表格
-  html = html.replace(/^\|(.+)\|\n\|[-| :]+\|\n((?:^\|.+\|\n?)+)/gm, (_m, headerRow, bodyRows) => {
-    const hCells = headerRow.split('|').map((c: string) => c.trim()).filter((c: string) => c)
-    let tbl = '<table><thead><tr>' + hCells.map((c: string) => `<th>${c}</th>`).join('') + '</tr></thead><tbody>'
-    bodyRows.trim().split('\n').forEach((row: string) => {
-      const cells = row.split('|').map((c: string) => c.trim()).filter((c: string) => c)
-      tbl += '<tr>' + cells.map((c: string) => `<td>${c}</td>`).join('') + '</tr>'
-    })
-    return tbl + '</tbody></table>'
-  })
-
-  // 引用块（合并连续行，内部可被后续粗体/斜体/链接规则处理）
-  html = html.replace(/(?:^> .+\n?)+/gm, (match) => {
-    const lines = match.trim().split('\n').map(l => l.replace(/^> /, '')).join('\n')
-    return `<blockquote>${lines}</blockquote>`
-  })
-
-  // 标题（ID 去重，避免重复标题导致 TOC 导航失效）
-  const usedIds = new Set<string>()
-  const makeId = (text: string): string => {
-    let id = text.trim().replace(/\s+/g, '-').replace(/[^\w\u4e00-\u9fff-]/g, '') || 'heading'
-    if (!usedIds.has(id)) { usedIds.add(id); return id }
-    let counter = 2
-    while (usedIds.has(`${id}-${counter}`)) counter++
-    const newId = `${id}-${counter}`
-    usedIds.add(newId)
-    return newId
+// ===== 后处理：还原数学公式 + 代码块包装 =====
+const postProcess = (html: string, mathPlaceholders: Map<string, string>): string => {
+  // 还原数学公式占位符
+  for (const [ph, mathHtml] of mathPlaceholders) {
+    html = html.split(ph).join(mathHtml)
   }
-  html = html.replace(/^###### (.+)$/gm, (_, text) => {
-    return `<h6 id="${makeId(text)}">${text}</h6>`
-  })
-  html = html.replace(/^##### (.+)$/gm, (_, text) => {
-    return `<h5 id="${makeId(text)}">${text}</h5>`
-  })
-  html = html.replace(/^#### (.+)$/gm, (_, text) => {
-    return `<h4 id="${makeId(text)}">${text}</h4>`
-  })
-  html = html.replace(/^### (.+)$/gm, (_, text) => {
-    return `<h3 id="${makeId(text)}">${text}</h3>`
-  })
-  html = html.replace(/^## (.+)$/gm, (_, text) => {
-    return `<h2 id="${makeId(text)}">${text}</h2>`
-  })
-  html = html.replace(/^# (.+)$/gm, (_, text) => {
-    return `<h1 id="${makeId(text)}">${text}</h1>`
-  })
-
-  // ── 粗体与斜体
-  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-  html = html.replace(/(?<!\w)___(.+?)___(?!\w)/g, '<strong><em>$1</em></strong>')
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  html = html.replace(/(?<!\w)__(.+?)__(?!\w)/g, '<strong>$1</strong>')
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  html = html.replace(/(?<!\w)_(.+?)_(?!\w)/g, '<em>$1</em>')
-
-  // strikethrough
-  html = html.replace(/~~(.+?)~~/g, '<del>$1</del>')
-
-  // 分割线
-  html = html.replace(/^---$/gm, '<hr />')
-
-  // 任务列表 (must precede unordered list)
-  html = html.replace(/^[ \t]*[-*+] \[x\] (.+)$/gim, '%%UL%%<li class="task-list-item"><span class="task-checkbox checked"></span> $1</li>')
-  html = html.replace(/^[ \t]*[-*+] \[ \] (.+)$/gim, '%%UL%%<li class="task-list-item"><span class="task-checkbox unchecked"></span> $1</li>')
-
-  // 无序列表（支持缩进子列表：前导空白 + -/*/+ 标记符）
-  html = html.replace(/^[ \t]*[-*+] +(.+)$/gm, '%%UL%%<li>$1</li>')
-  html = html.replace(/(?:%%UL%%<li>.*<\/li>\n?)+/g, (match) => {
-    const nl = match.endsWith('\n') ? '\n' : ''
-    return '<ul>' + match.replace(/%%UL%%/g, '').replace(/\n$/, '') + '</ul>' + nl
-  })
-
-  // 有序列表（支持缩进子列表）
-  html = html.replace(/^[ \t]*\d+\. (.+)$/gm, '%%OL%%<li>$1</li>')
-  html = html.replace(/(?:%%OL%%<li>.*<\/li>\n?)+/g, (match) => {
-    const nl = match.endsWith('\n') ? '\n' : ''
-    return '<ol>' + match.replace(/%%OL%%/g, '').replace(/\n$/, '') + '</ol>' + nl
-  })
-
-  // 图片（必须在链接之前，避免 `![` 被链接正则误匹配）
-  html = html.replace(/!\[(.+?)\]\((.+?)\)/g, '<img src="$2" alt="$1">')
-
-  // 链接
-  html = html.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
-
-  // 段落（占位符 %%CODE_ 和 %%MATH_ 视为块级，不包裹 <p>）
-  const blockPattern = /^<\/?(h[1-6]|ul|ol|li|pre|code|hr|table|blockquote|del)/m
-  const placeholderPattern = /^%%(CODE|MATH)-\d+%%/
-  const lines = html.split('\n')
-  const result: string[] = []
-  let inBlock = false
-  for (const line of lines) {
-    if (blockPattern.test(line) || placeholderPattern.test(line) || line.trim() === '') {
-      inBlock = blockPattern.test(line) || placeholderPattern.test(line)
-      result.push(line)
-    } else if (!inBlock && line.trim()) {
-      result.push(`<p>${line}</p>`)
-    } else {
-      result.push(line)
-    }
-  }
-  html = result.join('\n')
-
-  // 合并被子列表打断的相邻 <ol> 块，保持有序列表序号连续
-  html = html.replace(/<\/li><\/ol>(\s*(?:<ul>[\s\S]*?<\/ul>\s*)*)<ol>/g, '</li>$1')
-
-  // ── 还原占位符（先数学后代码）──
-  for (const { placeholder, html: mathHtml } of mathPlaceholders) {
-    html = html.replace(placeholder, mathHtml)
-  }
-  for (const { placeholder, html: codeHtml } of codePlaceholders) {
-    html = html.replace(placeholder, codeHtml)
-  }
-
   return html
+}
+
+// 修复与上文连在一起的标题标记（无换行的 #/##/###）
+// 注意：用 [^\n#] 防止匹配到行首的 ## （避免把 ## 拆成 #\n\n#）
+const fixConcatHeadings = (text: string): string => {
+  return text.replace(/([^\n#])(#{1,6}\s)/g, '$1\n\n$2')
+}
+
+// ===== Markdown 转 HTML =====
+const mdToHtml = (text: string): string => {
+  const fixed = fixConcatHeadings(text)
+  const { html: preprocessed, placeholders } = processMath(fixed)
+  const rendered = md.render(preprocessed)
+  return postProcess(rendered, placeholders)
 }
 
 // ===== 提取标题用于 TOC =====
@@ -277,33 +224,55 @@ interface Heading {
   level: number
 }
 
+function stripInlineMarkdown(text: string): string {
+  return text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/_(.+?)_/g, '$1')
+    .replace(/~~(.+?)~~/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .trim()
+}
+
 const headings = computed<Heading[]>(() => {
   const result: Heading[] = []
   const seenIds = new Set<string>()
-  const lines = props.content.split('\n')
-  for (const line of lines) {
-    const match = line.match(/^(#{1,6})\s+(.+)$/)
-    if (match) {
-      const level = match[1].length
-      const text = match[2].trim()
-      let id = text.replace(/\s+/g, '-').replace(/[^\w\u4e00-\u9fff-]/g, '') || 'heading'
-      if (seenIds.has(id)) {
-        let counter = 2
-        while (seenIds.has(`${id}-${counter}`)) counter++
-        id = `${id}-${counter}`
+
+  // 从 markdown-it token 流中提取标题（比正则更可靠）
+  const tokens = md.parse(props.content, {})
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].type === 'heading_open') {
+      const level = parseInt(tokens[i].tag.slice(1), 10)
+      const inlineToken = tokens[i + 1]
+      if (inlineToken?.type === 'inline') {
+        const text = stripInlineMarkdown(inlineToken.content)
+        let id = text.replace(/\s+/g, '-').replace(/[^\w\u4e00-\u9fff-]/g, '') || 'heading'
+        if (seenIds.has(id)) {
+          let counter = 2
+          while (seenIds.has(`${id}-${counter}`)) counter++
+          id = `${id}-${counter}`
+        }
+        seenIds.add(id)
+        result.push({ id, text, level })
       }
-      seenIds.add(id)
-      result.push({ id, text, level })
     }
   }
   return result
 })
 
+// 剥离 [CONTROL] ... ---CONTROL_END--- 控制块（兼容已有消息）
+function stripControlBlock(text: string): string {
+  return text.replace(/\[CONTROL\][\s\S]*?---CONTROL_END---/g, '').trim()
+}
+
 // ===== 消毒 HTML =====
 const sanitizedHtml = computed(() => {
-  const rawHtml = mdToHtml(props.content)
+  const rawHtml = mdToHtml(stripControlBlock(props.content))
   return DOMPurify.sanitize(rawHtml, {
-    ADD_ATTR: ['target', 'rel', 'data-code'],
+    ADD_ATTR: ['id', 'target', 'rel', 'data-code', 'type', 'checked', 'disabled'],
     ALLOWED_TAGS: [
       'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
       'p', 'br', 'hr',
@@ -311,7 +280,8 @@ const sanitizedHtml = computed(() => {
       'pre', 'code',
       'strong', 'em', 'a', 'span', 'div',
       'table', 'thead', 'tbody', 'tr', 'th', 'td',
-      'blockquote', 'img', 'sup', 'sub', 'del'
+      'blockquote', 'img', 'sup', 'sub', 'del',
+      'input'
     ]
   })
 })
@@ -345,6 +315,7 @@ const scrollToHeading = (id: string) => {
 }
 
 // 滚动监听高亮当前标题
+let scrollContainer: HTMLElement | null = null
 const onScroll = () => {
   if (!contentRef.value) return
   const hTags = contentRef.value.querySelectorAll('h1, h2, h3, h4, h5, h6')
@@ -361,8 +332,12 @@ const onScroll = () => {
 }
 
 onMounted(() => {
-  const container = contentRef.value?.closest('.overflow-y-auto') || contentRef.value
-  container?.addEventListener('scroll', onScroll)
+  scrollContainer = contentRef.value?.closest('.overflow-y-auto') || contentRef.value
+  scrollContainer?.addEventListener('scroll', onScroll)
+})
+
+onUnmounted(() => {
+  scrollContainer?.removeEventListener('scroll', onScroll)
 })
 </script>
 
@@ -627,8 +602,14 @@ onMounted(() => {
   margin: 0;
 }
 
-.markdown-content :deep(ul),
+.markdown-content :deep(ul) {
+  list-style: disc;
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
 .markdown-content :deep(ol) {
+  list-style: decimal;
   margin: 8px 0;
   padding-left: 24px;
 }
@@ -642,8 +623,12 @@ onMounted(() => {
   list-style: none;
   margin-left: -20px;
 }
-.markdown-content :deep(.task-checkbox) {
-  display: inline-block;
+.markdown-content :deep(.contains-task-list) {
+  padding-left: 0;
+}
+.markdown-content :deep(input[type="checkbox"]) {
+  appearance: none;
+  -webkit-appearance: none;
   width: 16px;
   height: 16px;
   border: 2px solid var(--lt-border);
@@ -651,18 +636,20 @@ onMounted(() => {
   margin-right: 8px;
   vertical-align: text-bottom;
   position: relative;
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.markdown-content :deep(.task-checkbox.checked) {
+.markdown-content :deep(input[type="checkbox"]:checked) {
   background: var(--el-color-primary);
   border-color: var(--el-color-primary);
 }
-.markdown-content :deep(.task-checkbox.checked)::after {
+.markdown-content :deep(input[type="checkbox"]:checked)::after {
   content: '';
   position: absolute;
-  left: 4px;
-  top: 1px;
-  width: 4px;
-  height: 8px;
+  left: 3px;
+  top: 0px;
+  width: 5px;
+  height: 9px;
   border: solid #fff;
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
@@ -725,5 +712,42 @@ onMounted(() => {
 /* highlight.js 主题微调 */
 .markdown-content :deep(.hljs) {
   background: transparent !important;
+  color: var(--lt-text-primary) !important;
+}
+/* highlight.js github.css 硬编码了 padding，需覆盖 */
+.markdown-content :deep(pre code.hljs) {
+  padding: 0 !important;
+  display: block;
+  overflow-x: auto;
+}
+.markdown-content :deep(code.hljs) {
+  padding: 2px 6px !important;
+}
+
+/* 暗色模式：覆盖 github.css 的硬编码亮色 token 颜色 */
+:root[data-theme="dark"] .markdown-content :deep(.hljs-keyword),
+:root[data-theme="dark"] .markdown-content :deep(.hljs-selector-tag),
+:root[data-theme="dark"] .markdown-content :deep(.hljs-built_in) {
+  color: #ff7b72 !important;
+}
+:root[data-theme="dark"] .markdown-content :deep(.hljs-string),
+:root[data-theme="dark"] .markdown-content :deep(.hljs-attr) {
+  color: #a5d6ff !important;
+}
+:root[data-theme="dark"] .markdown-content :deep(.hljs-comment),
+:root[data-theme="dark"] .markdown-content :deep(.hljs-quote) {
+  color: #8b949e !important;
+}
+:root[data-theme="dark"] .markdown-content :deep(.hljs-function),
+:root[data-theme="dark"] .markdown-content :deep(.hljs-title) {
+  color: #d2a8ff !important;
+}
+:root[data-theme="dark"] .markdown-content :deep(.hljs-number),
+:root[data-theme="dark"] .markdown-content :deep(.hljs-literal) {
+  color: #79c0ff !important;
+}
+:root[data-theme="dark"] .markdown-content :deep(.hljs-type),
+:root[data-theme="dark"] .markdown-content :deep(.hljs-class .hljs-title) {
+  color: #ffa657 !important;
 }
 </style>

@@ -24,6 +24,7 @@ import {
 import { useProfileStore } from '@/stores/profile'
 import { usePlanStore } from '@/stores/plan'
 import { useResourceStore } from '@/stores/resource'
+import { usePushStore } from '@/stores/push'
 import { apiFetch } from '@/utils/api'
 import type { CourseTextbook, ChapterNode, ResourcePack } from '@/types'
 import DashboardIcon from '@/components/icons/DashboardIcon.vue'
@@ -32,6 +33,7 @@ const router = useRouter()
 const profile = useProfileStore()
 const planStore = usePlanStore()
 const resourceStore = useResourceStore()
+const pushStore = usePushStore()
 
 echarts.use([RadarChart, CanvasRenderer])
 
@@ -162,8 +164,25 @@ const radarOption = computed(() => ({
 const profileVersion = computed(() => profile.profileVersion)
 const profileUpdatedAt = computed(() => profile.updatedAt)
 
-// ===== 下一步推荐 (基于真实 Plan/Profile 数据) =====
+// ===== 下一步推荐 (优先使用服务端推送推荐，fallback 到 Plan/Profile 数据) =====
 const nextRecommendation = computed(() => {
+  // 优先：服务端精准推送推荐
+  const apiRec = pushStore.mainRecommendation
+  if (apiRec) {
+    return {
+      title: `攻克「${apiRec.knowledgePoint || apiRec.title}」`,
+      knowledgePoint: apiRec.knowledgePoint || apiRec.title,
+      reason: apiRec.reasons?.map(r => r.label).filter(Boolean) || ['基于学习画像推荐'],
+      reasonDetails: apiRec.reasons?.map(r => r.detail).filter(Boolean) || [],
+      estimatedMinutes: apiRec.estimatedMinutes || 15,
+      resourcePackId: apiRec.packId,
+      confidence: apiRec.confidence as 'high' | 'medium' | 'low',
+      sourcesCount: 0,
+      qualityScore: 0,
+    }
+  }
+
+  // Fallback: 基于当前 Plan/Profile 数据
   const currentAct = planStore.currentActivity
   const currentMod = planStore.currentModule
 
@@ -177,6 +196,7 @@ const nextRecommendation = computed(() => {
       title: currentAct.title || '推荐学习活动',
       knowledgePoint: currentMod.title || '推荐知识点',
       reason: reasons.length > 0 ? reasons : ['基于你的学习画像推荐'],
+      reasonDetails: [],
       estimatedMinutes: currentAct.estimatedMinutes || 15,
       resourcePackId: currentAct.resource?.resourcePackId || '',
       confidence: 'high' as const,
@@ -191,6 +211,7 @@ const nextRecommendation = computed(() => {
       title: `攻克「${weakTags.value[0]}」`,
       knowledgePoint: weakTags.value[0],
       reason: ['薄弱项练习', '个性化推荐'],
+      reasonDetails: [],
       estimatedMinutes: profilePace.value,
       resourcePackId: '',
       confidence: 'medium' as const,
@@ -286,6 +307,10 @@ onMounted(() => {
   fetchTextbook()
   planStore.fetchPlan('default')
   resourceStore.fetchPacks('default')
+  // 获取服务端精准推送推荐
+  if (activeCourseId.value) {
+    pushStore.fetchRecommendations(activeCourseId.value)
+  }
 })
 </script>
 
@@ -369,11 +394,11 @@ onMounted(() => {
         </el-col>
       </el-row>
 
-      <!-- 2. 中部两列：下一步推荐 + 画像快照 -->
+      <!-- 2. 中部两列：下一步推荐 + 学习画像 -->
       <el-row :gutter="20">
-        <!-- 左：下一步推荐 -->
+        <!-- 左：下一步推荐 + 教材信息 -->
                                 <el-col :xs="24" :lg="14" class="mb-4">
-          <el-card shadow="never" class="h-full" style="border-radius: 12px; border: 1px solid var(--lt-border);">
+          <el-card shadow="never" class="mb-4" style="border-radius: 12px; border: 1px solid var(--lt-border);">
               <template #header>
                 <div class="flex items-center justify-between">
                   <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
@@ -431,16 +456,22 @@ onMounted(() => {
                     为什么推荐这个？
                   </p>
                   <div class="flex flex-wrap gap-2">
-                    <el-tag
+                    <el-tooltip
                       v-for="(reason, ridx) in nextRecommendation.reason"
                       :key="ridx"
-                      size="small"
-                      type="info"
-                      effect="plain"
-                      class="text-xs max-w-full"
+                      :content="nextRecommendation.reasonDetails?.[ridx] || reason"
+                      placement="top"
+                      :disabled="!nextRecommendation.reasonDetails?.[ridx]"
                     >
-                      {{ reason }}
-                    </el-tag>
+                      <el-tag
+                        size="small"
+                        type="info"
+                        effect="plain"
+                        class="text-xs max-w-full cursor-help"
+                      >
+                        {{ reason }}
+                      </el-tag>
+                    </el-tooltip>
                   </div>
                 </div>
 
@@ -464,14 +495,30 @@ onMounted(() => {
                 </div>
                 <el-progress :percentage="pathProgress" :stroke-width="6" />
               </div>
+
+              <!-- 次要推荐列表 -->
+              <div v-if="pushStore.secondaryRecommendations.length > 0" class="mt-6 pt-4 border-t" style="border-color: var(--lt-border);">
+                <p class="text-xs font-semibold mb-3" style="color: var(--lt-text-auxiliary);">你可能也需要：</p>
+                <div
+                  v-for="item in pushStore.secondaryRecommendations"
+                  :key="item.packId"
+                  class="flex items-center justify-between py-2 px-2 rounded-md cursor-pointer hover:bg-[var(--lt-bg-page)] transition-colors"
+                  @click="router.push(`/library?packId=${item.packId}`)"
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-xs flex-shrink-0">{{ item.resourceCount > 1 ? '🧩' : '📄' }}</span>
+                    <span class="text-sm truncate" style="color: var(--lt-text-primary);">{{ item.title }}</span>
+                    <el-tag v-if="item.weaknessMatch > 0.5" size="small" type="danger" effect="plain" class="text-xs flex-shrink-0">薄弱项</el-tag>
+                    <el-tag v-else-if="item.pathMatch > 0.5" size="small" type="primary" effect="plain" class="text-xs flex-shrink-0">路径匹配</el-tag>
+                  </div>
+                  <span class="text-xs flex-shrink-0 ml-2" style="color: var(--lt-text-auxiliary);">{{ item.estimatedMinutes }}min</span>
+                </div>
+              </div>
             </div>
           </el-card>
-        </el-col>
 
-        <!-- 右：教材信息 + 画像快照 -->
-                                <el-col :xs="24" :lg="10" class="mb-4">
           <!-- 教材信息卡片 -->
-          <el-card shadow="never" class="mb-4" style="border-radius: 12px; border: 1px solid var(--lt-border);">
+          <el-card shadow="never" style="border-radius: 12px; border: 1px solid var(--lt-border);">
             <template #header>
               <div class="flex items-center justify-between">
                 <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
@@ -503,15 +550,18 @@ onMounted(() => {
               <p class="text-sm" style="color: var(--lt-text-placeholder);">暂无教材信息</p>
             </div>
           </el-card>
-          <!-- 画像快照 -->
-          <el-card shadow="never" style="border-radius: 12px; border: 1px solid var(--lt-border);">
+        </el-col>
+
+        <!-- 右：学习画像 -->
+                                <el-col :xs="24" :lg="10" class="mb-4" style="display: flex; flex-direction: column;">
+          <el-card shadow="never" style="border-radius: 12px; border: 1px solid var(--lt-border); flex: 1;">
               <template #header>
                 <div class="flex items-center justify-between">
                   <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
                     <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--lt-success), #28A745);">
                       <el-icon size="14" color="white"><User /></el-icon>
                     </div>
-                    画像快照
+                    学习画像
                   </span>
                   <el-button link type="primary" size="small" @click="goToChat" style="color: var(--lt-brand);">
                     详细画像 <el-icon><Right /></el-icon>
@@ -520,12 +570,12 @@ onMounted(() => {
               </template>
 
               <div class="space-y-4">
-                                <!-- 迷你雷达图：蓝线 #2B6FFF + 浅蓝填充 -->
+                                <!-- 迷你雷达图 -->
                 <div class="h-52 w-full rounded-lg p-2" style="background-color: var(--lt-bg-page);">
                   <v-chart class="w-full h-full" :option="radarOption" autoresize />
                 </div>
 
-                                <!-- 标签云：分区豁免规则，标题用中性色 -->
+                                <!-- 标签云 -->
                 <div class="space-y-2.5">
                   <div>
                     <span class="text-xs block mb-1.5" style="color: var(--lt-text-secondary);">
@@ -604,6 +654,8 @@ onMounted(() => {
       </el-row>
 
             <!-- 3. 底部：最近资源包列表 -->
+      <el-row :gutter="20">
+        <el-col :span="24">
             <el-card shadow="never" style="border: 1px solid var(--lt-border); border-radius: 12px;">
         <template #header>
           <div class="flex items-center justify-between">
@@ -618,7 +670,7 @@ onMounted(() => {
         </template>
 
         <div class="-mx-4">
-          <el-table :data="recentPacks" style="width: 100%" stripe>
+          <el-table :data="recentPacks" style="width: 100%" stripe empty-text="暂无资源包数据">
             <el-table-column label="资源包名称" min-width="180">
               <template #default="{ row }">
                                 <div class="flex items-center gap-2">
@@ -666,6 +718,8 @@ onMounted(() => {
           </el-table>
         </div>
       </el-card>
+        </el-col>
+      </el-row>
     </template>
   </div>
 

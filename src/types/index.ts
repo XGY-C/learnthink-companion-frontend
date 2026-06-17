@@ -189,27 +189,6 @@ export interface Profile {
   last_trigger: 'chat' | 'quiz' | 'path_update' | 'manual'
 }
 
-/** 单个维度变更（ProfileDelta 子结构） */
-export interface ProfileDimensionChange {
-  key: ProfileDimensionKey
-  label: string
-  action: 'upsert' | 'append' | 'remove' | 'set'
-  before: any | null
-  after: any | null
-  confidence: number     // 本次变更置信度，<0.6 不触发更新
-  reason: string         // 变更原因，引用用户原话
-}
-
-/** 画像增量（对话/行为后的画像变化） */
-export interface ProfileDelta {
-  changed: ProfileDimensionChange[]
-  summary: string[]      // 前端轻提示，如 ["知识基础：新增薄弱点「优先队列」"]
-  from_version: number
-  to_version: number
-  trigger: 'chat' | 'quiz' | 'path_update' | 'manual'
-  updated_at: string     // ISO 8601
-}
-
 // ---------- 以下为前端可视化用的简化类型（保持兼容） ----------
 
 /** 画像维度（雷达图/标签云用，前端展示模型） */
@@ -554,6 +533,57 @@ export interface QuizQuestion {
   analysis: string
   difficulty: number
   tags?: { mistakes?: string[]; knowledge?: string[] }
+}
+
+// ========== 精准推送（Push）相关类型 ==========
+
+/** 推送理由 */
+export interface PushReason {
+  dimension: string      // path_match / weakness_match / interest_match / general
+  label: string          // 简短标签
+  detail: string         // 详细描述
+}
+
+/** 已评分资源包（推荐列表项） */
+export interface ScoredPack {
+  packId: string
+  title: string
+  knowledgePoint: string
+  pathMatch: number
+  weaknessMatch: number
+  interestMatch: number
+  confidence: 'high' | 'medium' | 'low'
+  estimatedMinutes: number
+  resourceCount: number
+  reasons: PushReason[]
+  createdAt: string | null
+}
+
+/** Dashboard 推荐响应 */
+export interface RecommendationResponse {
+  main: ScoredPack | null
+  secondary: ScoredPack[]
+}
+
+/** 推送 SSE 事件负载 */
+export interface PushEvent {
+  type: 'push_resource_ready' | 'push_weakness_found' | 'push_path_next'
+  notificationId: string
+  title: string
+  message: string
+  refId: string
+  refType: string
+  pathMatch: number
+  weaknessMatch: number
+  interestMatch: number
+  reasons: PushReason[]
+  createdAt: string
+}
+
+/** 推送通知列表响应 */
+export interface PushNotificationListResponse {
+  notifications: AppNotification[]
+  unreadCount: number
 }
 
 /** Activity 提交响应 */

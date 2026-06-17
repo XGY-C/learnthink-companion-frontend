@@ -46,6 +46,12 @@ const mobileRoutes = [
         meta: { title: '学习' }
       },
       {
+        path: 'code',
+        name: 'code-learn-m',
+        component: () => import('@/views/CodeLearnView.vue'),
+        meta: { title: '代码学习' }
+      },
+      {
         path: 'library',
         name: 'library-m',
         component: () => import('@/views/mobile/LibraryMobile.vue'),
@@ -105,6 +111,12 @@ const pcRoutes = [
         meta: { title: '学习', hideSidebar: true }
       },
       {
+        path: 'code',
+        name: 'code-learn',
+        component: () => import('@/views/CodeLearnView.vue'),
+        meta: { title: '代码学习', hideSidebar: true }
+      },
+      {
         path: 'library',
         name: 'library',
         component: () => import('@/views/LibraryView.vue')
@@ -118,6 +130,12 @@ const pcRoutes = [
         path: 'profile',
         name: 'profile',
         component: () => import('@/views/ProfileView.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'notifications',
+        name: 'notifications',
+        component: () => import('@/views/NotificationListView.vue'),
         meta: { requiresAuth: true }
       },
     ]

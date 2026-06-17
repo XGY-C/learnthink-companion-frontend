@@ -140,6 +140,15 @@ const versionText = computed(() =>
 const updatedText = computed(() =>
   profile.fullProfile?.updated_at ?? profile.updatedAt
 )
+
+// v3: read from new display_profile format
+const displayProfile = computed(() => profile.displayProfile)
+const hasNewFormat = computed(() => displayProfile.value != null)
+const coreSummaryText = computed(() => {
+  if (displayProfile.value?.core?.summary) return displayProfile.value.core.summary
+  if (displayProfile.value?.overview) return displayProfile.value.overview
+  return null
+})
 </script>
 
 <template>
@@ -207,6 +216,15 @@ const updatedText = computed(() =>
         </div>
       </div>
 
+      <!-- ===== 新格式摘要（当 display_profile 存在时显示）===== -->
+      <div v-if="hasNewFormat && coreSummaryText" class="rounded-xl p-3" style="background: linear-gradient(135deg, rgba(124, 92, 252, 0.05), rgba(43, 111, 255, 0.04)); border: 1px solid var(--lt-ai-light-7);">
+        <h3 class="text-xs font-semibold mb-1.5 flex items-center gap-1.5" style="color: var(--lt-ai);">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          画像摘要
+        </h3>
+        <p class="text-xs leading-relaxed" style="color: var(--lt-text-secondary);">{{ coreSummaryText }}</p>
+      </div>
+
       <!-- ===== 核心层详情 ===== -->
       <div class="rounded-xl p-4" style="background: linear-gradient(135deg, rgba(43, 111, 255, 0.04), var(--lt-brand-lightest)); border: 1px solid var(--lt-brand-light-7);">
         <h3 class="text-sm font-bold mb-3 flex items-center gap-1.5" style="color: var(--lt-brand);">
@@ -253,11 +271,11 @@ const updatedText = computed(() =>
         <div class="space-y-2.5">
           <div class="flex items-center justify-between text-sm">
             <span style="color: var(--lt-text-auxiliary);">认知偏好</span>
-            <span class="font-medium" style="color: var(--lt-text-primary);">{{ styleLabel }} · {{ densityLabel }}</span>
+            <span class="font-medium" style="color: var(--lt-text-primary);">{{ styleLabel }}<span v-if="densityLabel"> · {{ densityLabel }}</span></span>
           </div>
           <div class="flex items-center justify-between text-sm">
             <span style="color: var(--lt-text-auxiliary);">学习节奏</span>
-            <span class="font-medium" style="color: var(--lt-text-primary);">{{ paceMinutes }} 分钟/天 · {{ paceUrgency }}</span>
+            <span class="font-medium" style="color: var(--lt-text-primary);">{{ paceMinutes }}<span v-if="paceMinutes !== '?'"> 分钟/天</span><span v-if="paceUrgency"> · {{ paceUrgency }}</span></span>
           </div>
         </div>
       </div>

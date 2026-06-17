@@ -5,6 +5,7 @@ import { ChatLineRound, Plus, Delete, Fold, Expand, MagicStick } from '@element-
 import { useRouter } from 'vue-router'
 import { useChatSSE } from '@/composables/useChatSSE'
 import type { ChatMessage, Suggestion } from '@/composables/useChatSSE'
+import { useProfileStore } from '@/stores/profile'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import { apiFetch } from '@/utils/api'
 import ThoughtChainTimeline from '@/components/ThoughtChainTimeline.vue'
@@ -16,18 +17,25 @@ import PlanEditor from '@/components/PlanEditor.vue'
 import VideoLecturePlayer from '@/components/video/VideoLecturePlayer.vue'
 import VideoRecordCard from '@/components/video/VideoRecordCard.vue'
 import { useVideoLectureStore } from '@/stores/videoLecture'
+import ClarificationCard from '@/components/tutoring/ClarificationCard.vue'
+import AnalysisBar from '@/components/tutoring/AnalysisBar.vue'
+import AnswerContainer from '@/components/tutoring/AnswerContainer.vue'
 
 const router = useRouter()
 const chat = useChatSSE()
+const profile = useProfileStore()
 const videoStore = useVideoLectureStore()
 
-/** Mode options for the chat mode toggle */
+/** Mode options for the chat mode toggle — 辅导模式合并了原 tutoring 和 lecture */
 const modes = [
   { value: 'chat' as const, label: '💬 对话' },
-  { value: 'lecture' as const, label: '📖 讲解' },
+  { value: 'lecture' as const, label: '🎬 辅导' },
   { value: 'resource' as const, label: '📝 资源' },
   { value: 'plan' as const, label: '🗺 规划' },
 ]
+
+// ===== Video Lecture Toggle =====
+const isVideoLectureActive = ref(false)
 
 // ===== Profile Panel =====
 const PROFILE_STORAGE_KEY = 'lt-profile-panel'
@@ -123,25 +131,26 @@ function scrollToBottom() {
 }
 
 // ===== Action bar handlers =====
-function handleSuggestionClick(suggestion: Suggestion, msg: ChatMessage) {
+async function handleSuggestionClick(suggestion: Suggestion, msg: ChatMessage) {
   if (suggestion.sendAs.startsWith('__generate_plan__:')) {
     const topic = suggestion.sendAs.slice('__generate_plan__:'.length)
     msg.suggestions = undefined
-    chat.confirmPlanGeneration(topic)
+    await chat.confirmPlanGeneration(topic)
   } else if (suggestion.sendAs.startsWith('__generate__:')) {
     const topic = suggestion.sendAs.slice('__generate__:'.length)
     msg.suggestions = undefined
-    chat.confirmGeneration(topic)
+    await chat.confirmGeneration(topic)
   } else if (suggestion.sendAs.startsWith('/studio')) {
     msg.suggestions = undefined
     router.push(suggestion.sendAs)
   } else if (suggestion.sendAs) {
     msg.suggestions = undefined
-    chat.sendMessage(suggestion.sendAs)
+    await chat.sendMessage(suggestion.sendAs)
   } else {
     msg.suggestions = undefined
     msg.text = (msg.text || '') + '\n\n_（已了解，随时可以说「生成」来启动）_'
   }
+  scrollToBottom()
 }
 
 async function copyMessage(msg: ChatMessage) {
@@ -151,7 +160,7 @@ async function copyMessage(msg: ChatMessage) {
   } catch { ElMessage.error('复制失败') }
 }
 
-function regenerateMessage(_msg: ChatMessage, idx: number) {
+async function regenerateMessage(_msg: ChatMessage, idx: number) {
   const session = chat.activeSession.value
   if (!session || chat.isStreaming.value) return
   let userText = ''
@@ -161,7 +170,10 @@ function regenerateMessage(_msg: ChatMessage, idx: number) {
       break
     }
   }
-  if (userText) chat.sendMessage(userText)
+  if (userText) {
+    await chat.sendMessage(userText)
+    scrollToBottom()
+  }
 }
 
 function toggleLike(msg: ChatMessage) {
@@ -264,15 +276,27 @@ async function handleDeleteSession(sessionId: string) {
   ElMessage.success('会话已删除')
 }
 
+function handleSessionClick(sess: any) {
+  chat.switchSession(sess.id)
+}
+
 function handleSendMessage() {
   const text = inputMessage.value.trim()
   if (!text || chat.isStreaming.value) return
   inputMessage.value = ''
-  if (chat.chatMode.value === 'lecture') {
+  if (chat.chatMode.value === 'lecture' && isVideoLectureActive.value) {
     chat.sendLectureMessage(text)
+  } else if (chat.chatMode.value === 'lecture') {
+    // 辅导模式（未开启视频）→ 图文辅导，内联在对话流中渲染
+    chat.sendTutoringMessage(text)
   } else {
     chat.sendMessage(text)
   }
+  scrollToBottom()
+}
+
+function handleVideoLectureClick() {
+  isVideoLectureActive.value = !isVideoLectureActive.value
 }
 
 async function handleTriggerGenerate() {
@@ -282,8 +306,36 @@ async function handleTriggerGenerate() {
     await chat.triggerGenerate(topic)
     generateTopic.value = ''
     showGeneratePanel.value = false
+    scrollToBottom()
   } catch (err: any) {
     ElMessage.warning(err.message || '生成失败')
+  }
+}
+
+async function handleAcceptGenerationOffer(msg: ChatMessage) {
+  try {
+    await chat.acceptGenerationOffer(msg)
+    scrollToBottom()
+  } catch (err: any) {
+    ElMessage.warning(err.message || '操作失败')
+  }
+}
+
+async function handleConfirmEditedPlan(planJson: string, msg: ChatMessage) {
+  try {
+    await chat.confirmEditedPlan(planJson, msg._planOffer?.requirementText || '', msg._planOffer?.launchTopic || '学习计划')
+    scrollToBottom()
+  } catch (err: any) {
+    ElMessage.warning(err.message || '操作失败')
+  }
+}
+
+async function handleWelcomeButtonClick(text: string) {
+  try {
+    await chat.sendMessage(text)
+    scrollToBottom()
+  } catch (err: any) {
+    ElMessage.warning(err.message || '操作失败')
   }
 }
 
@@ -297,15 +349,23 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  chat.fireEndSessionOnLeave()
+  window.removeEventListener('beforeunload', onBeforeUnload)
   if (messageObserver) { messageObserver.disconnect(); messageObserver = null }
   stopAudio()
 })
+
+function onBeforeUnload() {
+  chat.fireEndSessionOnLeave()
+}
+window.addEventListener('beforeunload', onBeforeUnload)
 
 // Watch video lecture close → insert record card
 let prevPhase: string = videoStore.phase
 watch(() => videoStore.phase, (newPhase) => {
   if (prevPhase !== 'idle' && newPhase === 'idle' && videoStore.lastRecord && !videoStore._isReplaying) {
     chat.onLecturePlayerClose()
+    scrollToBottom()
   }
   prevPhase = newPhase
 })
@@ -317,6 +377,25 @@ function handleVideoReplay() {
   videoStore.replayFromCard(card)
 }
 
+// ===== Tutoring handlers =====
+function handleClarifySubmit(response: { skipped: boolean; selectedOptionId?: string; freeInput?: string }) {
+  chat.sendClarificationResponse(response)
+  scrollToBottom()
+}
+
+function handleSectionAction(sectionId: string, action: string, instruction?: string) {
+  chat.regenerateTutoringSection(sectionId, action, instruction)
+}
+
+function handleTutoringRetry() {
+  if (!chat.tutoringStore.error?.retryable) return
+  const question = [...(chat.activeSession.value?.messages ?? [])]
+    .reverse().find(m => m.role === 'user')?.text
+  if (question) {
+    chat.sendTutoringMessage(question)
+  }
+}
+
 // Watch messages to re-setup minimap observer
 watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], ([, isWelcome]) => {
   if (isWelcome) {
@@ -325,6 +404,16 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
   }
   nextTick(() => setupNavObserver())
 })
+
+// Tutoring: scroll to bottom when content updates
+watch(
+  () => chat.tutoringStore.sectionList.map(s => s.content.length).reduce((a, b) => a + b, 0),
+  () => { if (chat.isStreaming.value) scrollToBottom() }
+)
+watch(
+  () => chat.tutoringStore.status,
+  () => { nextTick(() => scrollToBottom()) }
+)
 </script>
 
 <template>
@@ -347,11 +436,15 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
             class="session-item group relative cursor-pointer rounded-lg px-3 py-2.5 mb-1 transition-all"
             :class="{ 'session-active': sess.id === chat.activeSessionId.value }"
             :style="sess.id === chat.activeSessionId.value ? 'background-color: var(--lt-brand-lightest); border-left: 3px solid var(--lt-brand);' : 'border-left: 3px solid transparent;'"
-            @click="chat.switchSession(sess.id)"
+            @click="handleSessionClick(sess)"
           >
             <div class="flex items-start justify-between">
               <div class="min-w-0 flex-1">
-                <div class="text-sm font-medium truncate" :style="{ color: sess.id === chat.activeSessionId.value ? 'var(--lt-text-primary)' : 'var(--lt-text-secondary)' }">{{ sess.title }}</div>
+                <div class="text-sm font-medium truncate flex items-center gap-1" :style="{ color: sess.id === chat.activeSessionId.value ? 'var(--lt-text-primary)' : 'var(--lt-text-secondary)' }">
+                  <span v-if="sess.type === 'tutoring'" class="flex-shrink-0">📖</span>
+                  <span v-else class="flex-shrink-0">💬</span>
+                  {{ sess.title }}
+                </div>
                 <div class="text-xs mt-0.5 truncate" style="color: var(--lt-text-auxiliary);">{{ sess.lastMessagePreview || (sess.messageCount ? sess.messageCount + ' 条消息' : '') }}</div>
               </div>
               <button class="opacity-0 group-hover:opacity-100 flex-shrink-0 ml-1 p-0.5 rounded transition-all hover:bg-red-50" style="color: var(--lt-text-disabled); border: none; background: none; cursor: pointer;" @click.stop="handleDeleteSession(sess.id)">
@@ -426,13 +519,13 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
             直接问我知识点，或者聊聊你的学习情况吧
           </p>
           <div class="flex flex-wrap justify-center gap-3">
-            <el-button size="large" class="text-sm" style="border-radius: 14px; padding: 12px 22px;" @click="chat.sendMessage('我是计算机大三，在学人工智能导论，平时喜欢看代码')">
+            <el-button size="large" class="text-sm" style="border-radius: 14px; padding: 12px 22px;" @click="handleWelcomeButtonClick('我是计算机大三，在学人工智能导论，平时喜欢看代码')">
               我是计算机大三，在学AI导论
             </el-button>
-            <el-button size="large" class="text-sm" style="border-radius: 14px; padding: 12px 22px;" @click="chat.sendMessage('我概率基础还行但贝叶斯公式和A*搜索不太懂')">
+            <el-button size="large" class="text-sm" style="border-radius: 14px; padding: 12px 22px;" @click="handleWelcomeButtonClick('我概率基础还行但贝叶斯公式和A*搜索不太懂')">
               概率还行，贝叶斯不太懂
             </el-button>
-            <el-button size="large" class="text-sm" style="border-radius: 14px; padding: 12px 22px;" @click="chat.sendMessage('我每天能学60分钟，目标是期末考到85分')">
+            <el-button size="large" class="text-sm" style="border-radius: 14px; padding: 12px 22px;" @click="handleWelcomeButtonClick('我每天能学60分钟，目标是期末考到85分')">
               每天60分钟，目标85分
             </el-button>
           </div>
@@ -456,10 +549,49 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
                 @update:expanded="msg.thinking.expanded = $event"
                 class="mb-3"
               />
-              <div v-if="!(msg as any)._generationCard && !(msg as any)._videoRecord" class="assistant-message-body">
+              <div v-if="!(msg as any)._generationCard && !(msg as any)._videoRecord && !(idx === chat.activeTutoringMsgIdx.value && chat.tutoringStore.status !== 'idle')" class="assistant-message-body">
                 <MarkdownViewer v-if="!msg.isStreaming" :content="msg.text" :showToc="false" />
                 <pre v-else class="streaming-text whitespace-pre-wrap text-sm leading-relaxed" style="color: var(--lt-text-primary); font-family: inherit; margin: 0;">{{ msg.text }}</pre>
                 <span v-if="msg.isStreaming && msg.text" class="streaming-cursor" />
+              </div>
+
+              <!-- 图文辅导内联渲染 -->
+              <div v-if="idx === chat.activeTutoringMsgIdx.value && chat.tutoringStore.status !== 'idle'" class="tutoring-inline">
+                <!-- 规划中 -->
+                <div v-if="chat.tutoringStore.status === 'planning'" class="text-center py-8">
+                  <div style="width: 32px; height: 32px; border: 3px solid var(--lt-border); border-top-color: var(--lt-brand); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px;"></div>
+                  <p style="font-size: 14px; color: var(--lt-text-secondary);">正在分析问题...</p>
+                </div>
+
+                <!-- 澄清卡片 -->
+                <ClarificationCard
+                  v-if="chat.tutoringStore.status === 'clarifying' && chat.tutoringStore.clarification"
+                  :clarification="chat.tutoringStore.clarification"
+                  :clarifyWaitSeconds="chat.tutoringStore.clarifyWaitSeconds"
+                  :round="chat.tutoringRound.value"
+                  @submit="handleClarifySubmit"
+                />
+
+                <!-- 分析标签栏 -->
+                <AnalysisBar v-if="chat.tutoringStore.analysis && ['preparing','generating','done'].includes(chat.tutoringStore.status)" class="mb-4" />
+
+                <!-- 准备中 -->
+                <div v-if="chat.tutoringStore.status === 'preparing'" class="text-center py-4">
+                  <p style="font-size: 13px; color: var(--lt-text-auxiliary);">正在准备资料...</p>
+                </div>
+
+                <!-- 解答内容（SectionCards） -->
+                <AnswerContainer
+                  v-if="chat.tutoringStore.sectionList.length > 0"
+                  @action="handleSectionAction"
+                />
+
+                <!-- 错误 -->
+                <div v-if="chat.tutoringStore.status === 'error'" style="background: var(--lt-orange-light-9); border: 1px solid var(--lt-warning); border-radius: var(--lt-radius-lg); padding: 20px; text-align: center;">
+                  <div style="font-size: 32px; margin-bottom: 8px;">⚠️</div>
+                  <h3 style="font-size: 16px; font-weight: 600; color: var(--lt-text-primary); margin-bottom: 4px;">{{ chat.tutoringStore.error?.message || '出错了' }}</h3>
+                  <el-button v-if="chat.tutoringStore.error?.retryable" type="primary" size="small" @click="handleTutoringRetry" style="margin-top: 12px;">重试</el-button>
+                </div>
               </div>
               <template v-if="(msg as any)._generationCard">
                 <div class="assistant-message-body">
@@ -516,7 +648,7 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
                   </div>
                 </div>
                 <div class="offer-actions">
-                  <button class="offer-btn-primary" :disabled="chat.isGenerating.value" @click="chat.acceptGenerationOffer(msg)">
+                  <button class="offer-btn-primary" :disabled="chat.isGenerating.value" @click="handleAcceptGenerationOffer(msg)">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>确认启动
                   </button>
                   <button class="offer-btn-ghost" @click="chat.dismissGenerationOffer()">继续聊天</button>
@@ -542,11 +674,11 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
                 :loading="chat.planPreviewLoading.value && !(msg as any)._pendingPlan"
                 :confirmed="!!(msg._planOffer?.confirmed || (msg as any)._pendingPlan?.confirmed)"
                 :on-save="(planJson: string) => chat.updatePlanDraft(planJson)"
-                @confirm="(planJson: string) => chat.confirmEditedPlan(planJson, msg._planOffer?.requirementText || '', msg._planOffer?.launchTopic || '学习计划')"
+                @confirm="(planJson: string) => handleConfirmEditedPlan(planJson, msg)"
                 @cancel="chat.dismissPlanOffer()"
               />
 
-              <div v-if="!(msg as any)._videoRecord" class="ai-action-bar">
+              <div v-if="!(msg as any)._videoRecord && !(idx === chat.activeTutoringMsgIdx.value && chat.tutoringStore.status !== 'idle')" class="ai-action-bar">
                 <button class="ai-action-btn" title="复制" @click="copyMessage(msg)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 </button>
@@ -600,10 +732,30 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
       <!-- 输入区 -->
       <div class="px-4 py-3 bg-white border-t" style="grid-row: 3; border-color: var(--lt-border);">
         <div class="flex gap-3">
+          <!-- 讲解模式：视频讲解按钮 -->
+          <Transition name="video-btn">
+            <button
+              v-if="chat.chatMode.value === 'lecture'"
+              class="video-lecture-btn"
+              :class="{ 
+                'is-active': isVideoLectureActive,
+                'is-loading': videoStore.phase === 'loading' || videoStore.phase === 'darkening' 
+              }"
+              :disabled="chat.isStreaming.value || videoStore.phase !== 'idle'"
+              @click="handleVideoLectureClick"
+              :title="isVideoLectureActive ? '关闭视频讲解' : '开启视频讲解'"
+            >
+              <div class="btn-shine"></div>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" class="btn-icon">
+                <path d="M8 5.14v14l11-7-11-7z"/>
+              </svg>
+            </button>
+          </Transition>
           <el-input
             v-model="inputMessage"
             :placeholder="chat.chatMode.value === 'resource' ? '描述你想生成的资料内容...'
               : chat.chatMode.value === 'plan' ? '聊聊你的学习目标和基础...'
+              : chat.chatMode.value === 'lecture' ? '输入你的问题，获取 AI 辅导解答...'
               : '聊聊你的学习情况，我会帮你定制学习方案...'"
             :disabled="chat.isStreaming.value || chat.isGenerating.value"
             @keyup.enter="handleSendMessage"
@@ -686,6 +838,12 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
   animation: cursor-blink 0.8s ease-in-out infinite;
 }
 @keyframes cursor-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 辅导内联渲染 */
+.tutoring-inline {
+  width: 100%;
+}
 
 .assistant-message-body :deep(.markdown-viewer) { display: block; }
 .assistant-message-body :deep(.markdown-content) { font-size: 15px; line-height: 1.75; }
@@ -1100,6 +1258,138 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
   color: var(--lt-text-primary);
   background: var(--lt-bg-page);
   border-color: var(--lt-border-dark);
+}
+
+/* Video Lecture Button - Premium Design */
+.video-lecture-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1.5px solid var(--lt-ai-light-3);
+  border-radius: 10px;
+  background: 
+    linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 50%),
+    linear-gradient(145deg, #F8F5FF 0%, #EDE5FF 100%);
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 1px 3px rgba(124, 92, 252, 0.1);
+  color: var(--lt-ai);
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+.video-lecture-btn .btn-shine {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    135deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 60%
+  );
+  opacity: 0;
+  transform: rotate(30deg);
+  transition: opacity 0.3s ease;
+}
+.video-lecture-btn .btn-icon {
+  position: relative;
+  z-index: 1;
+  transition: transform 0.2s ease;
+}
+.video-lecture-btn:hover {
+  background: 
+    linear-gradient(135deg, rgba(255,255,255,0.2) 0%, transparent 50%),
+    linear-gradient(145deg, #F0EAFF 0%, #E5DAFF 100%);
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 4px rgba(124, 92, 252, 0.12),
+    0 4px 12px rgba(124, 92, 252, 0.08);
+  transform: translateY(-1px);
+}
+.video-lecture-btn:hover .btn-shine {
+  opacity: 1;
+  animation: shine 0.6s ease forwards;
+}
+.video-lecture-btn:hover .btn-icon {
+  transform: scale(1.08);
+}
+.video-lecture-btn:active {
+  transform: translateY(0);
+  box-shadow: 
+    inset 0 1px 2px rgba(0, 0, 0, 0.1),
+    0 1px 2px rgba(124, 92, 252, 0.1);
+  transition-duration: 0.1s;
+}
+.video-lecture-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 1px 2px rgba(124, 92, 252, 0.04);
+}
+/* Active State */
+.video-lecture-btn.is-active {
+  border-color: var(--lt-ai);
+  background: 
+    linear-gradient(135deg, rgba(255,255,255,0.2) 0%, transparent 40%),
+    linear-gradient(145deg, var(--lt-ai) 0%, var(--lt-ai-light-3) 100%);
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 2px 8px rgba(124, 92, 252, 0.25),
+    0 4px 16px rgba(124, 92, 252, 0.15);
+  color: #fff;
+}
+.video-lecture-btn.is-active:hover {
+  border-color: var(--lt-ai-dark-2);
+  background: 
+    linear-gradient(135deg, rgba(255,255,255,0.25) 0%, transparent 40%),
+    linear-gradient(145deg, var(--lt-ai-dark-2) 0%, var(--lt-ai) 100%);
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 4px 12px rgba(124, 92, 252, 0.3),
+    0 8px 24px rgba(124, 92, 252, 0.18);
+}
+/* Loading State */
+.video-lecture-btn.is-loading {
+  pointer-events: none;
+}
+.video-lecture-btn.is-loading .btn-icon {
+  animation: pulse-icon 1.5s ease-in-out infinite;
+}
+@keyframes shine {
+  0% { transform: rotate(30deg) translateX(-100%); }
+  100% { transform: rotate(30deg) translateX(100%); }
+}
+@keyframes pulse-icon {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.95); }
+}
+
+/* Video Button Transition */
+.video-btn-enter-active {
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.video-btn-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.video-btn-enter-from {
+  opacity: 0;
+  transform: translateX(-8px) scale(0.85);
+  filter: blur(2px);
+}
+.video-btn-leave-to {
+  opacity: 0;
+  transform: translateX(-8px) scale(0.85);
+  filter: blur(2px);
 }
 </style>
 

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiFetch } from '@/utils/api'
-import type { ProfileDimension, Profile, ProfileDelta, ProfileDimensionChange, ProfileDimensionItem, CourseInfo } from '@/types'
+import type { ProfileDimension, Profile, ProfileDimensionItem, CourseInfo } from '@/types'
 
 export const useProfileStore = defineStore('profile', () => {
   // ===== 课程状态（动态加载） =====
@@ -95,7 +95,9 @@ export const useProfileStore = defineStore('profile', () => {
   const updatedAt = ref('刚刚')
 
   const fullProfile = ref<Profile | null>(null)
-  const lastDelta = ref<ProfileDelta | null>(null)
+  const displayProfile = ref<Record<string, any> | null>(null)
+  /** Raw MD profile texts for custom rendering */
+  const profileMd = ref<{ core?: string; learning?: string; knowledge?: string }>({})
 
   const radarData = computed(() =>
     dimensions.value.map(d => ({ name: d.name, value: d.value }))
@@ -146,66 +148,28 @@ export const useProfileStore = defineStore('profile', () => {
     updatedAt.value = '刚刚'
   }
 
-  function applyDelta(delta: ProfileDelta | null) {
-    if (!delta || delta.changed.length === 0) return false
-
-    for (const change of delta.changed) {
-      applyDimensionChange(change)
-    }
-
-    profileVersion.value = `v${delta.to_version}`
-    updatedAt.value = delta.updated_at
-    lastDelta.value = delta
-
-    return true
-  }
-
-  function applyDimensionChange(change: ProfileDimensionChange) {
-    if (!fullProfile.value) {
-      fullProfile.value = {
-        profile_id: '',
-        user_id: '',
-        course_id: '',
-        version: 0,
-        dimensions: [],
-        updated_at: '',
-        last_trigger: 'chat',
-      }
-    }
-    const dims = fullProfile.value.dimensions
-    const idx = dims.findIndex(d => d.key === change.key)
-
-    if (change.action === 'remove' && idx >= 0) {
-      dims.splice(idx, 1)
-    } else if (idx >= 0) {
-      dims[idx].value = change.after ?? dims[idx].value
-      dims[idx].confidence = change.confidence
-      dims[idx].updated_at = new Date().toISOString()
-      dims[idx].source = 'inferred'
-    } else if (change.action !== 'remove') {
-      dims.push({
-        key: change.key,
-        label: change.label,
-        layer: resolveLayer(change.key),
-        value: change.after ?? {},
-        confidence: change.confidence,
-        source: 'inferred',
-        updated_at: new Date().toISOString(),
-      })
-    }
-    fullProfile.value.version = change.confidence >= 0.6 ? (fullProfile.value.version || 0) + 1 : fullProfile.value.version
-  }
-
   function resolveLayer(key: string): 'core' | 'style' | 'auxiliary' {
     if (key === 'knowledge_basis' || key === 'learning_goal') return 'core'
     if (key === 'cognitive_style' || key === 'learning_pace') return 'style'
     return 'auxiliary'
   }
 
-  function loadFromProfile(profileData: Profile) {
+  function loadFromProfile(profileData: Profile, rawData?: Record<string, any>) {
     fullProfile.value = profileData
     profileVersion.value = `v${profileData.version}`
     updatedAt.value = profileData.updated_at
+
+    // v3: store new display_profile structure
+    if (rawData?.display_profile) {
+      displayProfile.value = rawData.display_profile
+    }
+    if (rawData?.core_profile_md || rawData?.learning_profile_md || rawData?.knowledge_profile_md) {
+      profileMd.value = {
+        core: rawData.core_profile_md || undefined,
+        learning: rawData.learning_profile_md || undefined,
+        knowledge: rawData.knowledge_profile_md || undefined,
+      }
+    }
 
     const kbDim = profileData.dimensions.find(d => d.key === 'knowledge_basis')
     if (kbDim) {
@@ -233,7 +197,8 @@ export const useProfileStore = defineStore('profile', () => {
 
   function clearProfile() {
     fullProfile.value = null
-    lastDelta.value = null
+    displayProfile.value = null
+    profileMd.value = {}
     profileVersion.value = 'v0'
     updatedAt.value = ''
     dimensions.value = []
@@ -243,15 +208,29 @@ export const useProfileStore = defineStore('profile', () => {
     const targetCourse = courseId ?? activeCourseId.value
     if (!targetCourse) return
     try {
-      const res = await apiFetch<Profile | Record<string, any>>(
+      const res = await apiFetch<any>(
         `/profile?course_id=${encodeURIComponent(targetCourse)}`
       )
-      const data = res.data as Profile
-      if (!data || !data.dimensions || data.dimensions.length === 0) {
+      const data = res.data as any
+      if (!data) {
         clearProfile()
         return
       }
-      loadFromProfile(data)
+      // Build backward-compatible Profile shape from dimensions (old format)
+      const profileData: Profile = {
+        profile_id: data.profile_id || '',
+        user_id: data.user_id || '',
+        course_id: data.course_id || '',
+        version: data.version || 0,
+        dimensions: data.dimensions || [],
+        updated_at: data.updated_at || '',
+        last_trigger: 'chat',
+      }
+      if (!profileData.dimensions || profileData.dimensions.length === 0) {
+        clearProfile()
+        return
+      }
+      loadFromProfile(profileData, data)
     } catch (err) {
       console.error('loadProfile failed:', err)
     }
@@ -266,9 +245,10 @@ export const useProfileStore = defineStore('profile', () => {
     courses, activeCourseId, activeCourse, currentProfileVersion, coursesLoading, coursesError,
     fetchMyCourses, enrollCourse, leaveCourse, switchCourse, initCourses,
     // 画像
-    dimensions, profileVersion, updatedAt, fullProfile, lastDelta,
+    dimensions, profileVersion, updatedAt, fullProfile,
+    displayProfile, profileMd,
     radarData, tags, pace, preference,
     updateDimension, updateFromDialog,
-    applyDelta, applyDimensionChange, loadFromProfile, refreshProfile, clearProfile,
+    loadFromProfile, refreshProfile, clearProfile,
   }
 })
