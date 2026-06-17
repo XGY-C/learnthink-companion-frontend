@@ -2,6 +2,8 @@ import { ref, computed, watch, reactive, onUnmounted } from 'vue'
 import { useProfileStore } from '@/stores/profile'
 import { usePlanStore } from '@/stores/plan'
 import { useVideoLectureStore } from '@/stores/videoLecture'
+import { useTutoringStore } from '@/stores/tutoring'
+import { useTutoringSSE } from '@/composables/useTutoringSSE'
 import { apiFetch, ensureValidToken } from '@/utils/api'
 import { useSSE } from '@/composables/useSSE'
 import { ElMessageBox } from 'element-plus'
@@ -62,6 +64,12 @@ export interface ChatMessage {
     keyTakeaways: string[]
     icon: 'text' | 'code' | 'diagram' | 'chat'
   }
+  /** Tutoring state — 图文辅导模式内联渲染 */
+  _tutoring?: {
+    active: boolean
+    completed: boolean
+    sessionId: string | null
+  }
 }
 
 export interface ChatSession {
@@ -69,6 +77,7 @@ export interface ChatSession {
   title: string
   messages: ChatMessage[]
   courseId: string
+  type?: 'chat' | 'tutoring'
   createdAt: string
   updatedAt: string
   lastMessagePreview?: string
@@ -153,6 +162,13 @@ export function useChatSSE() {
   /** Resource types detected from the last generation intent, passed to task creation */
   const pendingGenTypes = ref<string[]>([])
 
+  // ===== Tutoring (图文辅导) State =====
+  const tutoringStore = useTutoringStore()
+  const tutoringSSE = useTutoringSSE()
+  const activeTutoringMsgIdx = ref(-1)
+  const tutoringQuestion = ref('')
+  const tutoringRound = ref(1)
+
   // ===== Task Cards =====
   const taskCards = ref<Record<string, TaskCardState>>({})
   const taskSSE = useSSE()
@@ -173,6 +189,26 @@ export function useChatSSE() {
     onGenerationOffer = opts.onGenerationOffer ?? null
   }
 
+  // ===== Track previous session for auto-end =====
+  let lastActiveSessionId = ''
+
+  /** 页面关闭/导航离开时 fire-and-forget 结束会话，使用 keepalive 确保请求送达 */
+  function fireEndSessionOnLeave(sessionId?: string) {
+    const id = sessionId || activeSessionId.value
+    if (!id) return
+    const sess = sessions.value.find(s => s.id === id)
+    if (!sess || sess.messages.length === 0 || sess.profileVersionId || (sess as any)._ended) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    try {
+      fetch(`/api/chat/${id}/end`, {
+        method: 'POST',
+        keepalive: true,
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      }).catch(() => {}).finally(() => { if (sess) (sess as any)._ended = true })
+    } catch {}
+  }
+
   // ===== Session CRUD =====
 
   function createSession() {
@@ -183,6 +219,15 @@ export function useChatSSE() {
       activeSessionId.value = empty.id
       chatId.value = empty.id
       return
+    }
+    // Auto-end the previous session so profile gets updated
+    const prevId = activeSessionId.value
+    const prevSess = sessions.value.find(s => s.id === prevId)
+    if (prevId && prevSess && prevSess.messages.length > 0 && !prevSess.profileVersionId && !(prevSess as any)._ended) {
+      const pid = prevId
+      apiFetch(`/chat/${pid}/end`, { method: 'POST' }).catch(() => {}).finally(() => {
+        if (prevSess) (prevSess as any)._ended = true
+      })
     }
     const newId = crypto.randomUUID()
     sessions.value.unshift({
@@ -206,6 +251,7 @@ export function useChatSSE() {
           id: s.chatId, title: s.title || '新会话',
           messages: [] as ChatMessage[],
           courseId: s.courseId,
+          type: s.type || 'chat',
           createdAt: s.createdAt,
           updatedAt: s.lastMessageAt || s.createdAt,
           lastMessagePreview: s.lastMessagePreview,
@@ -352,8 +398,10 @@ export function useChatSSE() {
         planPreviewData.value = { modules: pp.modules || [], edges: pp.edges || [] }
         planPreviewLoading.value = false
 
-        const planOfferMsg = findPlanOfferMsg(session, 'plan')
-          || [...session.messages].reverse().find(m => m.role === 'assistant')
+        const planOfferMsg = res.data.planOfferMessageIdx != null
+          ? session.messages[res.data.planOfferMessageIdx]
+          : findPlanOfferMsg(session, 'plan')
+            || [...session.messages].reverse().find(m => m.role === 'assistant')
         if (planOfferMsg) {
           const isConfirmed = pp.status === 'decided' || pp.status === 'completed' || pp.status === 'generating' || pp.status === 'ready'
           planOfferMsg._pendingPlan = {
@@ -465,6 +513,14 @@ export function useChatSSE() {
   async function switchSession(sessionId: string) {
     if (!sessionId) return
     if (activeSessionId.value !== sessionId) {
+      // Auto-end the previous session if it has messages and hasn't been ended yet
+      const prevId = activeSessionId.value
+      const prevSess = sessions.value.find(s => s.id === prevId)
+      if (prevId && prevId !== sessionId && prevSess && prevSess.messages.length > 0 && !prevSess.profileVersionId && !(prevSess as any)._ended) {
+        apiFetch(`/chat/${prevId}/end`, { method: 'POST' }).catch(() => {}).finally(() => {
+          if (prevSess) (prevSess as any)._ended = true
+        })
+      }
       activeSessionId.value = sessionId
       chatId.value = sessionId
       profileVersionId.value = null
@@ -908,6 +964,156 @@ export function useChatSSE() {
     }
   }
 
+  // ===== Tutoring (图文辅导) =====
+
+  /** 将辅导 sections 转为 markdown 文本，用于持久化到聊天消息 */
+  function sectionsToMarkdown(): string {
+    let markdown = ''
+    for (const sectionId of tutoringStore.sectionOrder) {
+      const section = tutoringStore.sections[sectionId]
+      if (!section) continue
+      markdown += `## ${section.title}\n\n`
+      markdown += `${section.content}\n\n`
+    }
+    return markdown.trim()
+  }
+
+  /** 辅导结束（done/error）时，将结果写入聊天消息 */
+  function finalizeTutoring() {
+    const session = activeSession.value
+    if (!session || activeTutoringMsgIdx.value < 0) return
+
+    const msgIdx = activeTutoringMsgIdx.value
+    const msg = session.messages[msgIdx]
+    if (!msg) return
+
+    if (tutoringStore.status === 'done') {
+      msg.text = sectionsToMarkdown() || '(辅导已完成)'
+      msg.isStreaming = false
+      msg._tutoring = { active: false, completed: true, sessionId: tutoringStore.sessionId }
+    } else if (tutoringStore.status === 'error') {
+      msg.text = tutoringStore.error?.message || '辅导过程中出错，请重试。'
+      msg.isStreaming = false
+      msg._tutoring = { active: false, completed: false, sessionId: tutoringStore.sessionId }
+    }
+
+    activeTutoringMsgIdx.value = -1
+    isStreaming.value = false
+    tutoringStore.reset()
+  }
+
+  /** 发送图文辅导消息（辅导模式 + 未开启视频） */
+  async function sendTutoringMessage(text: string): Promise<void> {
+    const content = text.trim()
+    if (!content) return
+    if (isStreaming.value) return
+
+    if (!activeSessionId.value) {
+      createSession()
+      if (!activeSessionId.value) return
+    }
+
+    if (!activeSession.value) {
+      await initChat()
+      if (!activeSessionId.value) return
+    }
+
+    const targetSession = activeSession.value!
+
+    targetSession.messages.push({ role: 'user', text: content })
+    if (targetSession.title === '新会话') {
+      targetSession.title = autoTitle(targetSession.messages)
+    }
+    targetSession.updatedAt = new Date().toISOString()
+
+    const msgIndex = targetSession.messages.length
+    targetSession.messages.push({
+      role: 'assistant',
+      text: '',
+      isStreaming: true,
+      _tutoring: { active: true, completed: false, sessionId: null },
+    })
+
+    activeTutoringMsgIdx.value = msgIndex
+    tutoringQuestion.value = content
+    tutoringRound.value = 1
+    isStreaming.value = true
+
+    try {
+      await tutoringSSE.startTutoring({ question: content })
+
+      if (tutoringStore.status === 'clarifying') {
+        // 等待用户澄清回复，保持 isStreaming = true
+        return
+      }
+
+      finalizeTutoring()
+    } catch (err) {
+      console.error('sendTutoringMessage failed:', err)
+      if (targetSession.messages[msgIndex]) {
+        targetSession.messages[msgIndex].text = '辅导请求失败，请重试。'
+        targetSession.messages[msgIndex].isStreaming = false
+        targetSession.messages[msgIndex]._tutoring = { active: false, completed: false, sessionId: null }
+      }
+      activeTutoringMsgIdx.value = -1
+      isStreaming.value = false
+      tutoringStore.reset()
+    }
+  }
+
+  /** 提交澄清回复 */
+  async function sendClarificationResponse(response: {
+    skipped: boolean
+    selectedOptionId?: string
+    freeInput?: string
+  }): Promise<void> {
+    if (!tutoringStore.sessionId) return
+
+    isStreaming.value = true
+
+    try {
+      await tutoringSSE.startTutoring({
+        question: tutoringQuestion.value,
+        sessionId: tutoringStore.sessionId,
+        clarificationResponse: {
+          skipped: response.skipped,
+          selectedOptionId: response.selectedOptionId || null,
+          freeInput: response.freeInput || null,
+        },
+      })
+
+      tutoringRound.value++
+
+      if (tutoringStore.status === 'clarifying') {
+        return
+      }
+
+      finalizeTutoring()
+    } catch (err) {
+      console.error('sendClarificationResponse failed:', err)
+      finalizeTutoring()
+    }
+  }
+
+  /** 局部再生 section */
+  async function regenerateTutoringSection(
+    sectionId: string,
+    action: string,
+    instruction?: string
+  ): Promise<void> {
+    if (!tutoringStore.sessionId) return
+
+    try {
+      await tutoringSSE.regenerateSection(tutoringStore.sessionId, {
+        sectionId,
+        action: action as 'simplify' | 'switch_angle' | 'followup' | 'more_examples',
+        instruction: instruction || null,
+      })
+    } catch (err) {
+      console.error('regenerateTutoringSection failed:', err)
+    }
+  }
+
   /**
    * Called when VideoLecturePlayer closes — insert record card into chat.
    */
@@ -1309,14 +1515,24 @@ export function useChatSSE() {
 
   async function loadProfileFromBackend() {
     try {
+      // Try the new /end flow first — only if the session has been ended
+      // Otherwise fall back to /analyze for backward compatibility
       const res = await apiFetch<any>(`/chat/${activeSessionId.value}/analyze`, { method: 'POST' })
-      if (res.data && res.data.dimensions?.dimensions) {
-        profile.loadFromProfile({
-          profile_id: res.data.profileVersionId, user_id: '', course_id: profile.activeCourseId,
-          version: res.data.version, dimensions: res.data.dimensions.dimensions,
-          updated_at: new Date().toISOString(), last_trigger: 'chat',
-        })
-        totalFilled.value = res.data.dimensions.dimensions.length
+      if (res.data) {
+        // Return dimensions from the new format or use refreshProfile fallback
+        const dims = res.data.dimensions?.dimensions
+        if (dims && dims.length > 0) {
+          profile.loadFromProfile({
+            profile_id: res.data.profileVersionId, user_id: '', course_id: profile.activeCourseId,
+            version: res.data.version, dimensions: res.data.dimensions.dimensions,
+            updated_at: new Date().toISOString(), last_trigger: 'chat',
+          }, res.data)
+          totalFilled.value = res.data.dimensions.dimensions.length
+        } else if (res.data.profileVersionId) {
+          // Minimal response: refresh from /profile endpoint
+          await profile.refreshProfile(profile.activeCourseId)
+          totalFilled.value = profile.fullProfile?.dimensions?.length || 0
+        }
       }
     } catch (err) { console.error('loadProfile failed:', err) }
   }
@@ -1379,6 +1595,7 @@ export function useChatSSE() {
     // Methods
     initChat,
     createSession,
+    fireEndSessionOnLeave,
     startChat,
     loadSessions,
     loadSessionMessages,
@@ -1397,5 +1614,13 @@ export function useChatSSE() {
     updatePlanDraft,
     loadProfileFromBackend,
     setupMobileReconnection,
+
+    // Tutoring (图文辅导)
+    tutoringStore,
+    activeTutoringMsgIdx,
+    tutoringRound,
+    sendTutoringMessage,
+    sendClarificationResponse,
+    regenerateTutoringSection,
   }
 }

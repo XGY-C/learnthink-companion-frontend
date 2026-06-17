@@ -400,11 +400,23 @@ function toggleExpanded() {
   background-color: rgba(43, 111, 255, 0.08);
   color: var(--lt-brand);
 }
-.tct-r-line :deep(.markdown-body) {
+.tct-r-line :deep(.markdown-content) {
   flex: 1;
   min-width: 0;
   font-size: 12px;
+  line-height: 1.6;
   color: var(--lt-text-secondary);
+}
+.tct-r-line :deep(.markdown-content p) {
+  margin: 4px 0;
+}
+.tct-r-line :deep(.markdown-content code) {
+  font-size: 11px;
+}
+.tct-r-line :deep(.markdown-content pre) {
+  font-size: 11px;
+  padding: 8px;
+  margin: 6px 0;
 }
 
 /* ===== 工具步骤详情 ===== */

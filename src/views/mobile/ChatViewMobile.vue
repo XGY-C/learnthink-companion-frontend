@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useChatSSE } from '@/composables/useChatSSE'
 import type { ChatMessage, Suggestion } from '@/composables/useChatSSE'
+import { useProfileStore } from '@/stores/profile'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import ThoughtChainTimeline from '@/components/ThoughtChainTimeline.vue'
 import LottieAnimation from '@/components/LottieAnimation.vue'
@@ -16,6 +17,7 @@ import ProfileSheet from '@/components/mobile/ProfileSheet.vue'
 
 const router = useRouter()
 const chat = useChatSSE()
+const profile = useProfileStore()
 
 // ===== Session drawer =====
 const showSessions = ref(false)
@@ -122,9 +124,16 @@ onMounted(() => {
   window.visualViewport?.addEventListener('resize', handleViewportResize)
 })
 onBeforeUnmount(() => {
+  chat.fireEndSessionOnLeave()
+  window.removeEventListener('beforeunload', onBeforeUnload)
   if (cleanupReconnect) cleanupReconnect()
   window.visualViewport?.removeEventListener('resize', handleViewportResize)
 })
+
+function onBeforeUnload() {
+  chat.fireEndSessionOnLeave()
+}
+window.addEventListener('beforeunload', onBeforeUnload)
 </script>
 
 <template>

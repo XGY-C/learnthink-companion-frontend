@@ -15,6 +15,8 @@ import type { NavItem } from '@/components/ResourceNavigator.vue'
 import { ArrowLeft, Clock, List } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { extractVideoUrl } from '@/utils/media'
+import FloatingFab from '@/components/tutoring/FloatingFab.vue'
+import TutoringDrawer from '@/components/tutoring/TutoringDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +25,59 @@ const actStore = useActivityStore()
 
 const activityId = computed(() => route.params.activityId as string)
 const routeModuleId = computed(() => route.query.moduleId as string | undefined)
+
+// ===== Tutoring entry =====
+const showTutoringDrawer = ref(false)
+const selectedText = ref('')
+const showAskAiButton = ref(false)
+const askAiPosition = ref({ x: 0, y: 0 })
+
+function onResourceMouseUp() {
+  // Only activate for doc/reading type resources
+  const resType = currentResource.value?.planRef.resourceType
+  if (resType !== 'doc' && resType !== 'reading') return
+
+  const selection = window.getSelection()
+  const text = selection?.toString().trim()
+  if (text && text.length > 0) {
+    selectedText.value = text
+    const range = selection!.getRangeAt(0)
+    const rect = range.getBoundingClientRect()
+    askAiPosition.value = {
+      x: rect.left + rect.width / 2,
+      y: rect.top - 8,
+    }
+    showAskAiButton.value = true
+  } else {
+    showAskAiButton.value = false
+  }
+}
+
+function handleAskAi() {
+  showAskAiButton.value = false
+  showTutoringDrawer.value = true
+  // The drawer will pre-fill with selectedText if we pass it
+}
+
+function handleFabClick() {
+  showTutoringDrawer.value = !showTutoringDrawer.value
+}
+
+// Hide ask-AI button when clicking elsewhere
+function onDocumentClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (!target.closest('.ask-ai-btn')) {
+    showAskAiButton.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
+})
 
 // ===== Navigator toggle =====
 const navVisible = ref(localStorage.getItem('lt-learn-nav') !== 'false')
@@ -50,6 +105,19 @@ interface TocHeading {
   level: number
 }
 
+function stripInlineMarkdown(text: string): string {
+  return text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/_(.+?)_/g, '$1')
+    .replace(/~~(.+?)~~/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .trim()
+}
+
 const tocHeadings = computed<TocHeading[]>(() => {
   const content = currentResource.value?.content
   if (!content) return []
@@ -59,7 +127,7 @@ const tocHeadings = computed<TocHeading[]>(() => {
     const match = line.match(/^(#{1,4})\s+(.+)$/)
     if (match) {
       const level = match[1].length
-      const text = match[2].trim()
+      const text = stripInlineMarkdown(match[2])
       const id = text.replace(/\s+/g, '-').replace(/[^\w\u4e00-\u9fff-]/g, '')
       result.push({ id, text, level })
     }
@@ -998,7 +1066,7 @@ onUnmounted(() => {
               </template>
 
               <!-- doc / reading with TOC sidebar -->
-              <div v-else class="resource-doc-layout">
+              <div v-else class="resource-doc-layout" @mouseup="onResourceMouseUp">
                 <!-- TOC sidebar -->
                 <Transition name="toc-slide">
                   <div v-if="showToc && !tocCollapsed && tocHeadings.length > 0" class="toc-sidebar-immersive">
@@ -1114,10 +1182,48 @@ onUnmounted(() => {
       @select="onNavigatorSelect"
     />
 
+    <!-- Ask AI floating button (entry 2) -->
+    <button
+      v-if="showAskAiButton"
+      class="ask-ai-btn"
+      :style="{ left: askAiPosition.x + 'px', top: askAiPosition.y + 'px' }"
+      @click.stop="handleAskAi"
+    >
+      💬 问 AI
+    </button>
+
+    <!-- Tutoring drawer (entry 3) -->
+    <TutoringDrawer
+      :visible="showTutoringDrawer"
+      @close="showTutoringDrawer = false"
+    />
+
+    <!-- Floating FAB (entry 3) -->
+    <FloatingFab @click="handleFabClick" />
+
   </div>
 </template>
 
 <style scoped>
+/* Ask AI floating button */
+.ask-ai-btn {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  background: var(--lt-brand);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px var(--lt-shadow-blue);
+  z-index: 200;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.ask-ai-btn:hover { background: var(--lt-brand-dark); }
+
 .learn-root {
   height: 100%;
   display: flex;
