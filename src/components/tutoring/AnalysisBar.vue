@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useTutoringStore } from '@/stores/tutoring'
+import type { QuestionAnalysis } from '@/types/tutoring'
 
 const store = useTutoringStore()
 
-const analysis = computed(() => store.analysis)
+const props = defineProps<{
+  analysis?: QuestionAnalysis | null
+}>()
+
+const analysis = computed(() => props.analysis ?? store.analysis)
 
 const typeColorMap: Record<string, string> = {
   conceptual: 'var(--lt-brand)',

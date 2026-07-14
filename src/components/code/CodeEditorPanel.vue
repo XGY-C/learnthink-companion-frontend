@@ -290,6 +290,20 @@ watch(() => props.traceActiveLine, (line) => {
   view.value?.dispatch({ effects: traceLineCompartment.reconfigure(buildTraceLineExtension(line ?? null)) })
 })
 
+function scrollToLine(line: number) {
+  const v = view.value
+  if (!v || line < 1) return
+  const doc = v.state.doc
+  if (line > doc.lines) line = doc.lines
+  const lineObj = doc.line(line)
+  v.dispatch({
+    selection: { anchor: lineObj.from },
+    effects: EditorView.scrollIntoView(lineObj.from, { y: 'start', yMargin: 40 }),
+  })
+}
+
+defineExpose({ scrollToLine })
+
 onUnmounted(() => { view.value?.destroy() })
 </script>
 

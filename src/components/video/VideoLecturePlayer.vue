@@ -150,8 +150,12 @@ const showCloseEnding = computed(() =>
 
         <!-- Load error overlay -->
         <div v-if="loadError" class="player-error-overlay">
-          <p class="player-error-text">场景加载超时，请检查网络后重试</p>
-          <button class="player-retry-btn" @click="handleRetry">重新加载</button>
+          <p class="player-error-text">场景加载超时，可能是网络不稳定或生成中断</p>
+          <p class="player-error-hint">可重播已生成的内容，或关闭后重新提问</p>
+          <div class="player-error-actions">
+            <button class="player-retry-btn" @click="handleRetry">重新播放</button>
+            <button class="player-close-btn" @click="handleClose">关闭</button>
+          </div>
         </div>
 
         <ProgressBar />
@@ -323,6 +327,15 @@ const showCloseEnding = computed(() =>
   font-size: 15px;
   margin: 0;
 }
+.player-error-hint {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 13px;
+  margin: 0;
+}
+.player-error-actions {
+  display: flex;
+  gap: 12px;
+}
 .player-retry-btn {
   padding: 10px 24px;
   border: none;
@@ -334,5 +347,19 @@ const showCloseEnding = computed(() =>
 }
 .player-retry-btn:hover {
   background: var(--lt-brand-dark);
+}
+.player-close-btn {
+  padding: 10px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.player-close-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 </style>

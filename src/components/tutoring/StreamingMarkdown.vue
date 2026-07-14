@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import MarkdownIt from 'markdown-it'
+import { processLinkCards, initLinkCardInteractions } from '../../utils/linkCard'
 
 const props = withDefaults(defineProps<{
   content: string
@@ -14,7 +15,7 @@ const props = withDefaults(defineProps<{
 
 // ---- markdown-it 实例（与 MarkdownViewer 保持一致） ----
 const md = new MarkdownIt({
-  html: false,
+  html: true,
   linkify: true,
   typographer: false,
   breaks: false,
@@ -94,12 +95,39 @@ function fixConcatHeadings(text: string): string {
 const sanitizedHtml = computed(() => {
   const cleaned = stripControlBlock(props.content)
   const fixed = fixConcatHeadings(cleaned)
-  const { html: preprocessed, placeholders } = processMath(fixed)
-  const rendered = md.render(preprocessed)
+
+  // Protect raw <svg> blocks from processMath regex and markdown-it splitting.
+  const htmlBlocks: string[] = []
+  const protectedText = fixed.replace(/<svg\b[\s\S]*?<\/svg>/gi, (m) => {
+    const idx = htmlBlocks.length
+    htmlBlocks.push(m.replace(/\n[ \t]*\n/g, '\n'))
+    return `\n\n%%HTMLBLOCK_${idx}%%\n\n`
+  })
+
+  const { html: preprocessed, placeholders } = processMath(protectedText)
+
+  // Restore HTML blocks before markdown rendering
+  let restored = preprocessed
+  htmlBlocks.forEach((block, i) => {
+    restored = restored.split(`%%HTMLBLOCK_${i}%%`).join(block)
+  })
+
+  const rendered = md.render(restored)
   const withMath = postProcessMath(rendered, placeholders)
   const withMarkers = postProcessCustomMarkers(withMath)
-  return DOMPurify.sanitize(withMarkers, {
-    ADD_ATTR: ['id', 'target', 'rel', 'data-ref-id', 'data-diag-id', 'data-element', 'class'],
+  const sanitized = DOMPurify.sanitize(withMarkers, {
+    ADD_ATTR: ['id', 'target', 'rel', 'data-ref-id', 'data-diag-id', 'data-element', 'class',
+      'd', 'cx', 'cy', 'r', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
+      'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width',
+      'transform', 'font-size', 'font-weight', 'text-anchor',
+      'dominant-baseline', 'opacity', 'clip-path', 'mask',
+      'href', 'style', 'rx', 'ry',
+      'marker-end', 'marker-start', 'refX', 'refY',
+      'markerWidth', 'markerHeight', 'orient', 'points',
+      'version', 'xmlns', 'stroke-linecap', 'stroke-linejoin',
+      'fill-rule', 'clip-rule', 'stroke-dasharray',
+      'stroke-opacity', 'fill-opacity', 'preserveAspectRatio',
+    ],
     ALLOWED_TAGS: [
       'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
       'p', 'br', 'hr',
@@ -109,13 +137,23 @@ const sanitizedHtml = computed(() => {
       'table', 'thead', 'tbody', 'tr', 'th', 'td',
       'blockquote', 'img', 'sup', 'sub', 'del',
       'input',
+      'svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon',
+      'ellipse', 'text', 'tspan', 'g', 'defs', 'use',
+      'linearGradient', 'radialGradient', 'stop',
+      'clipPath', 'mask', 'marker', 'pattern',
+      'image', 'foreignObject', 'filter',
+      'feGaussianBlur', 'feOffset', 'feMerge', 'feMergeNode',
+      'feColorMatrix', 'feBlend', 'feComposite', 'feFlood',
+      'feDropShadow', 'animate', 'animateTransform', 'set',
     ],
   })
+  // 在消毒后处理链接卡片
+  return processLinkCards(sanitized)
 })
 
 const contentRef = ref<HTMLElement | null>(null)
 
-// 滚动处理：流式时保持底部可见
+// 滚动处理：流式时保持底部可见 + 链接卡片交互
 watch(sanitizedHtml, async () => {
   await nextTick()
   if (props.streaming && contentRef.value) {
@@ -123,6 +161,10 @@ watch(sanitizedHtml, async () => {
     if (parent) {
       parent.scrollTop = parent.scrollHeight
     }
+  }
+  // 初始化链接卡片交互（新出现的卡片会自动绑定，已绑定的不会重复）
+  if (contentRef.value) {
+    initLinkCardInteractions(contentRef.value)
   }
 })
 </script>
@@ -217,6 +259,7 @@ watch(sanitizedHtml, async () => {
   border-top: 1px solid var(--lt-border);
 }
 .markdown-content :deep(img) { max-width: 100%; border-radius: 8px; }
+.markdown-content :deep(svg) { max-width: 100%; height: auto; }
 
 /* 自定义标记样式 */
 .markdown-content :deep(.ref-citation) {

@@ -15,20 +15,66 @@ import {
   Timer, WarningFilled, Document, Medal, Right, Aim,
   TrendCharts, Reading, User, MagicStick
 } from '@element-plus/icons-vue'
+import { useUserStore } from '@/stores/user'
 import BottomSheet from '@/components/mobile/BottomSheet.vue'
 import DashboardIcon from '@/components/icons/DashboardIcon.vue'
 
 const router = useRouter()
 const profile = useProfileStore()
 const planStore = usePlanStore()
+const userStore = useUserStore()
 
 const pullContainer = ref<HTMLElement | null>(null)
 const { pullState, pullDistance } = usePullToRefresh(pullContainer, async () => {
   fetchTextbook()
+  fetchStats()
   profile.refreshProfile()
 })
 
 echarts.use([RadarChart, CanvasRenderer])
+
+// ===== 欢迎行 =====
+const hour = new Date().getHours()
+const greeting = hour < 12 ? '☀️ 早上好' : hour < 18 ? '☀️ 下午好' : '🌙 晚上好'
+const userName = computed(() => userStore.userInfo?.displayName ?? '同学')
+const courseName = computed(() => profile.activeCourse?.name ?? '')
+
+// ===== 学习统计数据 =====
+const todayMinutes = ref<number | null>(null)
+const weeklyHours = ref<number[]>([])
+const recentActivities = ref<{ type: string; label: string; time: string }[]>([])
+
+async function fetchStats() {
+  if (!activeCourseId.value) return
+  try {
+    const res = await apiFetch<any>(`/user/me/stats?courseId=${encodeURIComponent(activeCourseId.value)}`)
+    if (res.data) {
+      todayMinutes.value = res.data.todayMinutes ?? null
+      weeklyHours.value = res.data.weeklyHours ?? []
+      recentActivities.value = res.data.recentActivities ?? []
+    }
+  } catch { /* stats API 可能尚未就绪 */ }
+}
+
+const hasStats = computed(() => todayMinutes.value !== null)
+
+// ===== 画像展示层 =====
+const profileCoreInfo = computed(() => {
+  const dp = profile.displayProfile
+  if (!dp?.core_profile) return null
+  const findVal = (key: string) => dp.core_profile.find((d: any) => d.key === key)?.value ?? ''
+  return {
+    major: findVal('core.major'),
+    grade: findVal('core.grade'),
+    goal: findVal('core.goal'),
+  }
+})
+
+const masteryRatio = computed(() => {
+  if (profile.dimensions.length === 0) return 0
+  const avg = profile.dimensions.reduce((s, d) => s + d.value, 0) / profile.dimensions.length
+  return Math.round(avg)
+})
 
 // ===== 教材信息 =====
 const activeCourseId = computed(() => profile.activeCourseId)
@@ -69,7 +115,7 @@ const strongTags = computed(() => profile.tags.mastered)
 const interestTags = computed(() => profile.tags.interest)
 
 const metrics = computed(() => [
-  { label: '今日学习', value: profilePace.value, unit: '分钟/天', icon: Timer, color: 'var(--lt-brand)', bg: 'rgba(43,111,255,0.08)' },
+  { label: '今日学习', value: todayMinutes.value ?? '--', unit: todayMinutes.value !== null ? '分钟' : '', icon: Timer, color: 'var(--lt-brand)', bg: 'rgba(43,111,255,0.08)' },
   { label: '薄弱项', value: weakTags.value.length, unit: '个需加强', icon: WarningFilled, color: 'var(--lt-danger)', bg: 'rgba(255,59,48,0.08)' },
   { label: '资源包', value: recentPacks.value.length, unit: '个', icon: Document, color: 'var(--lt-success)', bg: 'rgba(52,199,89,0.08)' },
   { label: '路径进度', value: pathProgress.value, unit: '%', icon: Medal, color: 'var(--lt-warning)', bg: 'rgba(255,159,10,0.08)' },
@@ -139,7 +185,10 @@ const emptyGuideSteps = [
   { icon: '📈', title: '学习路径', desc: '获取动态调整的学习规划与练习反馈', action: '去路径', route: '/path' },
 ]
 
-onMounted(() => { fetchTextbook() })
+onMounted(() => {
+  fetchTextbook()
+  fetchStats()
+})
 </script>
 
 <template>
@@ -157,14 +206,14 @@ onMounted(() => { fetchTextbook() })
         <span>下拉刷新</span>
       </template>
     </div>
-    <!-- 标题行 -->
+    <!-- 欢迎行 -->
     <div class="m-dash-header">
       <div>
         <h1 class="m-dash-title">
           <DashboardIcon :size="28" :animated="true" />
-          <span>学习总览</span>
+          <span>{{ greeting }}，{{ userName }}</span>
         </h1>
-        <p class="m-dash-subtitle">基于多智能体画像驱动的个性化学习概览</p>
+        <p class="m-dash-subtitle">{{ courseName }}<template v-if="todayMinutes !== null"> · 今日学习 {{ todayMinutes }} 分钟</template></p>
       </div>
       <button class="m-dash-report-btn" @click="router.push('/report')">
         完整报告 <el-icon :size="14"><Right /></el-icon>
@@ -211,7 +260,41 @@ onMounted(() => { fetchTextbook() })
         </div>
       </div>
 
-      <!-- 2. 教材信息卡片 -->
+      <!-- 5. 学习动态 -->
+      <div class="m-recommend-card">
+        <div class="m-section-header">
+          <span class="m-section-label">
+            <el-icon :size="16"><TrendCharts /></el-icon> 学习动态
+          </span>
+          <button class="m-section-link" @click="router.push('/report')">查看完整报告 →</button>
+        </div>
+        <template v-if="hasStats">
+          <div class="flex items-end gap-1.5 h-24 mb-3">
+            <div v-for="(h, i) in weeklyHours" :key="i" class="flex-1 flex flex-col items-center gap-0.5">
+              <span class="text-[9px]" style="color: var(--lt-text-auxiliary);">{{ h > 0 ? h : '' }}</span>
+              <div
+                class="w-full rounded-t-md"
+                :style="{
+                  height: Math.max(h / (Math.max(...weeklyHours, 1)) * 100, 4) + '%',
+                  background: i === weeklyHours.length - 1 ? 'var(--lt-brand)' : 'var(--lt-brand-lighter)',
+                }"
+              />
+              <span class="text-[9px]" style="color: var(--lt-text-placeholder);">{{ ['一','二','三','四','五','六','日'][i] }}</span>
+            </div>
+          </div>
+          <div v-if="recentActivities.length > 0" class="space-y-1.5">
+            <p class="text-xs font-medium" style="color: var(--lt-text-secondary);">最近活动</p>
+            <div v-for="(act, i) in recentActivities.slice(0, 3)" :key="i" class="flex items-center gap-2 text-xs py-1.5 px-2 rounded-md" style="background-color: var(--lt-bg-page);">
+              <span>{{ act.type === 'chat' ? '💬' : act.type === 'practice' ? '📝' : '📖' }}</span>
+              <span class="flex-1 truncate" style="color: var(--lt-text-secondary);">{{ act.label }}</span>
+              <span style="color: var(--lt-text-placeholder);">{{ act.time }}</span>
+            </div>
+          </div>
+        </template>
+        <p v-else class="text-xs text-center py-6" style="color: var(--lt-text-auxiliary);">完成对话和练习后，学习动态将在此展示</p>
+      </div>
+
+      <!-- 6. 教材信息 -->
       <div v-if="textbook" class="m-textbook-card" @click="showTocSheet = true">
         <div class="m-textbook-header">
           <span class="m-textbook-badge">
@@ -221,82 +304,10 @@ onMounted(() => { fetchTextbook() })
         </div>
         <h3 class="m-textbook-title">《{{ textbook.title }}》</h3>
         <p v-if="textbook.author" class="m-textbook-author">作者：{{ textbook.author }}</p>
-        <p v-if="textbook.introduction" class="m-textbook-intro line-clamp-3">{{ textbook.introduction }}</p>
+        <p v-if="textbook.introduction" class="m-textbook-intro line-clamp-2">{{ textbook.introduction }}</p>
       </div>
 
-      <!-- 3. 下一步推荐（排在画像前面） -->
-      <div class="m-recommend-card">
-        <div class="m-section-header">
-          <span class="m-section-label">
-            <el-icon :size="16"><Aim /></el-icon> 下一步学习推荐
-          </span>
-          <button class="m-section-link" @click="router.push('/path')">查看完整路径 →</button>
-        </div>
-        <h3 class="m-recommend-title">{{ nextRecommendation.title }}</h3>
-        <p class="m-recommend-kp">知识点：{{ nextRecommendation.knowledgePoint }}</p>
-        <div class="m-recommend-meta">
-          <span class="m-reco-tag" :class="CONFIDENCE_CONFIG[nextRecommendation.confidence].type">
-            {{ CONFIDENCE_CONFIG[nextRecommendation.confidence].label }}置信度
-          </span>
-          <span class="m-reco-stat">来源 {{ nextRecommendation.sourcesCount }}</span>
-          <span class="m-reco-stat">质量 {{ nextRecommendation.qualityScore }}/100</span>
-          <span class="m-reco-stat">{{ nextRecommendation.estimatedMinutes }}分钟</span>
-        </div>
-        <div class="m-recommend-reasons">
-          <span v-for="(r, i) in nextRecommendation.reason" :key="i" class="m-reason-tag">{{ r }}</span>
-        </div>
-        <div class="m-recommend-actions">
-          <button class="m-dash-primary-btn" @click="router.push({ path: '/studio', query: { topic: nextRecommendation.knowledgePoint } })">
-            <el-icon :size="14"><MagicStick /></el-icon> 去生成资源包
-          </button>
-        </div>
-        <div class="m-recommend-progress">
-          <span class="m-progress-label">路径整体进度 {{ pathProgress }}%</span>
-          <div class="m-progress-track">
-            <div class="m-progress-fill" :style="{ width: pathProgress + '%' }" />
-          </div>
-        </div>
-      </div>
-
-      <!-- 4. 画像快照 -->
-      <div class="m-profile-card">
-        <div class="m-section-header">
-          <span class="m-section-label">
-            <el-icon :size="16"><User /></el-icon> 画像快照
-          </span>
-          <button class="m-section-link" @click="router.push('/chat')">详细画像 →</button>
-        </div>
-        <div class="m-radar-wrap">
-          <v-chart class="m-radar-chart" :option="radarOption" autoresize />
-        </div>
-        <div class="m-tags-section">
-          <div class="m-tag-group">
-            <span class="m-tag-group-label"><el-icon :size="12"><WarningFilled /></el-icon>薄弱</span>
-            <div class="m-tag-row">
-              <span v-for="t in weakTags" :key="t" class="m-tag danger">{{ t }}</span>
-            </div>
-          </div>
-          <div class="m-tag-group">
-            <span class="m-tag-group-label"><el-icon :size="12"><Medal /></el-icon>掌握</span>
-            <div class="m-tag-row">
-              <span v-for="t in strongTags" :key="t" class="m-tag success">{{ t }}</span>
-            </div>
-          </div>
-          <div class="m-tag-group">
-            <span class="m-tag-group-label"><el-icon :size="12"><Reading /></el-icon>兴趣</span>
-            <div class="m-tag-row">
-              <span v-for="t in interestTags" :key="t" class="m-tag primary">{{ t }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="m-profile-meta">
-          <div class="m-meta-row"><span class="m-meta-label">学习节奏</span><span class="m-meta-value">{{ profilePace }} 分钟/天</span></div>
-          <div class="m-meta-row"><span class="m-meta-label">内容偏好</span><span class="m-meta-value">{{ profilePreference }}</span></div>
-          <div class="m-meta-row"><span class="m-meta-label">画像版本</span><span class="m-meta-value m-meta-version">{{ profileVersion }} · {{ profileUpdatedAt }}</span></div>
-        </div>
-      </div>
-
-      <!-- 5. 最近资源包：卡片列表替代 el-table -->
+      <!-- 7. 最近资源包 -->
       <div class="m-packs-card">
         <div class="m-section-header">
           <span class="m-section-label">

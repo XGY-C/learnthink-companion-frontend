@@ -46,6 +46,12 @@ const mobileRoutes = [
         meta: { title: '学习' }
       },
       {
+        path: 'learn/resource/:packId',
+        name: 'resource-learn-m',
+        component: () => import('@/views/ResourceLearnView.vue'),
+        meta: { title: '学习' }
+      },
+      {
         path: 'code',
         name: 'code-learn-m',
         component: () => import('@/views/CodeLearnView.vue'),
@@ -58,6 +64,30 @@ const mobileRoutes = [
         meta: { title: '资源库' }
       },
       {
+        path: 'forum',
+        name: 'forum-m',
+        component: () => import('@/views/forum/ForumHome.vue'),
+        meta: { title: '学习论坛' }
+      },
+      {
+        path: 'forum/:id',
+        name: 'forum-detail-m',
+        component: () => import('@/views/forum/PostDetail.vue'),
+        meta: { title: '帖子详情' }
+      },
+      {
+        path: 'forum/create',
+        name: 'forum-create-m',
+        component: () => import('@/views/forum/CreatePost.vue'),
+        meta: { title: '发布新帖' }
+      },
+      {
+        path: 'forum/edit/:id',
+        name: 'forum-edit-m',
+        component: () => import('@/views/forum/EditPost.vue'),
+        meta: { title: '编辑帖子' }
+      },
+      {
         path: 'report',
         name: 'report-m',
         component: () => import('@/views/mobile/ReportMobile.vue'),
@@ -68,6 +98,18 @@ const mobileRoutes = [
         name: 'profile-m',
         component: () => import('@/views/mobile/ProfileMobile.vue'),
         meta: { title: '个人中心', requiresAuth: true }
+      },
+      {
+        path: 'notifications',
+        name: 'notifications-m',
+        component: () => import('@/views/NotificationListView.vue'),
+        meta: { title: '消息通知', requiresAuth: true }
+      },
+      {
+        path: 'answer/:sessionId',
+        name: 'DirectAnswer-m',
+        component: () => import('@/views/pc/DirectAnswerView.vue'),
+        meta: { title: '完整解答', requiresAuth: true }
       },
     ]
   }
@@ -111,6 +153,12 @@ const pcRoutes = [
         meta: { title: '学习', hideSidebar: true }
       },
       {
+        path: 'learn/resource/:packId',
+        name: 'resource-learn',
+        component: () => import('@/views/ResourceLearnView.vue'),
+        meta: { title: '学习', hideSidebar: true }
+      },
+      {
         path: 'code',
         name: 'code-learn',
         component: () => import('@/views/CodeLearnView.vue'),
@@ -120,6 +168,30 @@ const pcRoutes = [
         path: 'library',
         name: 'library',
         component: () => import('@/views/LibraryView.vue')
+      },
+      {
+        path: 'forum',
+        name: 'forum',
+        component: () => import('@/views/forum/ForumHome.vue'),
+        meta: { title: '学习论坛' }
+      },
+      {
+        path: 'forum/:id',
+        name: 'forum-detail',
+        component: () => import('@/views/forum/PostDetail.vue'),
+        meta: { title: '帖子详情' }
+      },
+      {
+        path: 'forum/create',
+        name: 'forum-create',
+        component: () => import('@/views/forum/CreatePost.vue'),
+        meta: { title: '发布新帖' }
+      },
+      {
+        path: 'forum/edit/:id',
+        name: 'forum-edit',
+        component: () => import('@/views/forum/EditPost.vue'),
+        meta: { title: '编辑帖子' }
       },
       {
         path: 'report',
@@ -137,6 +209,12 @@ const pcRoutes = [
         name: 'notifications',
         component: () => import('@/views/NotificationListView.vue'),
         meta: { requiresAuth: true }
+      },
+      {
+        path: 'answer/:sessionId',
+        name: 'DirectAnswer',
+        component: () => import('@/views/pc/DirectAnswerView.vue'),
+        meta: { title: '完整解答', requiresAuth: true }
       },
     ]
   }
@@ -165,7 +243,7 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const userStore = useUserStore()
 
-  // 登录页 — 已登录则跳转首页
+  // 登录页 — 已登录则跳转首页（触发课程分流）
   if (to.path === '/login') {
     if (userStore.isLoggedIn) return { path: '/' }
     return true
@@ -176,21 +254,30 @@ router.beforeEach(async (to) => {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
 
-  // 需要课程上下文的页面 — 检查是否有已选课程
-  if (to.meta.requiresCourse !== false && to.path !== '/courses') {
-    const profileStore = useProfileStore()
-    // 如果课程列表尚未加载，先初始化
-    if (profileStore.courses.length === 0) {
-      await profileStore.initCourses()
-    }
-    // 确实没有已选课程 → 引导至选课页
-    if (profileStore.courses.length === 0) {
-      return { path: '/courses' }
-    }
-    // 有课程但未设置 activeCourseId
-    if (!profileStore.activeCourseId) {
-      profileStore.switchCourse(profileStore.courses[0])
-    }
+  // ===== 课程上下文校验（选课分流） =====
+  const profileStore = useProfileStore()
+  if (profileStore.courses.length === 0) {
+    await profileStore.initCourses()
+  }
+
+  const courseCount = profileStore.courses.length
+
+  // 课程选择页特殊处理
+  if (to.path === '/courses') {
+    return true
+  }
+
+  // 其他页面需要课程上下文
+  if (courseCount === 0) {
+    return { path: '/courses' }
+  }
+  if (courseCount >= 2) {
+    if (profileStore.activeCourseId) return true
+    return { path: '/courses' }
+  }
+  // courseCount === 1，确保 activeCourseId 已设置
+  if (!profileStore.activeCourseId) {
+    profileStore.switchCourse(profileStore.courses[0])
   }
 
   return true

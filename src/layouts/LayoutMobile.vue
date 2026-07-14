@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
-import { DataBoard, ChatLineRound, MagicStick, User, ArrowLeft } from '@element-plus/icons-vue'
+import { usePushStore } from '@/stores/push'
+import { DataBoard, ChatLineRound, MagicStick, User, ArrowLeft, Bell } from '@element-plus/icons-vue'
+import { usePushSSE } from '@/composables/usePushSSE'
 
 const profileStore = useProfileStore()
+const pushStore = usePushStore()
+const { connect: connectPushSSE } = usePushSSE()
 
 const route = useRoute()
 const router = useRouter()
@@ -59,6 +63,13 @@ const isActive = (tab: TabItem) => {
   if (tab.path === '/') return route.path === '/'
   return route.path.startsWith(tab.path)
 }
+
+onMounted(() => {
+  if (profileStore.activeCourseId) {
+    pushStore.fetchNotifications(profileStore.activeCourseId)
+  }
+  connectPushSSE()
+})
 </script>
 
 <template>
@@ -85,7 +96,19 @@ const isActive = (tab: TabItem) => {
 
         <!-- 右侧 -->
         <div class="mobile-nav-right">
-          <slot name="nav-actions" />
+          <button
+            class="mobile-nav-bell"
+            @click="router.push('/notifications')"
+            aria-label="通知"
+          >
+            <el-icon :size="20"><Bell /></el-icon>
+            <span
+              v-if="pushStore.unreadCount > 0"
+              class="mobile-bell-badge"
+            >
+              {{ pushStore.unreadCount > 99 ? '99+' : pushStore.unreadCount }}
+            </span>
+          </button>
         </div>
       </div>
     </header>
@@ -170,6 +193,45 @@ const isActive = (tab: TabItem) => {
 
 .mobile-nav-back:active {
   background-color: rgba(43, 111, 255, 0.06);
+}
+
+/* 通知铃铛 */
+.mobile-nav-bell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--lt-text-secondary);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background-color 150ms ease-out;
+  touch-action: manipulation;
+}
+
+.mobile-nav-bell:active {
+  background-color: rgba(43, 111, 255, 0.06);
+}
+
+.mobile-bell-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #ef4444;
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .mobile-nav-title {

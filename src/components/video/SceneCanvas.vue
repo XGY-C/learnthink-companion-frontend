@@ -22,18 +22,29 @@ const store = useVideoLectureStore()
 const transitionState = ref<'entering' | 'active' | 'exiting'>('active')
 const sceneKey = ref(0)
 const autoplayBlocked = ref(false)
+const audioBuffering = ref(false)  // TTS 音频缓冲中，暂停动画
+const audioLoadFailed = ref(false) // TTS 音频 URL 失效（404 等）
 let tickTimer: ReturnType<typeof setInterval> | null = null
+let transitionTimer1: ReturnType<typeof setTimeout> | null = null
+let transitionTimer2: ReturnType<typeof setTimeout> | null = null
 
 // ===== Audio playback =====
 let audioEl: HTMLAudioElement | null = null
 
 function stopAudio() {
   if (audioEl) {
+    audioEl.onwaiting = null
+    audioEl.onplaying = null
+    audioEl.onstalled = null
+    audioEl.oncanplay = null
+    audioEl.onerror = null
     audioEl.pause()
     audioEl.currentTime = 0
     audioEl.src = ''
     audioEl = null
   }
+  audioBuffering.value = false
+  audioLoadFailed.value = false
 }
 
 function loadAndPlayAudio(url: string) {
@@ -41,6 +52,16 @@ function loadAndPlayAudio(url: string) {
   autoplayBlocked.value = false
   audioEl = new Audio(url)
   audioEl.playbackRate = props.speed
+
+  // 音频缓冲时暂停动画，恢复时继续——保持音画同步
+  audioEl.addEventListener('waiting', () => { audioBuffering.value = true })
+  audioEl.addEventListener('stalled', () => { audioBuffering.value = true })
+  audioEl.addEventListener('playing', () => { audioBuffering.value = false })
+  audioEl.addEventListener('canplay', () => { audioBuffering.value = false })
+
+  // 音频加载失败（404、URL 过期等）--区别于自动播放被阻止
+  audioEl.addEventListener('error', () => { audioLoadFailed.value = true })
+
   if (props.isPlaying) {
     audioEl.play().catch(() => { autoplayBlocked.value = true })
   }
@@ -66,6 +87,9 @@ watch(() => props.speed, (s) => {
   if (audioEl) audioEl.playbackRate = s
 })
 
+// 音频缓冲时动画暂停（effectiveIsPlaying 传递给子场景组件和 tick timer）
+const effectiveIsPlaying = computed(() => props.isPlaying && !audioBuffering.value)
+
 // Load audio when scene changes
 watch(() => props.scene, (newScene) => {
   if (newScene?.audioUrl) {
@@ -75,13 +99,11 @@ watch(() => props.scene, (newScene) => {
   }
 })
 
-onBeforeUnmount(() => stopAudio())
-
 // ===== Tick timer for ProgressBar and subtitle =====
 function startTimer() {
   stopTimer()
   tickTimer = setInterval(() => {
-    if (props.isPlaying) {
+    if (effectiveIsPlaying.value) {
       store.currentSceneTime += 50 * props.speed
     }
   }, 50)
@@ -120,16 +142,18 @@ watch(() => props.scene, (newScene, oldScene) => {
   }
 
   transitionState.value = 'exiting'
-  setTimeout(() => {
+  if (transitionTimer1) clearTimeout(transitionTimer1)
+  transitionTimer1 = setTimeout(() => {
     sceneKey.value++
-    // 新场景组件此时已挂载，useSceneTimer 已开始计时 → 启动同步的 tick timer
+    // 新场景组件此时已挂载，useSceneTimer 已开始计时 -> 启动同步的 tick timer
     startTimer()
     transitionState.value = 'entering'
-    setTimeout(() => { transitionState.value = 'active' }, 30)
+    if (transitionTimer2) clearTimeout(transitionTimer2)
+    transitionTimer2 = setTimeout(() => { transitionState.value = 'active' }, 30)
   }, 200)
 })
 
-watch(() => props.isPlaying, (playing) => {
+watch(() => effectiveIsPlaying.value, (playing) => {
   if (!playing) stopTimer()
   else startTimer()
 })
@@ -157,7 +181,12 @@ const transitionClass = computed(() => {
   return ''
 })
 
-onBeforeUnmount(() => { stopTimer(); stopAudio() })
+onBeforeUnmount(() => {
+  stopTimer()
+  stopAudio()
+  if (transitionTimer1) clearTimeout(transitionTimer1)
+  if (transitionTimer2) clearTimeout(transitionTimer2)
+})
 </script>
 
 <template>
@@ -168,7 +197,7 @@ onBeforeUnmount(() => { stopTimer(); stopAudio() })
         :is="sceneComponent"
         :key="sceneKey"
         :content="scene.content"
-        :is-playing="isPlaying"
+        :is-playing="effectiveIsPlaying"
         :speed="speed"
         :duration="scene.duration"
         :narration="scene.narration"
@@ -187,14 +216,27 @@ onBeforeUnmount(() => { stopTimer(); stopAudio() })
     <div v-if="currentSubtitle" class="scene-subtitle">{{ currentSubtitle }}</div>
 
     <!-- 自动播放被阻止提示 -->
-    <div v-if="autoplayBlocked" class="autoplay-hint" @click.stop="retryAudio">
+    <div v-if="autoplayBlocked && !audioLoadFailed" class="autoplay-hint" @click.stop="retryAudio">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="5 3 19 12 5 21 5 3"/>
       </svg>
       点击播放音频
     </div>
 
-    <div v-if="!isPlaying && scene" class="pause-indicator">
+    <!-- 音频加载失败提示 -->
+    <div v-if="audioLoadFailed" class="autoplay-hint audio-error-hint">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+      </svg>
+      音频加载失败，仅显示字幕
+    </div>
+
+    <div v-if="audioBuffering && scene" class="audio-buffering-hint">
+      <div class="buffering-dots"><span></span><span></span><span></span></div>
+      <span>音频加载中...</span>
+    </div>
+
+    <div v-if="!effectiveIsPlaying && !audioBuffering && scene" class="pause-indicator">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" stroke="none" opacity="0.5">
         <polygon points="5 3 19 12 5 21 5 3"/>
       </svg>
@@ -295,6 +337,25 @@ onBeforeUnmount(() => { stopTimer(); stopAudio() })
   margin: 0;
 }
 
+.audio-buffering-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  pointer-events: none;
+  z-index: 10;
+}
+.audio-buffering-hint .buffering-dots {
+  margin-bottom: 0;
+}
+.audio-buffering-hint > span {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
 .pause-indicator {
   position: absolute;
   inset: 0;
@@ -334,6 +395,15 @@ onBeforeUnmount(() => { stopTimer(); stopAudio() })
 }
 .autoplay-hint:hover {
   background: rgba(255, 140, 66, 0.25);
+}
+.audio-error-hint {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #ef4444;
+  cursor: default;
+}
+.audio-error-hint:hover {
+  background: rgba(239, 68, 68, 0.15);
 }
 @keyframes hint-in {
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }

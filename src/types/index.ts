@@ -110,6 +110,41 @@ export interface ChapterNode {
   children: ChapterNode[]
 }
 
+// ========== 资源文件夹（Resource Folder）相关类型 ==========
+
+/** 资源文件夹（网盘式嵌套） */
+export interface ResourceFolder {
+  id: string
+  parentId: string | null
+  name: string
+  sortOrder: number
+  resourceCount: number
+  children: ResourceFolder[]
+}
+
+// ========== 资源文件（Resource File，库内展示单位） ==========
+
+/** 资源文件（文件级，对应后端 ResourceFileDTO） */
+export interface ResourceFile {
+  id: string
+  folderId: string | null
+  packId?: string
+  type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video'
+  title: string
+  topic?: string
+  status: 'pending' | 'ready' | 'failed' | 'rejected' | 'rendering'
+  confidence: 'high' | 'medium' | 'low'
+  qualityScore: number
+  noteCount: number
+  isLearning: boolean
+  createdAt: string
+  updatedAt?: string
+  /** 详情加载时才有 */
+  content?: string
+  sources?: SourceItem[]
+  sourcesCount?: number
+}
+
 // ========== 资源包（Resource Pack）相关类型 ==========
 
 /** 单个资源项 */
@@ -266,8 +301,11 @@ export interface AgentThinkingTrace {
   timestamp: string
 }
 
-/** Agent 思考阶段 —— 与后端 ThinkingPhase.java 枚举同步 */
-export type ThinkingPhase = 'CONTEXT' | 'RETRIEVE' | 'RAG' | 'PLANNING' | 'DECISION' | 'REFLECT' | 'ERROR'
+/** Agent 思考阶段 -- 与后端 ThinkingPhase.java 枚举同步 */
+export type ThinkingPhase =
+  | 'CONTEXT' | 'RETRIEVE' | 'RAG' | 'PLANNING'
+  | 'DECISION' | 'REFLECT' | 'ERROR'
+  | 'THINKING' | 'TOOL_CALL'  // Smart v2 新增
 
 /** 前端思考链步骤（ChatPanel 用，由 SSE agent.thought 事件驱动） */
 export interface ThinkingStep {
@@ -278,11 +316,33 @@ export interface ThinkingStep {
   phase?: ThinkingPhase
   /** 简短描述 */
   detail?: string
+  /** 阶段上下文描述 */
+  context?: string
   /** 完整推理链字段 */
   observation?: string
   thought?: string
   decision?: string
   confidenceLevel?: string
+  /** Agent 名称 */
+  agentName?: string
+  /** Agent 角色 */
+  agentRole?: string
+    /** 来源列表（web_search / rag_retrieve 等工具步骤） */
+  sources?: SearchSource[]
+}
+
+/** 来源项（支持 web_search 和 rag_retrieve） */
+export interface SearchSource {
+  title: string
+  /** web_search 有 URL，rag_retrieve 无 URL */
+  url?: string
+  snippet: string
+  /** rag_retrieve 来源定位（如页码、章节） */
+  locator?: string
+  /** rag_retrieve 相关性分数（0-1） */
+  relevance?: number
+  /** 来源类型：'web' | 'rag' */
+  type?: 'web' | 'rag'
 }
 
 /** 思考链记录（挂载在每条助手消息上） */
@@ -380,9 +440,63 @@ export interface NotificationItem {
   topic?: string
   packId?: string
   taskId?: string
+  dailyRefType?: string
   plannerRationale?: string
   resourceTypes?: string[]
   timestamp: number
+}
+
+// ========== 题库（Question Bank）相关类型 ==========
+
+/** 题目库中的题目（对应后端 QuestionDTO） */
+export interface QBankQuestion {
+  id: string
+  userId: string
+  courseId: string
+  sourceItemId?: string
+  questionType: string
+  difficulty: number
+  title: string
+  options?: { label: string; content: string }[]
+  answer?: any
+  explanation?: string
+  kpId?: string
+  kpName?: string
+  tags?: string[]
+  attemptCount: number
+  correctCount: number
+  accuracyRate: number
+  status: string
+  createdAt: string
+}
+
+/** 题目分页（对应后端 QuestionPageDTO） */
+export interface QuestionPage {
+  items: QBankQuestion[]
+  total: number
+  page: number
+  size: number
+}
+
+/** 创建题目请求 */
+export interface CreateQBankQuestionRequest {
+  courseId: string
+  questionType: string
+  difficulty: number
+  title: string
+  options?: { label: string; content: string }[]
+  answer: any
+  explanation?: string
+  kpId?: string
+}
+
+/** 知识点正确率（对应后端 KpAccuracyDTO） */
+export interface KpAccuracy {
+  kpId: string
+  kpName: string
+  totalAttempts: number
+  correctCount: number
+  accuracyRate: number
 }
 
 // ========== 学习路径（Learning Path）相关类型 ==========
@@ -573,10 +687,10 @@ export interface PushEvent {
   message: string
   refId: string
   refType: string
-  pathMatch: number
-  weaknessMatch: number
-  interestMatch: number
-  reasons: PushReason[]
+  pathMatch?: number
+  weaknessMatch?: number
+  interestMatch?: number
+  reasons?: PushReason[]
   createdAt: string
 }
 
@@ -586,6 +700,11 @@ export interface PushNotificationListResponse {
   unreadCount: number
 }
 
+export interface QuestionResult {
+  questionId: string
+  result: 'correct' | 'incorrect' | 'partial'
+}
+
 /** Activity 提交响应 */
 export interface ActivitySubmitResponse {
   activityId: string
@@ -593,6 +712,7 @@ export interface ActivitySubmitResponse {
   status?: string
   score?: number
   weakTags?: string[]
+  questionResults?: QuestionResult[]
   retryCount?: number
   retryAllowed?: boolean
   retriesRemaining?: number
@@ -606,3 +726,241 @@ export interface AutoAction {
   reason: string
   insertedActivities: { activityId: string; type: string; title: string }[]
 }
+
+// ========== 画像展示 v2 类型（详见 docs/画像展示设计方案_v2.md） ==========
+
+/** display_json 原始结构（后端 step2_display.txt 产出） */
+export interface DisplayJson {
+  core: {
+    summary?: string
+    current_chapter?: string
+    major?: string
+    grade?: string
+    goal?: string
+    strong?: string[]
+    weak?: string[]
+  }
+  style: {
+    preference?: string[]
+    pace?: string
+    avoid?: string
+  }
+  knowledge: {
+    mastered?: string[]
+    weak?: string[]
+    error_pattern?: string[]
+  }
+  dimensions?: string[]
+  /** 兼容旧字段：早期画像可能挂在顶层 overview 里 */
+  overview?: string
+}
+
+/** key → value 形状的精确映射 */
+export interface DimensionValueMap {
+  knowledge_basis: {
+    mastered?: string[]
+    weak?: string[]
+    /** 学科级强项；后端当前未稳定产出，仅作可选 fallback */
+    strong?: string[]
+  }
+  learning_goal: { primary?: string; sub_goals?: string[] }
+  cognitive_style: {
+    style?: string[]
+    media_preference?: string
+    avoid?: string
+    example_density?: 'high' | 'medium' | 'low'
+  }
+  learning_pace: {
+    daily_minutes?: number
+    /** 兼容历史字段名 */
+    minutes_per_day?: number
+    urgency?: 'intensive' | 'normal' | 'relaxed'
+  }
+  major_context: { major?: string; grade?: string; course?: string }
+  interest_direction: { topics?: string[] }
+  error_pattern: { tags?: string[] }
+}
+
+/** 以 key 判别的泛型条目 */
+export interface TypedDimensionItem<K extends ProfileDimensionKey = ProfileDimensionKey> {
+  key: K
+  label: string
+  layer: ProfileDimensionLayer
+  value: DimensionValueMap[K]
+  confidence: number
+  source: 'explicit' | 'inferred'
+  updated_at: string
+}
+
+/** dimensions[] 元素的具体联合（每个元素 key/value 强绑定） */
+export type AnyDimensionItem = {
+  [K in ProfileDimensionKey]: TypedDimensionItem<K>
+}[ProfileDimensionKey]
+
+/** 知识树节点（前端从 knowledge_profile_md 解析） */
+export interface KnowledgeTopicNode {
+  /** ### 标题：知识点名 */
+  name: string
+  /** stable_key，如 know.ai_intro.bayes */
+  key: string
+  /** MD 行的自然语言描述 */
+  description: string
+  mastery: 'mastered' | 'weak' | 'unknown'
+  /** high = display_json 精确匹配；low = MD 关键词推断或未知 */
+  masteryConfidence: 'high' | 'low'
+}
+
+export interface KnowledgeTreeNode {
+  /** ## 标题：科目名 */
+  subject: string
+  /** [know.xxx.overall] 行的描述 */
+  overall?: string
+  topics: KnowledgeTopicNode[]
+}
+
+/** 维度展示状态（卡片级，非标签级） */
+export type DimDisplayState = 'normal' | 'inferred' | 'low' | 'missing'
+
+/** 类型守卫：从 dimensions[] 按 key 取整条 */
+export function getDim<K extends ProfileDimensionKey>(
+  dimensions: ProfileDimensionItem[] | AnyDimensionItem[] | undefined,
+  key: K
+): TypedDimensionItem<K> | undefined {
+  if (!dimensions) return undefined
+  // 联合数组的 find 谓词无法精确收窄到泛型 K，使用 as 断言。
+  // 类型安全由运行时 `d.key === key` 保证。
+  const found = (dimensions as Array<ProfileDimensionItem | AnyDimensionItem>).find(d => d.key === key)
+  return found as TypedDimensionItem<K> | undefined
+}
+
+/** 类型守卫：从 dimensions[] 按 key 取 value（自动收窄类型） */
+export function getDimValue<K extends ProfileDimensionKey>(
+  dimensions: ProfileDimensionItem[] | AnyDimensionItem[] | undefined,
+  key: K
+): DimensionValueMap[K] | undefined {
+  return getDim(dimensions, key)?.value
+}
+
+// ========== 画像 Phase 2：来源追溯 + 纠错闭环 ==========
+
+/**
+ * profile_signals 表的来源类型枚举（与后端 enum 同名）。
+ *  - user_said：用户在对话里明确表述
+ *  - user_corrected：用户主动纠正过该项
+ *  - learning_result：答题/资源完成等学习结果触发
+ *  - behavior：行为推断（停留时长、跳过等）
+ *  - llm_inferred：LLM 推断
+ */
+export type SignalSource =
+  | 'user_said'
+  | 'user_corrected'
+  | 'learning_result'
+  | 'behavior'
+  | 'llm_inferred'
+
+/** 单条来源信号（对应后端 profile_signals 表一行） */
+export interface ProfileSignal {
+  id: string
+  dimension: string
+  signal_key: string
+  value: string
+  source: SignalSource
+  status: 'written' | 'pending' | 'discarded'
+  created_at: string
+  chat_id?: string
+}
+
+/** 用户纠错动作 */
+export type CorrectAction = 'confirm' | 'correct' | 'deny'
+
+/** 纠错请求负载（POST /profile/correct） */
+export interface CorrectPayload {
+  course_id: string
+  dimension: ProfileDimensionKey
+  signal_key?: string
+  /** 被纠正的原值（可选，便于后端审计） */
+  original_value?: string
+  action: CorrectAction
+  /** action='correct' 时必填 */
+  corrected_value?: string
+  /** action='deny' 时可选附文 */
+  note?: string
+}
+
+// ========== 笔记（Notebook）相关类型 ==========
+
+/** 笔记创建请求 */
+export interface CreateNoteRequest {
+  courseId: string
+  notebookId?: string
+  resourcePackId?: string
+  resourceItemId?: string
+  resourceTitle?: string
+  sectionTitle?: string
+  content: string
+  selectedText?: string
+  anchorId?: string
+  textRange?: string
+}
+
+/** 笔记更新请求 */
+export interface UpdateNoteRequest {
+  content: string
+}
+
+/** 笔记完整对象 */
+export interface Note {
+  id: string
+  userId: string
+  courseId: string
+  notebookId?: string
+  resourcePackId?: string
+  resourceItemId?: string
+  resourceTitle?: string
+  sectionTitle?: string
+  content: string
+  selectedText?: string
+  anchorId?: string
+  textRange?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** 笔记本 */
+export interface Notebook {
+  id: string
+  courseId: string
+  name: string
+  description?: string
+  cover?: string
+  sortOrder?: number
+  isDefault?: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/** 笔记本创建请求 */
+export interface CreateNotebookRequest {
+  courseId: string
+  name: string
+  description?: string
+  cover?: string
+  sortOrder?: number
+  isDefault?: boolean
+}
+
+/** 笔记本更新请求 */
+export interface UpdateNotebookRequest {
+  name?: string
+  description?: string
+  cover?: string
+  sortOrder?: number
+  isDefault?: boolean
+}
+
+/**
+ * 三种关联层次判定：
+ * - 资源级：sectionTitle == null
+ * - 章节级：sectionTitle != null && selectedText == null
+ * - 文本级：sectionTitle != null && selectedText != null
+ */

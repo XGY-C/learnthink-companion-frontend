@@ -8,6 +8,8 @@ import confetti from 'canvas-confetti'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import { useSoundEffect } from '@/composables/useSoundEffect'
 import { useTheme } from '@/composables/useTheme'
+import { useProfileStore } from '@/stores/profile'
+import { useLearningTracker } from '@/composables/useLearningTracker'
 
 const props = defineProps<{
   questions: QuizQuestion[]
@@ -23,13 +25,19 @@ const emit = defineEmits<{
 
 const planStore = usePlanStore()
 const actStore = useActivityStore()
+const profileStore = useProfileStore()
+
+// 学习心跳追踪
+const { isAway: isLearningAway, resumeTracking } = useLearningTracker({
+  courseId: profileStore.activeCourseId,
+})
 
 // ========== Core State ==========
 const quizAnswers = ref<Record<string, string>>({})
 
 let questionIdCounter = 0
 const safeQuestions = computed(() =>
-  props.questions.map((q, i) => ({ ...q, questionId: q.questionId || `q_${i}` }))
+  props.questions.map((q, i) => ({ ...q, questionId: String(q.questionId ?? q.id ?? `q_${i}`) }))
 )
 function resetQuestionIdCounter() { questionIdCounter = 0 }
 const quizCurrentQ = ref(0)
@@ -457,17 +465,18 @@ function handleReview() {
 }
 
 // ========== Answer Check ==========
+function getQuestionResult(q: QuizQuestion): string | undefined {
+  return quizResult.value?.questionResults?.find(
+    r => r.questionId === (q.questionId || q.id?.toString())
+  )?.result
+}
+
 function isAnswerCorrect(q: QuizQuestion): boolean {
-  const userAns = quizAnswers.value[q.questionId]
-  if (!userAns) return false
-  if (q.type === 'SHORT_ANSWER') return false
-  if (q.type === 'FILL_IN_BLANK') {
-    return userAns.trim().toLowerCase() === q.answer.trim().toLowerCase()
-  }
-  if (q.type === 'MULTIPLE_CHOICE') {
-    return userAns.trim().toUpperCase().split('').sort().join('') === q.answer.trim().toUpperCase().split('').sort().join('')
-  }
-  return userAns.trim().toUpperCase() === q.answer.trim().toUpperCase()
+  return getQuestionResult(q) === 'correct'
+}
+
+function isAnswerPartial(q: QuizQuestion): boolean {
+  return getQuestionResult(q) === 'partial'
 }
 
 function correctCount(): number {
@@ -537,14 +546,15 @@ function reviewDotStyle(q: QuizQuestion, qi: number) {
                 'is-answered': quizAnswers[q.questionId],
                 'is-marked': markedQuestions.has(qi),
                 'is-correct': quizState === 'review' && isAnswerCorrect(q),
-                'is-wrong': quizState === 'review' && !isAnswerCorrect(q) && quizAnswers[q.questionId],
+                'is-partial': quizState === 'review' && isAnswerPartial(q),
+                'is-wrong': quizState === 'review' && !isAnswerCorrect(q) && !isAnswerPartial(q) && quizAnswers[q.questionId],
               }"
               :aria-label="'第' + (qi + 1) + '题' + (quizAnswers[q.questionId] ? '，已作答' : '，未作答')"
               :aria-selected="quizState === 'review' ? qi === reviewCurrentQ : qi === quizCurrentQ"
               role="tab"
               @click="quizState === 'review' ? reviewCurrentQ = qi : goToQuestion(qi)"
             >
-              <span v-if="quizState === 'review'">{{ isAnswerCorrect(q) ? '✓' : quizAnswers[q.questionId] ? '✗' : (qi + 1) }}</span>
+              <span v-if="quizState === 'review'">{{ isAnswerCorrect(q) ? '✓' : isAnswerPartial(q) ? '~' : quizAnswers[q.questionId] ? '✗' : (qi + 1) }}</span>
               <span v-else-if="markedQuestions.has(qi)" class="mark-icon">⚑</span>
               <span v-else>{{ qi + 1 }}</span>
             </button>
@@ -1025,9 +1035,9 @@ function reviewDotStyle(q: QuizQuestion, qi: number) {
                     </span>
                     <span
                       class="quiz-review-status"
-                      :class="isAnswerCorrect(reviewQuestion) ? 'correct' : 'wrong'"
+                      :class="isAnswerCorrect(reviewQuestion) ? 'correct' : isAnswerPartial(reviewQuestion) ? 'partial' : 'wrong'"
                     >
-                      {{ isAnswerCorrect(reviewQuestion) ? '✓ 回答正确' : '✗ 回答错误' }}
+                      {{ isAnswerCorrect(reviewQuestion) ? '✓ 回答正确' : isAnswerPartial(reviewQuestion) ? '~ 部分正确' : '✗ 回答错误' }}
                     </span>
                   </div>
                 </div>
@@ -1088,7 +1098,10 @@ function reviewDotStyle(q: QuizQuestion, qi: number) {
                     </div>
                     <div v-if="reviewQuestion.type === 'SHORT_ANSWER'" class="quiz-review-text-answer-item">
                       <span class="quiz-review-text-answer-label">状态：</span>
-                      <span class="quiz-review-text-answer-status">待批改</span>
+                      <span class="quiz-review-text-answer-value"
+                        :class="isAnswerCorrect(reviewQuestion) ? 'is-correct' : isAnswerPartial(reviewQuestion) ? 'is-partial' : 'is-wrong'">
+                        {{ isAnswerCorrect(reviewQuestion) ? '正确' : isAnswerPartial(reviewQuestion) ? '部分正确' : '不正确' }}
+                      </span>
                     </div>
                   </div>
 
@@ -1180,6 +1193,17 @@ function reviewDotStyle(q: QuizQuestion, qi: number) {
         <span class="quiz-fab-text">提交</span>
         <span class="quiz-fab-badge">{{ quizAnsweredCount }}/{{ safeQuestions.length }}</span>
       </button>
+
+      <!-- 离开提示遮罩 -->
+      <Transition name="fade">
+        <div v-if="isLearningAway" class="learning-away-overlay">
+          <div class="learning-away-card">
+            <p class="text-lg font-semibold mb-2">你已离开一会儿了</p>
+            <p class="text-sm mb-4" style="color: var(--lt-text-auxiliary);">学习计时已暂停</p>
+            <el-button type="primary" @click="resumeTracking">继续学习</el-button>
+          </div>
+        </div>
+      </Transition>
 
     </div>
 </template>
@@ -2401,6 +2425,12 @@ function reviewDotStyle(q: QuizQuestion, qi: number) {
   color: #fff !important;
 }
 
+.quiz-progress-dot.is-partial {
+  background: var(--lt-warning) !important;
+  border-color: var(--lt-warning) !important;
+  color: #fff !important;
+}
+
 .quiz-progress-dot.is-wrong {
   background: var(--lt-danger) !important;
   border-color: var(--lt-danger) !important;
@@ -2834,6 +2864,9 @@ function reviewDotStyle(q: QuizQuestion, qi: number) {
 .quiz-review-text-answer-value.is-correct {
   color: var(--lt-success);
 }
+.quiz-review-text-answer-value.is-partial {
+  color: var(--lt-warning);
+}
 .quiz-review-text-answer-value.is-wrong {
   color: var(--lt-danger);
 }
@@ -2841,10 +2874,25 @@ function reviewDotStyle(q: QuizQuestion, qi: number) {
   color: var(--lt-success);
   font-weight: 700;
 }
-.quiz-review-text-answer-status {
-  font-size: 14px;
-  color: var(--lt-warning);
+
+/* ==================== Review Status Badge ==================== */
+.quiz-review-status {
+  font-size: 13px;
   font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 20px;
+}
+.quiz-review-status.correct {
+  color: var(--lt-success);
+  background: rgba(52, 199, 89, 0.12);
+}
+.quiz-review-status.partial {
+  color: var(--lt-warning);
+  background: rgba(255, 159, 10, 0.12);
+}
+.quiz-review-status.wrong {
+  color: var(--lt-danger);
+  background: rgba(255, 59, 48, 0.12);
 }
 
 /* ==================== Celebration Badges ==================== */
@@ -2910,4 +2958,19 @@ html[data-theme="dark"] .quiz-congrats-badge--gold {
   color: #FFD700;
   background: rgba(255, 215, 0, 0.1);
 }
+
+/* 离开提示遮罩 */
+.learning-away-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 3000; backdrop-filter: blur(4px);
+}
+.learning-away-card {
+  background: var(--lt-bg-card); border-radius: 16px;
+  padding: 32px 48px; text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+}
+.fade-enter-active, .fade-leave-active { transition: opacity 0.25s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

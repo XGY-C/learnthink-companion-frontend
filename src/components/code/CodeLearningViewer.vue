@@ -4,61 +4,77 @@
 
   <!-- New structured rendering -->
   <div v-else-if="parsed" class="code-learning-viewer">
-    <CodeHeader
-      :title="parsed.title"
-      :language="parsed.language"
-      :mode="mode"
-      @toggle-mode="mode = mode === 'read' ? 'edit' : 'read'"
-    />
+    <div class="clv-main">
+      <div class="clv-code-pane">
+        <CodeHeader
+          :title="parsed.title"
+          :language="parsed.language"
+          :mode="mode"
+          @toggle-mode="mode = mode === 'read' ? 'edit' : 'read'"
+        />
 
-    <CodeDescription :content="parsed.description" />
+        <CodeDescription :content="parsed.description" />
 
-    <CodeFileTabs
-      v-if="parsed.files.length > 1"
-      :files="parsed.files"
-      :active-index="activeFileIndex"
-      :edited="editedFiles"
-      @select="activeFileIndex = $event"
-    />
+        <CodeFileTabs
+          v-if="parsed.files.length > 1"
+          :files="parsed.files"
+          :active-index="activeFileIndex"
+          :edited="editedFiles"
+          @select="activeFileIndex = $event"
+        />
 
-    <CodeEditorPanel
-      :content="activeFileContent"
-      :language="parsed.language"
-      :filename="activeFile?.filename ?? ''"
-      :read-only="mode === 'read'"
-      :highlighted-lines="highlightedLines"
-      @update:content="onCodeChange"
-    />
+        <CodeEditorPanel
+          ref="editorRef"
+          :content="activeFileContent"
+          :language="parsed.language"
+          :filename="activeFile?.filename ?? ''"
+          :read-only="mode === 'read'"
+          :highlighted-lines="highlightedLines"
+          @update:content="onCodeChange"
+          @selection-change="onSelectionChange"
+        />
 
-    <CodeToolbar
-      :mode="mode"
-      :run-state="runState"
-      :can-run="canRun"
-      :active-filename="activeFile?.filename ?? ''"
-      @run="handleRun"
-      @reset="handleReset"
-      @copy="handleCopy"
-      @download="handleDownload"
-    />
+        <SelectionFloatingMenu
+          :visible="selectionMenu.visible"
+          :x="selectionMenu.x"
+          :y="selectionMenu.y"
+          @explain="onSelectionExplain"
+          @find-similar="onSelectionFindSimilar"
+          @ask="onSelectionAsk"
+        />
 
-    <CodeOutput
-      v-if="runState !== 'idle'"
-      :state="runState"
-      :result="runResult"
-      :expected="parsed.expectedOutput"
-    />
+        <CodeToolbar
+          :mode="mode"
+          :run-state="runState"
+          :can-run="canRun"
+          :active-filename="activeFile?.filename ?? ''"
+          @run="handleRun"
+          @reset="handleReset"
+          @copy="handleCopy"
+          @download="handleDownload"
+        />
 
-    <CodeStepList
-      v-if="mode === 'read' && parsed.steps.length > 0"
-      :steps="parsed.steps"
-      @hover-step="onStepHover"
-      @click-step="onStepClick"
-    />
+        <CodeOutput
+          v-if="runState !== 'idle'"
+          :state="runState"
+          :result="runResult"
+          :expected="parsed.expectedOutput"
+        />
+      </div>
+
+      <CodeStepList
+        v-if="mode === 'read' && parsed.steps.length > 0"
+        class="clv-steps-pane"
+        :steps="parsed.steps"
+        @hover-step="onStepHover"
+        @click-step="onStepClick"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import CodeHeader from './CodeHeader.vue'
@@ -68,6 +84,7 @@ import CodeEditorPanel from './CodeEditorPanel.vue'
 import CodeToolbar from './CodeToolbar.vue'
 import CodeOutput from './CodeOutput.vue'
 import CodeStepList from './CodeStepList.vue'
+import SelectionFloatingMenu from './SelectionFloatingMenu.vue'
 import { runCode } from '@/utils/codeRunner'
 import type { CodeRunResult } from '@/types'
 
@@ -114,6 +131,10 @@ const runState = ref<'idle' | 'running' | 'success' | 'error' | 'timeout'>('idle
 const runResult = ref<CodeRunResult | null>(null)
 const editedFiles = ref<Map<string, string>>(new Map())
 const highlightedLines = ref<number[]>([])
+const editorRef = ref<InstanceType<typeof CodeEditorPanel> | null>(null)
+
+const selectionMenu = reactive({ visible: false, x: 0, y: 0, text: '' })
+let selectionTimer: ReturnType<typeof setTimeout> | null = null
 
 const activeFile = computed(() => parsed.value?.files[activeFileIndex.value])
 const activeFileContent = computed(() =>
@@ -247,21 +268,55 @@ function onStepHover(refs: CodeLineRef[]) {
 }
 
 function onStepClick(step: CodeStep) {
-  if (step.references.length > 0) {
-    const targetFile = step.references[0].filename
-    const idx = parsed.value?.files.findIndex(f => f.filename === targetFile)
-    if (idx !== undefined && idx >= 0) {
-      activeFileIndex.value = idx
-    }
+  if (step.references.length === 0) return
+  const targetRef = step.references[0]
+  const targetFile = targetRef.filename
+  const idx = parsed.value?.files.findIndex(f => f.filename === targetFile)
+  const needSwitchFile = idx !== undefined && idx >= 0 && idx !== activeFileIndex.value
+
+  if (needSwitchFile && idx !== undefined) {
+    activeFileIndex.value = idx
+    nextTick(() => {
+      nextTick(() => {
+        editorRef.value?.scrollToLine(targetRef.startLine)
+      })
+    })
+  } else {
+    editorRef.value?.scrollToLine(targetRef.startLine)
   }
+
   const activeFilename = activeFile.value?.filename
   const lines: number[] = []
   for (const ref of step.references) {
-    if (ref.filename === activeFilename) {
+    if (ref.filename === targetFile) {
       for (let i = ref.startLine; i <= ref.endLine; i++) lines.push(i)
     }
   }
   highlightedLines.value = lines
+}
+
+function onSelectionChange(info: { text: string; from: number; to: number; x: number; y: number } | null) {
+  if (selectionTimer) clearTimeout(selectionTimer)
+  if (!info) { selectionMenu.visible = false; return }
+  selectionTimer = setTimeout(() => {
+    selectionMenu.visible = true
+    selectionMenu.x = info.x
+    selectionMenu.y = info.y
+    selectionMenu.text = info.text
+  }, 200)
+}
+
+function onSelectionExplain() {
+  selectionMenu.visible = false
+  ElMessage.info('解释功能：' + (selectionMenu.text.slice(0, 30) + '...'))
+}
+function onSelectionFindSimilar() {
+  selectionMenu.visible = false
+  ElMessage.info('找相似模式功能开发中')
+}
+function onSelectionAsk() {
+  selectionMenu.visible = false
+  ElMessage.info('提问功能开发中')
 }
 </script>
 
@@ -270,5 +325,45 @@ function onStepClick(step: CodeStep) {
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+.clv-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.clv-code-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.clv-steps-pane {
+  flex-shrink: 0;
+}
+
+@media (min-width: 1200px) {
+  .clv-main {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--lt-space-loose);
+  }
+
+  .clv-code-pane {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .clv-steps-pane {
+    width: 380px;
+    position: sticky;
+    top: var(--lt-space-loose);
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-left: var(--lt-space-loose);
+    border-left: 1px solid var(--lt-border);
+  }
 }
 </style>

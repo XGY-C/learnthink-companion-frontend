@@ -1,318 +1,213 @@
 <script setup lang="ts">
+/**
+ * 学习画像面板（PC / 桌面）。
+ *
+ * 五层信息层级（详见 docs/画像展示设计方案_v2.md）：
+ *   L1 概览：RadarOverview + ProfileSummary
+ *   L2 核心：CoreLayerCard
+ *   L3 风格：StyleLayerCard
+ *   L4 知识：KnowledgeTreeCard
+ *   L5 演进：Phase 3 实现，本轮占位
+ *
+ * 状态分支：空态 / 加载错误（stale-while-error）/ 低置信整体提示 / 正常。
+ */
 import { computed } from 'vue'
-import * as echarts from 'echarts/core'
-import { RadarChart } from 'echarts/charts'
-import { CanvasRenderer } from 'echarts/renderers'
-import VChart from 'vue-echarts'
+import { useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
-import { DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
-import type { ProfileDimensionItem, ProfileDimensionKey } from '@/types'
-
-echarts.use([RadarChart, CanvasRenderer])
+import { DArrowLeft, DArrowRight, RefreshRight } from '@element-plus/icons-vue'
+import RadarOverview from './RadarOverview.vue'
+import ProfileSummary from './ProfileSummary.vue'
+import CoreLayerCard from './CoreLayerCard.vue'
+import StyleLayerCard from './StyleLayerCard.vue'
+import KnowledgeTreeCard from './KnowledgeTreeCard.vue'
+import EmptyState from './EmptyState.vue'
+import LowConfidenceBanner from './LowConfidenceBanner.vue'
 
 defineProps<{ collapsed?: boolean }>()
 const emit = defineEmits<{ toggle: [] }>()
 
 const profile = useProfileStore()
+const router = useRouter()
 
-// ===== 7 维雷达图定义 =====
-interface RadarDim {
-  key: ProfileDimensionKey
-  label: string
-  layer: 'core' | 'style' | 'auxiliary'
+const versionText = computed(() => profile.profileVersion)
+const updatedText = computed(() => profile.updatedAt)
+const isEmpty = computed(() => profile.isEmpty)
+const isLowConfidence = computed(() => profile.isLowConfidence)
+const overall = computed(() => profile.overallConfidence)
+const loadError = computed(() => profile.loadError)
+
+function handleEmptyCta() {
+  router.push('/chat')
 }
-
-const radarDims: RadarDim[] = [
-  { key: 'knowledge_basis',     label: '知识基础', layer: 'core' },
-  { key: 'learning_goal',       label: '学习目标', layer: 'core' },
-  { key: 'cognitive_style',     label: '认知风格', layer: 'style' },
-  { key: 'learning_pace',       label: '学习节奏', layer: 'style' },
-  { key: 'major_context',       label: '专业上下文', layer: 'auxiliary' },
-  { key: 'interest_direction',  label: '兴趣方向', layer: 'auxiliary' },
-  { key: 'error_pattern',       label: '错误模式', layer: 'auxiliary' },
-]
-
-function getDim(key: ProfileDimensionKey): ProfileDimensionItem | undefined {
-  return profile.fullProfile?.dimensions?.find(d => d.key === key)
+function handleRetry() {
+  profile.refreshProfile()
 }
-
-function dimValue(key: ProfileDimensionKey): number {
-  const dim = getDim(key)
-  if (!dim) return 5
-  return Math.round(dim.confidence * 100)
-}
-
-
-const radarOption = computed(() => ({
-  radar: {
-    indicator: radarDims.map(d => ({
-      name: d.label,
-      max: 100,
-    })),
-    radius: '55%',
-    center: ['50%', '50%'],
-    axisName: {
-      color: '#5A5A72',
-      fontSize: 10,
-    },
-    splitArea: {
-      areaStyle: {
-        color: ['#FAFBFC', '#F5F7FA', '#EEF1F5', '#E8ECF0'],
-      },
-    },
-    axisLine: { lineStyle: { color: '#E8ECF0' } },
-    splitLine: { lineStyle: { color: '#E8ECF0' } },
-  },
-  series: [
-    {
-      name: '画像完整度',
-      type: 'radar',
-      data: [
-        {
-          value: radarDims.map(d => dimValue(d.key)),
-          name: '当前',
-          itemStyle: { color: '#2B6FFF' },
-          lineStyle: { color: '#2B6FFF', width: 1.5 },
-          areaStyle: { color: 'rgba(43, 111, 255, 0.06)' },
-        },
-      ],
-    },
-  ],
-}))
-
-const knowledgeValue = computed(() => getDim('knowledge_basis')?.value)
-const masteredList = computed(() => (knowledgeValue.value?.mastered ?? knowledgeValue.value?.strong ?? []) as string[])
-const weakList    = computed(() => (knowledgeValue.value?.weak ?? []) as string[])
-const kbPercent   = computed(() => {
-  const total = masteredList.value.length + weakList.value.length
-  if (total === 0) return dimValue('knowledge_basis') > 50 ? 50 : 10
-  return Math.round((masteredList.value.length / total) * 100)
-})
-
-const goalValue = computed(() => getDim('learning_goal')?.value)
-const goalPrimary = computed(() => goalValue.value?.primary as string || '未设置')
-const goalSubs    = computed(() => (goalValue.value?.sub_goals ?? []) as string[])
-const goalPercent = computed(() => dimValue('learning_goal'))
-
-const styleValue = computed(() => getDim('cognitive_style')?.value)
-const styleLabel  = computed(() => {
-  const pref = styleValue.value?.media_preference as string
-  const map: Record<string, string> = { text: '图文优先', video: '视频优先', code: '代码优先', mixed: '混合' }
-  if (pref && map[pref]) return map[pref]
-  const styleArr = (styleValue.value?.style ?? []) as string[]
-  if (styleArr.length > 0) return styleArr.join('、')
-  return '未设置'
-})
-const densityLabel = computed(() => {
-  const d = styleValue.value?.example_density as string
-  const map: Record<string, string> = { high: '高密度', medium: '中密度', low: '低密度' }
-  return map[d] ?? ''
-})
-
-const paceValue = computed(() => getDim('learning_pace')?.value)
-const paceMinutes  = computed(() => paceValue.value?.daily_minutes ?? paceValue.value?.minutes_per_day ?? '?')
-const paceUrgency  = computed(() => {
-  const u = paceValue.value?.urgency as string
-  const map: Record<string, string> = { relaxed: '宽松', normal: '正常', intensive: '紧凑' }
-  return map[u] ?? ''
-})
-
-const majorValue = computed(() => getDim('major_context')?.value)
-const majorText  = computed(() => {
-  if (!majorValue.value) return '未设置'
-  const UNKNOWN = new Set(['', '未知', 'unknown', 'null', '无'])
-  const parts = [majorValue.value.major, majorValue.value.course].filter(
-    (v): v is string => typeof v === 'string' && !UNKNOWN.has(v.trim())
-  )
-  return parts.join(' · ') || '未设置'
-})
-const majorGrade  = computed(() => majorValue.value?.grade as string || '')
-
-const interestValue = computed(() => getDim('interest_direction')?.value)
-const interestTopics = computed(() => (interestValue.value?.topics ?? []) as string[])
-
-const errorValue = computed(() => getDim('error_pattern')?.value)
-const errorTags = computed(() => (errorValue.value?.tags ?? []) as string[])
-
-const versionText = computed(() =>
-  profile.fullProfile ? `v${profile.fullProfile.version}` : profile.profileVersion
-)
-const updatedText = computed(() =>
-  profile.fullProfile?.updated_at ?? profile.updatedAt
-)
-
-// v3: read from new display_profile format
-const displayProfile = computed(() => profile.displayProfile)
-const hasNewFormat = computed(() => displayProfile.value != null)
-const coreSummaryText = computed(() => {
-  if (displayProfile.value?.core?.summary) return displayProfile.value.core.summary
-  if (displayProfile.value?.overview) return displayProfile.value.overview
-  return null
-})
 </script>
 
 <template>
   <!-- 收起态：右侧细条 -->
   <div
     v-if="collapsed"
-    class="flex flex-col items-center justify-between py-4 cursor-pointer group transition-colors"
-    style="height: 100%; width: 36px; background-color: var(--lt-bg-card); border-left: 1px solid var(--lt-border);"
+    class="pp-collapsed"
     @click="emit('toggle')"
   >
-    <span
-      class="text-xs font-medium tracking-wider transition-colors group-hover:text-[var(--lt-brand)]"
-      style="writing-mode: vertical-rl; color: var(--lt-text-auxiliary);"
-    >学习画像</span>
-    <div class="flex flex-col items-center gap-1.5">
+    <span class="pp-collapsed-label">学习画像</span>
+    <div class="pp-collapsed-foot">
       <el-tag size="small" type="info" effect="plain" class="!text-[10px] !px-0.5">{{ versionText }}</el-tag>
-      <el-icon :size="14" class="transition-colors group-hover:text-[var(--lt-brand)]" style="color: var(--lt-text-placeholder);"><DArrowLeft /></el-icon>
+      <el-icon :size="14" class="pp-collapsed-icon"><DArrowLeft /></el-icon>
     </div>
   </div>
 
   <!-- 展开态：完整面板 -->
-  <div
-    v-else
-    style="display: grid; grid-template-rows: auto 1fr; height: 100%; background-color: var(--lt-bg-card); border-left: 1px solid var(--lt-border);"
-  >
+  <div v-else class="pp-panel">
     <!-- 头部 -->
-    <div class="p-4" style="grid-row: 1; border-bottom: 1px solid var(--lt-border);">
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-medium" style="color: var(--lt-text-primary);">学习画像</h2>
-        <el-button
-          link
-          class="!p-1 !min-w-0"
-          @click="emit('toggle')"
-        >
+    <div class="pp-head">
+      <div class="pp-head-row">
+        <h2 class="pp-head-title">学习画像</h2>
+        <el-button link class="!p-1 !min-w-0" @click="emit('toggle')">
           <el-icon :size="16" style="color: var(--lt-text-placeholder);"><DArrowRight /></el-icon>
         </el-button>
       </div>
-      <div class="flex items-center justify-between mt-1">
-        <p class="text-xs" style="color: var(--lt-text-auxiliary);">{{ updatedText }}</p>
+      <div class="pp-head-meta">
+        <p class="pp-head-time">{{ updatedText || '尚未生成' }}</p>
         <el-tag size="small" type="info" effect="plain">{{ versionText }}</el-tag>
       </div>
     </div>
 
-    <div class="overflow-y-auto p-4 space-y-4" style="grid-row: 2; min-height: 0;">
-
-      <!-- ===== 雷达图（7维全貌概览）===== -->
-      <div class="rounded-xl p-3" style="background-color: var(--lt-bg-page); border: 1px solid var(--lt-border);">
-        <h3 class="text-xs font-semibold mb-1 flex items-center gap-2" style="color: var(--lt-text-auxiliary);">
-          画像全貌
-          <span class="inline-flex items-center gap-1">
-            <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--lt-brand);" />
-            <span class="text-xs" style="color: var(--lt-brand);">核心</span>
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--lt-warning);" />
-            <span class="text-xs" style="color: var(--lt-warning);">风格</span>
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--lt-text-auxiliary);" />
-            <span class="text-xs" style="color: var(--lt-text-auxiliary);">辅助</span>
-          </span>
-        </h3>
-        <div class="h-56 w-full">
-          <v-chart class="w-full h-full" :option="radarOption" autoresize />
-        </div>
+    <div class="pp-body">
+      <!-- stale-while-error：有数据时不阻塞展示，仅显示重试条 -->
+      <div v-if="loadError && !isEmpty" class="pp-error-bar">
+        <span>画像加载失败，显示的是上次缓存。</span>
+        <el-button link type="primary" @click="handleRetry">
+          <el-icon :size="13" class="mr-1"><RefreshRight /></el-icon>重试
+        </el-button>
       </div>
 
-      <!-- ===== 新格式摘要（当 display_profile 存在时显示）===== -->
-      <div v-if="hasNewFormat && coreSummaryText" class="rounded-xl p-3" style="background: linear-gradient(135deg, rgba(124, 92, 252, 0.05), rgba(43, 111, 255, 0.04)); border: 1px solid var(--lt-ai-light-7);">
-        <h3 class="text-xs font-semibold mb-1.5 flex items-center gap-1.5" style="color: var(--lt-ai);">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-          画像摘要
-        </h3>
-        <p class="text-xs leading-relaxed" style="color: var(--lt-text-secondary);">{{ coreSummaryText }}</p>
-      </div>
+      <!-- 空态 -->
+      <EmptyState
+        v-if="isEmpty"
+        @cta="handleEmptyCta"
+      />
 
-      <!-- ===== 核心层详情 ===== -->
-      <div class="rounded-xl p-4" style="background: linear-gradient(135deg, rgba(43, 111, 255, 0.04), var(--lt-brand-lightest)); border: 1px solid var(--lt-brand-light-7);">
-        <h3 class="text-sm font-bold mb-3 flex items-center gap-1.5" style="color: var(--lt-brand);">
-          核心 · 决定学什么
-        </h3>
+      <template v-else>
+        <!-- 整体置信度过低提示 -->
+        <LowConfidenceBanner
+          v-if="isLowConfidence"
+          :confidence-percent="overall"
+        />
 
-        <div class="mb-4">
-          <div class="flex justify-between mb-1">
-            <span class="text-xs font-medium" style="color: var(--lt-text-secondary);">知识基础</span>
-            <span class="text-xs font-bold" style="color: var(--lt-brand);">{{ kbPercent }}%</span>
-          </div>
-          <el-progress :percentage="kbPercent" :stroke-width="6" :show-text="false" color="var(--lt-brand)" />
-          <div class="flex flex-wrap gap-1 mt-2">
-            <el-tag v-for="t in weakList" :key="t" size="small" type="danger" effect="plain" class="rounded text-xs">
-              {{ t }}
-            </el-tag>
-            <el-tag v-for="t in masteredList" :key="t" size="small" type="success" effect="plain" class="rounded text-xs">
-              {{ t }}
-            </el-tag>
-            <span v-if="weakList.length === 0 && masteredList.length === 0" class="text-xs" style="color: var(--lt-text-auxiliary);">对话中建立...</span>
-          </div>
-        </div>
+        <!-- L1: 雷达图 -->
+        <RadarOverview />
 
-        <div>
-          <div class="flex justify-between mb-1">
-            <span class="text-xs font-medium" style="color: var(--lt-text-secondary);">学习目标</span>
-            <span class="text-xs font-bold" style="color: var(--lt-brand);">{{ goalPercent }}%</span>
-          </div>
-          <el-progress :percentage="goalPercent" :stroke-width="6" :show-text="false" color="var(--lt-brand)" />
-          <p class="text-xs mt-2 font-medium" style="color: var(--lt-text-primary);">{{ goalPrimary }}</p>
-          <div class="flex flex-wrap gap-1 mt-1">
-            <span v-for="(s, i) in goalSubs" :key="i" class="text-xs px-1.5 py-0.5 rounded" style="background-color: var(--lt-brand-lightest); color: var(--lt-brand);">
-              {{ s }}
-            </span>
-          </div>
-        </div>
-      </div>
+        <!-- L1: AI 摘要 -->
+        <ProfileSummary />
 
-      <!-- ===== 风格层 ===== -->
-      <div class="rounded-xl p-4" style="background: linear-gradient(135deg, rgba(255, 140, 66, 0.04), var(--lt-orange-light-9)); border: 1px solid var(--lt-orange-light-5);">
-        <h3 class="text-sm font-bold mb-3 flex items-center gap-1.5" style="color: var(--lt-orange);">
-          风格 · 决定怎么呈现
-        </h3>
-        <div class="space-y-2.5">
-          <div class="flex items-center justify-between text-sm">
-            <span style="color: var(--lt-text-auxiliary);">认知偏好</span>
-            <span class="font-medium" style="color: var(--lt-text-primary);">{{ styleLabel }}<span v-if="densityLabel"> · {{ densityLabel }}</span></span>
-          </div>
-          <div class="flex items-center justify-between text-sm">
-            <span style="color: var(--lt-text-auxiliary);">学习节奏</span>
-            <span class="font-medium" style="color: var(--lt-text-primary);">{{ paceMinutes }}<span v-if="paceMinutes !== '?'"> 分钟/天</span><span v-if="paceUrgency"> · {{ paceUrgency }}</span></span>
-          </div>
-        </div>
-      </div>
+        <!-- L2: 核心层 -->
+        <CoreLayerCard />
 
-      <!-- ===== 辅助层 ===== -->
-      <div class="rounded-xl p-4" style="background-color: var(--lt-bg-page); border: 1px solid var(--lt-border);">
-        <h3 class="text-sm font-medium mb-3 flex items-center gap-1.5" style="color: var(--lt-text-auxiliary);">
-          辅助 · 补充上下文
-        </h3>
-        <div class="space-y-2.5">
-          <div class="text-sm">
-            <span class="text-xs" style="color: var(--lt-text-auxiliary);">专业</span>
-            <p class="mt-0.5 font-medium" style="color: var(--lt-text-primary);">{{ majorText }}
-              <span v-if="majorGrade" class="text-xs ml-1" style="color: var(--lt-text-auxiliary);">{{ majorGrade }}</span>
-            </p>
-          </div>
-          <div class="text-sm">
-            <span class="text-xs" style="color: var(--lt-text-auxiliary);">兴趣</span>
-            <div class="flex flex-wrap gap-1 mt-0.5">
-              <el-tag v-for="t in interestTopics" :key="t" size="small" type="primary" effect="plain" class="rounded text-xs">
-                {{ t }}
-              </el-tag>
-              <span v-if="interestTopics.length === 0" class="text-xs" style="color: var(--lt-text-auxiliary);">对话中建立...</span>
-            </div>
-          </div>
-          <div class="text-sm">
-            <span class="text-xs" style="color: var(--lt-text-auxiliary);">常见错因</span>
-            <div class="flex flex-wrap gap-1 mt-0.5">
-              <el-tag v-for="t in errorTags" :key="t" size="small" type="danger" effect="light" class="rounded text-xs">
-                {{ t }}
-              </el-tag>
-              <span v-if="errorTags.length === 0" class="text-xs" style="color: var(--lt-text-auxiliary);">做题后自动分析...</span>
-            </div>
-          </div>
-        </div>
-      </div>
+        <!-- L3: 风格层 -->
+        <StyleLayerCard />
 
+        <!-- L4: 知识层 -->
+        <KnowledgeTreeCard />
+
+        <!-- L5: Phase 3 占位（避免抢眼，仅在桌面端显示） -->
+        <!-- TODO(Phase3): 接入 ProfileTimeline 与 VersionDiff -->
+      </template>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* ===== 收起态 ===== */
+.pp-collapsed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  cursor: pointer;
+  height: 100%;
+  width: 36px;
+  background-color: var(--lt-bg-card);
+  border-left: 1px solid var(--lt-border);
+  transition: background-color 0.15s;
+}
+.pp-collapsed:hover {
+  background-color: var(--lt-brand-lightest);
+}
+.pp-collapsed-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  writing-mode: vertical-rl;
+  color: var(--lt-text-auxiliary);
+}
+.pp-collapsed:hover .pp-collapsed-label,
+.pp-collapsed:hover .pp-collapsed-icon {
+  color: var(--lt-brand);
+}
+.pp-collapsed-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.pp-collapsed-icon {
+  color: var(--lt-text-placeholder);
+}
+
+/* ===== 展开态 ===== */
+.pp-panel {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  background-color: var(--lt-bg-card);
+  border-left: 1px solid var(--lt-border);
+}
+.pp-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--lt-border);
+}
+.pp-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pp-head-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--lt-text-primary);
+  margin: 0;
+}
+.pp-head-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.pp-head-time {
+  font-size: 11px;
+  color: var(--lt-text-auxiliary);
+  margin: 0;
+}
+.pp-body {
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.pp-error-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(255,59,48,0.06);
+  border: 1px solid rgba(255,59,48,0.2);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--lt-danger);
+}
+</style>

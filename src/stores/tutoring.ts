@@ -13,6 +13,8 @@ import type {
   TutoringSSEEvent,
   SectionBlueprint,
   DiagramState,
+  ReActThought,
+  GuidedStepState,
 } from '@/types/tutoring'
 
 function createSectionState(blueprint: { id: string; title: string; expandDefault: boolean; expectedDiagram?: { id: string } | null }): SectionState {
@@ -43,6 +45,9 @@ export const useTutoringStore = defineStore('tutoring', () => {
   const personalization = ref<Personalization | null>(null)
   const teachingThesis = ref<string | null>(null)
 
+  // ReAct 思考步骤
+  const reactThoughts = ref<ReActThought[]>([])
+
   // Section
   const sections = ref<Record<string, SectionState>>({})
   const sectionOrder = ref<string[]>([])
@@ -57,6 +62,11 @@ export const useTutoringStore = defineStore('tutoring', () => {
   // 会话列表
   const sessions = ref<TutoringSessionSummary[]>([])
   const sessionsLoading = ref(false)
+
+  // Guided Mode 状态
+  const guidedSteps = ref<GuidedStepState[]>([])
+  const currentGuidedStepIdx = ref(-1)
+  const guidedSummary = ref('')
 
   // ============ 计算属性 ============
   const sectionList = computed(() =>
@@ -86,11 +96,15 @@ export const useTutoringStore = defineStore('tutoring', () => {
     analysis.value = null
     personalization.value = null
     teachingThesis.value = null
+    reactThoughts.value = []
     sections.value = {}
     sectionOrder.value = []
     resourceCount.value = 0
     resources.value = null
     error.value = null
+    guidedSteps.value = []
+    currentGuidedStepIdx.value = -1
+    guidedSummary.value = ''
   }
 
   function handleSSEEvent(event: TutoringSSEEvent) {
@@ -99,6 +113,15 @@ export const useTutoringStore = defineStore('tutoring', () => {
     if (eventName === 'tutoring.started') {
       status.value = 'planning'
       sessionId.value = data.sessionId
+      return
+    }
+
+    if (eventName === 'tutoring.react.thought') {
+      reactThoughts.value.push({
+        iteration: data.iteration,
+        thought: data.thought,
+        action: data.action,
+      })
       return
     }
 
@@ -254,7 +277,95 @@ export const useTutoringStore = defineStore('tutoring', () => {
       return
     }
 
+    // ===== Guided Mode Events =====
+
+    if (eventName === 'tutoring.guided.step_start') {
+      status.value = 'guided'
+      const step: GuidedStepState = {
+        id: data.stepId,
+        order: data.stepIndex,
+        stage: data.stage,
+        title: data.title,
+        status: 'guiding',
+        guidanceContent: '',
+        question: '',
+        studentAnswer: '',
+        feedback: '',
+        hint: '',
+        evaluation: '',
+        attempt: 0,
+        maxAttempts: 2,
+        allowReveal: false,
+        timeSpentMs: 0,
+      }
+      guidedSteps.value.push(step)
+      currentGuidedStepIdx.value = guidedSteps.value.length - 1
+      return
+    }
+
+    if (eventName === 'tutoring.guided.guidance_chunk') {
+      const step = guidedSteps.value.find(s => s.id === data.stepId)
+      if (step) step.guidanceContent += data.chunk
+      return
+    }
+
+    if (eventName === 'tutoring.guided.question') {
+      const step = guidedSteps.value.find(s => s.id === data.stepId)
+      if (step) {
+        step.question = data.question
+        step.status = 'waiting_answer'
+      }
+      return
+    }
+
+    if (eventName === 'tutoring.guided.waiting_answer') {
+      const step = guidedSteps.value.find(s => s.id === data.stepId)
+      if (step) {
+        step.attempt = data.attempt
+        step.maxAttempts = data.maxAttempts
+        step.allowReveal = data.allowReveal
+      }
+      return
+    }
+
+    if (eventName === 'tutoring.guided.feedback') {
+      const step = guidedSteps.value.find(s => s.id === data.stepId)
+      if (step) {
+        step.feedback = data.feedback
+        step.hint = data.hint
+        step.allowReveal = data.allowReveal
+      }
+      return
+    }
+
+    if (eventName === 'tutoring.guided.step_done') {
+      const step = guidedSteps.value.find(s => s.id === data.stepId)
+      if (step) {
+        step.status = 'done'
+        step.evaluation = data.evaluation
+        step.timeSpentMs = data.timeSpentMs
+      }
+      return
+    }
+
+    if (eventName === 'tutoring.guided.revealed') {
+      const step = guidedSteps.value.find(s => s.id === data.stepId)
+      if (step) {
+        step.studentAnswer = `[揭示答案] ${data.answer}`
+        step.feedback = data.explanation
+        step.evaluation = 'revealed'
+        step.status = 'done'
+      }
+      return
+    }
+
+    if (eventName === 'tutoring.guided.summary') {
+      guidedSummary.value += data.chunk
+      return
+    }
+
     if (eventName === 'tutoring.done') {
+      sessionId.value = data.sessionId
       status.value = 'done'
       return
     }
@@ -308,11 +419,15 @@ export const useTutoringStore = defineStore('tutoring', () => {
     analysis.value = null
     personalization.value = null
     teachingThesis.value = null
+    reactThoughts.value = []
     sections.value = {}
     sectionOrder.value = []
     resourceCount.value = 0
     resources.value = null
     error.value = null
+    guidedSteps.value = []
+    currentGuidedStepIdx.value = -1
+    guidedSummary.value = ''
   }
 
   return {
@@ -327,6 +442,7 @@ export const useTutoringStore = defineStore('tutoring', () => {
     analysis,
     personalization,
     teachingThesis,
+    reactThoughts,
     sections,
     sectionOrder,
     resourceCount,
@@ -334,6 +450,10 @@ export const useTutoringStore = defineStore('tutoring', () => {
     error,
     sessions,
     sessionsLoading,
+    // guided mode
+    guidedSteps,
+    currentGuidedStepIdx,
+    guidedSummary,
     // 计算属性
     sectionList,
     isClarifying,

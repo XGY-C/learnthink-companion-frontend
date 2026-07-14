@@ -1,0 +1,347 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 360" width="240" height="360">
+  <defs>
+    <!-- ===== 头部球面渐变 ===== -->
+    <radialGradient id="headGrad" cx="0.38" cy="0.3" r="0.72">
+      <stop offset="0%" stop-color="#A8C8FF"/>
+      <stop offset="35%" stop-color="#6B9BFF"/>
+      <stop offset="75%" stop-color="#2B6FFF"/>
+      <stop offset="100%" stop-color="#1A4FCC"/>
+    </radialGradient>
+
+    <!-- ===== 头部底部反光 ===== -->
+    <linearGradient id="headRim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="85%" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#3B7FFF" stop-opacity="0.4"/>
+    </linearGradient>
+
+    <!-- ===== 身体圆柱渐变 ===== -->
+    <linearGradient id="bodyGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#5A3ED4"/>
+      <stop offset="20%" stop-color="#7C5CFC"/>
+      <stop offset="55%" stop-color="#8B6CFC"/>
+      <stop offset="85%" stop-color="#6B4CE4"/>
+      <stop offset="100%" stop-color="#4A2EC0"/>
+    </linearGradient>
+
+    <!-- ===== 瞳孔 ===== -->
+    <radialGradient id="pupilGrad" cx="0.4" cy="0.35" r="0.6">
+      <stop offset="0%" stop-color="#5A5A7A"/>
+      <stop offset="40%" stop-color="#2A2A4A"/>
+      <stop offset="100%" stop-color="#1A1A2E"/>
+    </radialGradient>
+
+    <!-- ===== 虹膜环 ===== -->
+    <radialGradient id="irisGrad" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#6B9BFF" stop-opacity="0.6"/>
+      <stop offset="60%" stop-color="#2B6FFF" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#1A4FCC" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- ===== 面屏内阴影 ===== -->
+    <radialGradient id="screenGlow" cx="0.5" cy="0.4" r="0.65">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="60%" stop-color="#E8F0FE"/>
+      <stop offset="100%" stop-color="#C8D8FF"/>
+    </radialGradient>
+
+    <!-- ===== 天线发光 ===== -->
+    <radialGradient id="antennaGlow" cx="0.3" cy="0.3" r="0.6">
+      <stop offset="0%" stop-color="#FFE0B3"/>
+      <stop offset="30%" stop-color="#FF8C42"/>
+      <stop offset="80%" stop-color="#E06020"/>
+      <stop offset="100%" stop-color="#C04010"/>
+    </radialGradient>
+
+    <!-- ===== 腮红 ===== -->
+    <radialGradient id="blushGrad" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#FF8C42" stop-opacity="0.35"/>
+      <stop offset="60%" stop-color="#FF8C42" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#FF8C42" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- ===== 胸部屏幕 ===== -->
+    <linearGradient id="chestGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E8DFFF"/>
+    </linearGradient>
+
+    <!-- ===== 手臂高光 ===== -->
+    <linearGradient id="armGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#A78BFF"/>
+      <stop offset="50%" stop-color="#7C5CFC"/>
+      <stop offset="100%" stop-color="#5A3ED4"/>
+    </linearGradient>
+
+    <!-- ===== 阴影滤镜 ===== -->
+    <filter id="shadowDrop" x="-20%" y="-15%" width="150%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#1A1A2E" flood-opacity="0.12"/>
+    </filter>
+    <filter id="shadowSmall" x="-15%" y="-15%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#1A1A2E" flood-opacity="0.08"/>
+    </filter>
+    <filter id="shadowInset" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#1A1A2E" flood-opacity="0.15"/>
+    </filter>
+    <filter id="glowOuter" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowInner" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ================================================================== -->
+  <!--  地面阴影                                                           -->
+  <!-- ================================================================== -->
+  <ellipse cx="120" cy="326" rx="58" ry="6" fill="#1A1A2E" opacity="0.06" filter="url(#glowOuter)"/>
+  <ellipse cx="120" cy="324" rx="42" ry="4" fill="#1A1A2E" opacity="0.08" filter="url(#glowInner)"/>
+
+  <!-- ================================================================== -->
+  <!--  天线                                                               -->
+  <!-- ================================================================== -->
+  <!-- 天线光晕 -->
+  <circle id="antenna-glow" cx="120" cy="42" r="20" fill="#FF8C42" opacity="0.12" filter="url(#glowOuter)"/>
+  <!-- 天线杆 -->
+  <line id="antenna-stick" x1="120" y1="54" x2="120" y2="76" stroke="#FF8C42" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- 天线球底座 -->
+  <rect x="117" y="74" width="6" height="4" rx="2" fill="#E06020" opacity="0.6"/>
+  <!-- 天线球主体 -->
+  <circle id="antenna-ball" cx="120" cy="50" r="9" fill="url(#antennaGlow)" filter="url(#glowInner)"/>
+  <!-- 天线球高光 -->
+  <ellipse cx="117" cy="46" rx="3.5" ry="2.5" fill="#FFE0B3" opacity="0.8"/>
+  <!-- 天线球次高光 -->
+  <circle cx="123" cy="53" r="1.5" fill="#FFFFFF" opacity="0.25"/>
+
+  <!-- ================================================================== -->
+  <!--  耳朵 — 信号接收器风格                                              -->
+  <!-- ================================================================== -->
+  <g id="ear-left-group" filter="url(#shadowSmall)">
+    <!-- 底座 -->
+    <circle cx="62" cy="128" r="13" fill="#1A4FCC"/>
+    <!-- 外环 -->
+    <circle cx="62" cy="128" r="8" fill="none" stroke="#6B9BFF" stroke-width="2" opacity="0.6"/>
+    <!-- 内芯 -->
+    <circle cx="62" cy="128" r="5" fill="#6B9BFF"/>
+    <!-- 中心高光 -->
+    <circle cx="60" cy="126" r="2" fill="#A3C4FF"/>
+    <!-- 连接支架 -->
+    <path d="M 62,115 L 62,101" stroke="#1A4FCC" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+  <g id="ear-right-group" filter="url(#shadowSmall)">
+    <circle cx="178" cy="128" r="13" fill="#1A4FCC"/>
+    <circle cx="178" cy="128" r="8" fill="none" stroke="#6B9BFF" stroke-width="2" opacity="0.6"/>
+    <circle cx="178" cy="128" r="5" fill="#6B9BFF"/>
+    <circle cx="176" cy="126" r="2" fill="#A3C4FF"/>
+    <path d="M 178,115 L 178,101" stroke="#1A4FCC" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+
+  <!-- ================================================================== -->
+  <!--  头部                                                               -->
+  <!-- ================================================================== -->
+  <g id="head-group" filter="url(#shadowDrop)">
+    <!-- 头部主体：更圆润的 squircle -->
+    <rect id="head" x="60" y="73" width="120" height="102" rx="42" ry="42" fill="url(#headGrad)"/>
+    <!-- 头部底部环境反光 -->
+    <rect x="60" y="73" width="120" height="102" rx="42" ry="42" fill="url(#headRim)"/>
+
+    <!-- 头部上方环境光 -->
+    <path d="M 72,80 Q 120,64 168,80" fill="none" stroke="#C8DEFF" stroke-width="2.5" stroke-linecap="round" opacity="0.4"/>
+
+    <!-- 面部屏幕区域 — 内凹效果 -->
+    <rect id="face-screen" x="72" y="86" width="96" height="68" rx="20" ry="20" fill="url(#screenGlow)" stroke="#B8C8E8" stroke-width="1.5"/>
+    <!-- 面屏内侧阴影 -->
+    <rect x="72" y="86" width="96" height="68" rx="20" ry="20" fill="none" stroke="#2B6FFF" stroke-width="1" opacity="0.08"/>
+  </g>
+
+  <!-- ================================================================== -->
+  <!--  眼睛                                                               -->
+  <!-- ================================================================== -->
+  <g id="eyes-group">
+    <!-- 左眼阴影 -->
+    <ellipse cx="103" cy="113" rx="15" ry="16" fill="#1A4FCC" opacity="0.15"/>
+    <!-- 左眼白 -->
+    <ellipse id="eye-left" cx="103" cy="111" rx="15" ry="16" fill="#FFFFFF" stroke="#E0E8F0" stroke-width="0.5"/>
+    <!-- 左眼上眼皮阴影 -->
+    <path d="M 88,105 Q 103,98 118,105" fill="none" stroke="#2B6FFF" stroke-width="1.5" stroke-linecap="round" opacity="0.12"/>
+
+    <!-- 右眼阴影 -->
+    <ellipse cx="137" cy="113" rx="15" ry="16" fill="#1A4FCC" opacity="0.15"/>
+    <!-- 右眼白 -->
+    <ellipse id="eye-right" cx="137" cy="111" rx="15" ry="16" fill="#FFFFFF" stroke="#E0E8F0" stroke-width="0.5"/>
+    <!-- 右眼上眼皮阴影 -->
+    <path d="M 122,105 Q 137,98 152,105" fill="none" stroke="#2B6FFF" stroke-width="1.5" stroke-linecap="round" opacity="0.12"/>
+
+    <!-- 左眼虹膜环 -->
+    <ellipse cx="107" cy="113" rx="9" ry="10.5" fill="url(#irisGrad)"/>
+    <!-- 右眼虹膜环 -->
+    <ellipse cx="141" cy="113" rx="9" ry="10.5" fill="url(#irisGrad)"/>
+
+    <!-- 左瞳孔 -->
+    <ellipse id="pupil-left" cx="107" cy="114" rx="7" ry="8.5" fill="url(#pupilGrad)"/>
+    <!-- 右瞳孔 -->
+    <ellipse id="pupil-right" cx="141" cy="114" rx="7" ry="8.5" fill="url(#pupilGrad)"/>
+
+    <!-- 左眼主高光 -->
+    <ellipse id="highlight-left-1" cx="109" cy="108" rx="4" ry="3.5" fill="#FFFFFF" opacity="0.95" filter="url(#glowInner)"/>
+    <!-- 右眼主高光 -->
+    <ellipse id="highlight-right-1" cx="143" cy="108" rx="4" ry="3.5" fill="#FFFFFF" opacity="0.95" filter="url(#glowInner)"/>
+
+    <!-- 左眼次高光 -->
+    <circle id="highlight-left-2" cx="104" cy="119" r="2" fill="#FFFFFF" opacity="0.5"/>
+    <!-- 右眼次高光 -->
+    <circle id="highlight-right-2" cx="138" cy="119" r="2" fill="#FFFFFF" opacity="0.5"/>
+
+    <!-- 左眼小高光 -->
+    <circle cx="111" cy="111" r="1.2" fill="#FFFFFF" opacity="0.6"/>
+    <!-- 右眼小高光 -->
+    <circle cx="145" cy="111" r="1.2" fill="#FFFFFF" opacity="0.6"/>
+
+    <!-- 睫毛 -->
+    <path d="M 95,96 Q 92,92 91,89" fill="none" stroke="#1A4FCC" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+    <path d="M 100,95 Q 99,91 99,88" fill="none" stroke="#1A4FCC" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+    <path d="M 140,95 Q 141,91 141,88" fill="none" stroke="#1A4FCC" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+    <path d="M 145,96 Q 148,92 149,89" fill="none" stroke="#1A4FCC" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+  </g>
+
+  <!-- ================================================================== -->
+  <!--  腮红                                                               -->
+  <!-- ================================================================== -->
+  <ellipse id="blush-left" cx="86" cy="127" rx="10" ry="6" fill="url(#blushGrad)"/>
+  <ellipse id="blush-right" cx="154" cy="127" rx="10" ry="6" fill="url(#blushGrad)"/>
+
+  <!-- ================================================================== -->
+  <!--  眉毛                                                               -->
+  <!-- ================================================================== -->
+  <path d="M 91,100 Q 97,97 103,99" fill="none" stroke="#1A4FCC" stroke-width="1.8" stroke-linecap="round" opacity="0.4"/>
+  <path d="M 137,99 Q 143,97 149,100" fill="none" stroke="#1A4FCC" stroke-width="1.8" stroke-linecap="round" opacity="0.4"/>
+
+  <!-- ================================================================== -->
+  <!--  嘴巴                                                               -->
+  <!-- ================================================================== -->
+  <path id="mouth" d="M 112,131 Q 120,138 128,131" fill="none" stroke="#2B6FFF" stroke-width="2.8" stroke-linecap="round"/>
+  <!-- 嘴角微扬 -->
+  <path d="M 110,131 Q 111,130 112,131" fill="none" stroke="#2B6FFF" stroke-width="2" stroke-linecap="round"/>
+  <path d="M 130,131 Q 129,130 128,131" fill="none" stroke="#2B6FFF" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- ================================================================== -->
+  <!--  颈部环                                                             -->
+  <!-- ================================================================== -->
+  <rect id="neck-ring" x="98" y="170" width="44" height="8" rx="5" ry="5" fill="#A78BFF" stroke="#5A3ED4" stroke-width="0.5" filter="url(#shadowSmall)"/>
+  <!-- 颈环高光 -->
+  <path d="M 100,172 L 140,172" fill="none" stroke="#D6C8FF" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+
+  <!-- ================================================================== -->
+  <!--  身体                                                               -->
+  <!-- ================================================================== -->
+  <g id="body-group" filter="url(#shadowDrop)">
+    <!-- 身体主体 -->
+    <path id="body" d="M 80,176 L 160,176 Q 166,176 166,182 L 162,254 Q 160,268 148,272 L 92,272 Q 80,268 78,254 L 74,182 Q 74,176 80,176 Z" fill="url(#bodyGrad)"/>
+
+    <!-- 身体左侧环境光 -->
+    <path d="M 82,182 Q 82,220 86,258" fill="none" stroke="#CBB5FF" stroke-width="3" stroke-linecap="round" opacity="0.25"/>
+    <!-- 身体右侧微弱反光 -->
+    <path d="M 158,182 Q 158,220 156,258" fill="none" stroke="#B09CFF" stroke-width="2" stroke-linecap="round" opacity="0.15"/>
+
+    <!-- 胸口屏幕底座 -->
+    <rect id="chest-screen-bg" x="91" y="194" width="58" height="46" rx="14" ry="14" fill="#4A2EC0" opacity="0.3" filter="url(#shadowSmall)"/>
+    <!-- 胸口屏幕 -->
+    <rect id="chest-screen" x="93" y="196" width="54" height="42" rx="12" ry="12" fill="url(#chestGrad)" stroke="#D6C8FF" stroke-width="1"/>
+    <!-- 屏幕内发光 -->
+    <rect x="93" y="196" width="54" height="42" rx="12" ry="12" fill="none" stroke="#FFFFFF" stroke-width="0.5" opacity="0.5"/>
+
+    <!-- 屏幕内书本图标 -->
+    <g id="chest-icon">
+      <!-- 书本外轮廓阴影 -->
+      <path d="M 108,204 L 108,228" stroke="#E06020" stroke-width="3" stroke-linecap="round" opacity="0.3" transform="translate(0.5,0.5)"/>
+      <!-- 书脊 -->
+      <path d="M 108,204 L 108,227" stroke="#FF8C42" stroke-width="2.5" stroke-linecap="round"/>
+      <!-- 左页背景 -->
+      <path d="M 104,207 C 104,203 109,202 111,205 L 111,227 C 109,225 105,225 104,227 Z" fill="#FFB380" opacity="0.6"/>
+      <!-- 右页（亮面） -->
+      <path d="M 112,205 C 114,203 120,203 122,205 L 122,227 C 120,225 114,225 112,227 Z" fill="#FFD9B3"/>
+      <!-- 打开的书本中间折痕 -->
+      <line x1="111" y1="205" x2="112" y2="205" stroke="#FF8C42" stroke-width="1" opacity="0.5"/>
+      <!-- 文字行 -->
+      <line x1="112" y1="209" x2="122" y2="209" stroke="#FF8C42" stroke-width="1" opacity="0.35" stroke-linecap="round"/>
+      <line x1="112" y1="213" x2="120" y2="213" stroke="#FF8C42" stroke-width="1" opacity="0.35" stroke-linecap="round"/>
+      <line x1="112" y1="217" x2="118" y2="217" stroke="#FF8C42" stroke-width="1" opacity="0.25" stroke-linecap="round"/>
+    </g>
+
+    <!-- 指示灯 -->
+    <circle cx="108" cy="250" r="2.5" fill="#34C759" opacity="0.8" filter="url(#glowInner)"/>
+    <circle cx="120" cy="250" r="2.5" fill="#34C759" opacity="0.4"/>
+    <circle cx="132" cy="250" r="2.5" fill="#34C759" opacity="0.15"/>
+  </g>
+
+  <!-- ================================================================== -->
+  <!--  肩膀关节                                                           -->
+  <!-- ================================================================== -->
+  <circle id="joint-left" cx="86" cy="192" r="7.5" fill="#5A3ED4" stroke="#A78BFF" stroke-width="1.5"/>
+  <circle id="joint-right" cx="154" cy="192" r="7.5" fill="#5A3ED4" stroke="#A78BFF" stroke-width="1.5"/>
+  <circle cx="86" cy="191" r="2" fill="#CBB5FF" opacity="0.4"/>
+  <circle cx="154" cy="191" r="2" fill="#CBB5FF" opacity="0.4"/>
+
+  <!-- ================================================================== -->
+  <!--  左臂                                                               -->
+  <!-- ================================================================== -->
+  <g id="arm-left-group" filter="url(#shadowSmall)">
+    <!-- 上臂阴影 -->
+    <path d="M 83,198 Q 67,218 57,238" fill="none" stroke="#4A2EC0" stroke-width="13" stroke-linecap="round" opacity="0.2" transform="translate(1,1)"/>
+    <!-- 上臂 -->
+    <path id="arm-left-upper" d="M 83,198 Q 67,218 57,238" fill="none" stroke="url(#armGrad)" stroke-width="12" stroke-linecap="round"/>
+    <!-- 上臂高光 -->
+    <path d="M 82,196 Q 66,216 56,234" fill="none" stroke="#D6C8FF" stroke-width="2" stroke-linecap="round" opacity="0.25"/>
+    <!-- 肘关节 -->
+    <circle id="elbow-left" cx="59" cy="236" r="6" fill="#5A3ED4" opacity="0.7"/>
+    <!-- 手 -->
+    <path id="hand-left" d="M 53,244 Q 44,252 46,259 Q 48,263 54,261 Q 60,259 60,252 Q 60,246 53,244 Z" fill="#CBB5FF"/>
+    <!-- 手指高光 -->
+    <ellipse cx="49" cy="261" rx="2.5" ry="1.8" fill="#DEC8FF"/>
+    <ellipse cx="54" cy="262" rx="2" ry="1.5" fill="#DEC8FF"/>
+    <!-- 手指阴影 -->
+    <path d="M 50,259 Q 46,258 47,256" fill="none" stroke="#A78BFF" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+  </g>
+
+  <!-- ================================================================== -->
+  <!--  右臂                                                               -->
+  <!-- ================================================================== -->
+  <g id="arm-right-group" filter="url(#shadowSmall)">
+    <path d="M 157,198 Q 173,218 183,238" fill="none" stroke="#4A2EC0" stroke-width="13" stroke-linecap="round" opacity="0.2" transform="translate(-1,1)"/>
+    <path id="arm-right-upper" d="M 157,198 Q 173,218 183,238" fill="none" stroke="url(#armGrad)" stroke-width="12" stroke-linecap="round"/>
+    <path d="M 158,196 Q 174,216 184,234" fill="none" stroke="#D6C8FF" stroke-width="2" stroke-linecap="round" opacity="0.25"/>
+    <circle id="elbow-right" cx="181" cy="236" r="6" fill="#5A3ED4" opacity="0.7"/>
+    <path id="hand-right" d="M 187,244 Q 196,252 194,259 Q 192,263 186,261 Q 180,259 180,252 Q 180,246 187,244 Z" fill="#CBB5FF"/>
+    <ellipse cx="191" cy="261" rx="2.5" ry="1.8" fill="#DEC8FF"/>
+    <ellipse cx="186" cy="262" rx="2" ry="1.5" fill="#DEC8FF"/>
+    <path d="M 190,259 Q 194,258 193,256" fill="none" stroke="#A78BFF" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+  </g>
+
+  <!-- ================================================================== -->
+  <!--  腿和脚                                                             -->
+  <!-- ================================================================== -->
+  <g id="leg-left-group" filter="url(#shadowSmall)">
+    <!-- 腿 -->
+    <rect id="leg-left" x="100" y="265" width="14" height="34" rx="6" ry="6" fill="#2B6FFF"/>
+    <!-- 腿高光 -->
+    <line x1="103" y1="267" x2="103" y2="296" stroke="#6B9BFF" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
+    <!-- 鞋子 -->
+    <path id="foot-left" d="M 93,300 Q 93,295 100,295 L 114,295 Q 119,295 119,300 Q 119,309 112,309 L 98,309 Q 93,309 93,300 Z" fill="#1A4FCC"/>
+    <!-- 鞋面高光 -->
+    <path d="M 96,298 Q 104,296 114,297" fill="none" stroke="#6B9BFF" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
+    <!-- 鞋底反光 -->
+    <path d="M 96,305 Q 100,303 112,305" fill="none" stroke="#2B6FFF" stroke-width="1" stroke-linecap="round" opacity="0.25"/>
+    <!-- 鞋带装饰 -->
+    <circle cx="107" cy="302" r="1.5" fill="#A3C4FF" opacity="0.6"/>
+  </g>
+  <g id="leg-right-group" filter="url(#shadowSmall)">
+    <rect id="leg-right" x="126" y="265" width="14" height="34" rx="6" ry="6" fill="#2B6FFF"/>
+    <line x1="129" y1="267" x2="129" y2="296" stroke="#6B9BFF" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
+    <path id="foot-right" d="M 121,300 Q 121,295 128,295 L 146,295 Q 149,295 149,300 Q 149,309 142,309 L 128,309 Q 121,309 121,300 Z" fill="#1A4FCC"/>
+    <path d="M 124,298 Q 132,296 144,297" fill="none" stroke="#6B9BFF" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
+    <path d="M 128,305 Q 132,303 144,305" fill="none" stroke="#2B6FFF" stroke-width="1" stroke-linecap="round" opacity="0.25"/>
+    <circle cx="137" cy="302" r="1.5" fill="#A3C4FF" opacity="0.6"/>
+  </g>
+</svg>

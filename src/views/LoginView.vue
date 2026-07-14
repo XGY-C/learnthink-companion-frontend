@@ -215,7 +215,7 @@ const handleLogin = async () => {
     loginEmailValid.value = true
     loginPasswordValid.value = true
     const redirect = route.query.redirect as string
-    router.push(redirect || '/')
+    router.push(redirect || '/courses')
   } else {
     loginError.value = error
   }
@@ -264,7 +264,7 @@ const handleRegister = async () => {
     registerUsernameValid.value = true
     registerPasswordValid.value = true
     registerConfirmValid.value = true
-    router.push('/chat')
+    router.push('/courses')
   } else {
     registerError.value = error
   }

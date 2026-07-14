@@ -13,6 +13,7 @@ import {
 import GenerationCard from '@/components/GenerationCard.vue'
 import PathDag from '@/components/PathDag.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import EmptyState from '@/components/EmptyState.vue'
 
 const router = useRouter()
 const profile = useProfileStore()

@@ -1,94 +1,118 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
-import { apiFetch } from '@/utils/api'
-import type { LearningStats } from '@/types'
-import * as echarts from 'echarts/core'
-import { RadarChart, BarChart } from 'echarts/charts'
-import { CanvasRenderer } from 'echarts/renderers'
+import { useLearningReport, useAllCoursesReport } from '@/composables/useLearningReport'
 import VChart from 'vue-echarts'
-import { Timer, Document, Medal, WarningFilled, Right, TrendCharts } from '@element-plus/icons-vue'
+import { Timer, Right, TrendCharts } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const profile = useProfileStore()
 
-echarts.use([RadarChart, BarChart, CanvasRenderer])
+const scope = ref<'single' | 'all'>('single')
 
-const stats = ref<LearningStats | null>(null)
-const loading = ref(false)
-const error = ref<string | null>(null)
-const hasData = computed(() => stats.value !== null && stats.value.totalHours > 0)
+const {
+  stats, loading, error, hasData,
+  metrics, weakAnalysis, radarOption, trendOption,
+  versionHistory, behaviorDetails,
+  insightCards,
+} = useLearningReport(profile.activeCourseId)
 
-onMounted(() => {
-  if (profile.activeCourseId) fetchStats()
+const {
+  courseCards, selectedCourseIndex,
+  totalHoursAcross, courseCount,
+  allRadarOption, courseComparisonOption, timeDistributionOption,
+  mergedTrendOption,
+  allWeakAnalysis, overallAvgScore, bestCourse, mostInvestedCourse,
+  selectCourse,
+} = useAllCoursesReport()
+
+const barDimensions = computed(() => {
+  const s = radarOption.value
+  if (!s?.radar?.indicator?.length) return []
+  return s.radar.indicator.map((ind: any, i: number) => ({
+    name: ind.name,
+    value: (s.series?.[0]?.data?.[0]?.value?.[i]) ?? 0,
+    max: ind.max,
+  }))
 })
 
-async function fetchStats() {
-  if (!profile.activeCourseId) return
-  loading.value = true
-  error.value = null
-  try {
-    const res = await apiFetch<LearningStats>(`/user/me/stats?courseId=${encodeURIComponent(profile.activeCourseId)}`)
-    stats.value = res.data
-  } catch { error.value = '加载统计数据失败' }
-  finally { loading.value = false }
+const overallScore = computed(() => {
+  const d = barDimensions.value
+  if (!d.length) return 0
+  return Math.round(d.reduce((s, item) => s + item.value, 0) / d.length)
+})
+
+function gradeLabel(score: number): string {
+  if (score >= 90) return 'A'
+  if (score >= 80) return 'A-'
+  if (score >= 70) return 'B+'
+  if (score >= 60) return 'B'
+  if (score >= 50) return 'C+'
+  if (score >= 40) return 'C'
+  return 'D'
 }
 
-const metrics = computed(() => {
-  if (!stats.value) return []
-  return [
-    { label: '累计学习', value: stats.value.totalHours, unit: '小时', icon: Timer, color: 'var(--lt-brand)' },
-    { label: '资源包', value: stats.value.resourcePackCount, unit: '个', icon: Document, color: 'var(--lt-success)' },
-    { label: '完成度', value: stats.value.pathProgressPercent, unit: '%', icon: Medal, color: 'var(--lt-warning)' },
-    { label: '薄弱项', value: `${stats.value.prevWeakCount}→${stats.value.weakCount}`, unit: stats.value.weakCount < stats.value.prevWeakCount ? '改善' : '关注', icon: WarningFilled, color: stats.value.weakCount < stats.value.prevWeakCount ? 'var(--lt-success)' : 'var(--lt-danger)' },
-  ]
-})
-
-const chartColors = (() => {
-  const style = getComputedStyle(document.documentElement)
-  return {
-    axisLabel: style.getPropertyValue('--lt-chart-axis-label').trim() || '#8E8EA0',
-    axisLine: style.getPropertyValue('--lt-chart-axis-line').trim() || '#E8ECF0',
-    splitBg0: style.getPropertyValue('--lt-chart-split-bg-0').trim() || '#F5F7FA',
-    splitBg1: style.getPropertyValue('--lt-chart-split-bg-1').trim() || '#EEF1F5',
-    brand: style.getPropertyValue('--lt-brand').trim() || '#2B6FFF',
+function dimDescription(name: string, score: number): string {
+  if (score >= 80) {
+    if (name === '知识基础') return '基础知识积累扎实'
+    if (name === '学习目标') return '目标体系清晰'
+    if (name === '认知风格') return '有成熟的认知策略'
+    if (name === '学习节奏') return '节奏把控得当'
+    if (name === '专业理解') return '专业认知深入'
+    if (name === '兴趣广度') return '兴趣广泛'
+    return '表现优秀'
   }
-})()
+  if (score >= 60) {
+    if (name === '知识基础') return '有一定基础，仍可提升'
+    if (name === '学习目标') return '方向基本明确'
+    if (name === '认知风格') return '认知策略可更多元'
+    if (name === '学习节奏') return '节奏基本稳定'
+    if (name === '专业理解') return '处于成长阶段'
+    if (name === '兴趣广度') return '有待拓展'
+    return '成长中'
+  }
+  return '需重点关注'
+}
 
-const radarOption = computed(() => ({
-  radar: {
-    indicator: (stats.value?.radarData || []).map(d => ({ name: d.name, max: 100 })),
-    radius: '50%',
-    axisName: { color: chartColors.axisLabel, fontSize: 9 },
-    splitArea: { areaStyle: { color: [chartColors.splitBg0, chartColors.splitBg1, '#e2e8f0'] } },
-    axisLine: { lineStyle: { color: chartColors.axisLine } },
-    splitLine: { lineStyle: { color: chartColors.axisLine } }
-  },
-  series: [{ name: '当前画像', type: 'radar', data: [{ value: (stats.value?.radarData || []).map(d => d.value), name: '掌握度', itemStyle: { color: chartColors.brand }, areaStyle: { color: chartColors.brand + '1a' } }] }]
-}))
+const totalWeeks = computed(() => (stats.value?.weeklyActivity?.length ?? 0))
+const activeWeeks = computed(() => (stats.value?.weeklyActivity ?? []).filter((w: any) => w.hours > 0).length)
 
-const barOption = computed(() => ({
-  tooltip: { trigger: 'axis' as const },
-  grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
-  xAxis: { type: 'category' as const, data: (stats.value?.weeklyActivity || []).map(w => w.week), axisLine: { lineStyle: { color: chartColors.axisLine } }, axisLabel: { color: chartColors.axisLabel, fontSize: 10, rotate: 30 } },
-  yAxis: { type: 'value' as const, name: '小时', axisLine: { show: false }, axisTick: { show: false }, splitLine: { lineStyle: { color: chartColors.splitBg1 } }, axisLabel: { color: chartColors.axisLabel, fontSize: 10 } },
-  series: [{ data: (stats.value?.weeklyActivity || []).map(w => w.hours), type: 'bar' as const, barWidth: 14, itemStyle: { color: chartColors.brand, borderRadius: [4, 4, 0, 0] } }]
-}))
+const stabilityAnalysis = computed(() => {
+  const hours = (stats.value?.weeklyActivity ?? []).map(w => w.hours)
+  if (hours.length < 2) return null
+  const avg = hours.reduce((a, b) => a + b, 0) / hours.length
+  const variance = hours.reduce((sum, h) => sum + (h - avg) ** 2, 0) / hours.length
+  const std = Math.sqrt(variance)
+  const cv = avg > 0 ? std / avg : 1
+  const label = cv < 0.3 ? '高' : cv < 0.6 ? '中等' : '较低'
+  const half = Math.floor(hours.length / 2)
+  const firstAvg = hours.slice(0, half).reduce((a, b) => a + b, 0) / half
+  const secondAvg = hours.slice(half).reduce((a, b) => a + b, 0) / (hours.length - half)
+  const trend = secondAvg - firstAvg > 0.5 ? '上升' : secondAvg - firstAvg < -0.5 ? '下降' : '平稳'
+  return { label, avg: +avg.toFixed(1), trend, cv: +cv.toFixed(2) }
+})
 </script>
 
 <template>
   <div class="m-report">
-    <!-- 标题 -->
     <div class="m-report-header">
-      <h1 class="m-report-title">
-        <el-icon :size="22" style="color: var(--lt-brand);"><TrendCharts /></el-icon>
-        学习报告
-      </h1>
-      <p class="m-report-subtitle">回顾学习历程，追踪能力成长</p>
+      <div class="flex items-center gap-2 mb-1">
+        <h1 class="m-report-title">
+          <span class="text-lg">📋</span>
+          个人学习分析
+        </h1>
+        <el-radio-group v-model="scope" size="small">
+          <el-radio-button value="single">当前</el-radio-button>
+          <el-radio-button value="all">全部</el-radio-button>
+        </el-radio-group>
+      </div>
+      <p class="m-report-subtitle">
+        <template v-if="scope === 'single'">{{ profile.displayProfile?.core?.major || profile.activeCourse?.name || '学员' }} · {{ totalWeeks }} 周数据</template>
+        <template v-else>全部 {{ courseCount }} 门课程 · 累计 {{ totalHoursAcross }}h</template>
+      </p>
     </div>
 
-    <!-- 空状态 -->
     <template v-if="!loading && !hasData && !error">
       <div class="m-report-empty">
         <div class="text-5xl mb-4">🧭</div>
@@ -98,66 +122,199 @@ const barOption = computed(() => ({
       </div>
     </template>
 
-    <!-- Loading -->
     <div v-else-if="loading" class="m-report-loading"><el-icon class="is-loading" :size="32" style="color: var(--lt-brand);"><Timer /></el-icon></div>
-
-    <!-- Error -->
     <div v-else-if="error" class="m-report-error">
       <p class="text-sm" style="color: var(--lt-text-auxiliary);">{{ error }}</p>
-      <button class="m-retry-btn" @click="fetchStats()">重试</button>
+      <button class="m-retry-btn">重试</button>
     </div>
 
-    <!-- 数据视图 -->
-    <template v-else-if="stats">
-      <!-- 2×2 指标卡 -->
-      <div class="m-metrics">
-        <div v-for="(m, i) in metrics" :key="i" class="m-metric-card">
-          <p class="m-metric-label">{{ m.label }}</p>
-          <p class="m-metric-value">{{ m.value }}<span class="m-metric-unit">{{ m.unit }}</span></p>
+    <template v-else-if="hasData && scope === 'single'">
+      <!-- 综合评分 + 雷达 -->
+      <div class="m-card">
+        <p class="m-card-title">🎯 综合能力评估</p>
+        <div class="flex items-center gap-3 mb-3">
+          <svg viewBox="0 0 100 100" width="72" height="72" class="shrink-0">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="var(--lt-bg-page)" stroke-width="8"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="var(--lt-brand)" stroke-width="8" stroke-linecap="round"
+              :stroke-dasharray="2 * Math.PI * 42"
+              :stroke-dashoffset="2 * Math.PI * 42 * (1 - overallScore / 100)"
+              transform="rotate(-90, 50, 50)" style="transition: stroke-dashoffset 1s ease;"/>
+            <text x="50" y="38" text-anchor="middle" font-size="18" font-weight="800" fill="var(--lt-text-primary)">{{ overallScore }}</text>
+            <text x="50" y="52" text-anchor="middle" font-size="8" fill="var(--lt-text-placeholder)">/ 100</text>
+          </svg>
+          <div>
+            <div class="text-xl font-extrabold" :style="{ color: overallScore >= 70 ? 'var(--lt-success)' : 'var(--lt-warning)' }">{{ gradeLabel(overallScore) }}</div>
+            <p class="text-xs" style="color: var(--lt-text-auxiliary);">累计 {{ behaviorDetails.totalHours }}h · {{ activeWeeks }}/{{ totalWeeks }} 周活跃</p>
+          </div>
         </div>
-      </div>
-
-      <!-- 雷达图 + 柱状图（堆叠） -->
-      <div v-if="stats.radarData.length > 0" class="m-chart-card">
-        <h3 class="m-chart-title">能力雷达</h3>
-        <div class="m-chart-box" style="height: 210px;">
+        <div class="h-44" v-if="radarOption.radar?.indicator?.length">
           <v-chart class="w-full h-full" :option="radarOption" autoresize />
         </div>
       </div>
 
-      <div v-if="stats.weeklyActivity.length > 0" class="m-chart-card">
-        <h3 class="m-chart-title">学习轨迹（周）</h3>
-        <div class="m-chart-box" style="height: 180px;">
-          <v-chart class="w-full h-full" :option="barOption" autoresize />
-        </div>
-      </div>
-
-      <!-- 画像版本历史 -->
-      <div v-if="stats.profileHistory.length > 0" class="m-chart-card">
-        <h3 class="m-chart-title">画像版本历史</h3>
-        <div class="m-history-list">
-          <div v-for="h in stats.profileHistory" :key="h.version" class="m-history-item">
-            <div class="m-history-indicator">
-              <div class="m-history-dot" />
-              <div class="m-history-line" />
+      <!-- 维度水平条 -->
+      <div class="m-card">
+        <p class="m-card-title">📐 维度评分</p>
+        <div class="flex flex-col gap-2">
+          <div v-for="d in barDimensions" :key="d.name" class="py-1" :class="{ 'border-t border-[var(--lt-border)]': barDimensions.indexOf(d) > 0 }">
+            <div class="flex items-center gap-2">
+              <span class="text-xs w-16 shrink-0 text-right" style="color: var(--lt-text-secondary);">{{ d.name }}</span>
+              <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--lt-bg-page);">
+                <div class="h-full rounded-full" :style="{ width: (d.value / d.max) * 100 + '%', background: d.value >= 80 ? 'var(--lt-success)' : d.value >= 60 ? 'var(--lt-brand)' : 'var(--lt-warning)' }" />
+              </div>
+              <span class="text-xs font-bold w-5 text-right shrink-0" :style="{ color: d.value >= 80 ? 'var(--lt-success)' : d.value >= 60 ? 'var(--lt-brand)' : 'var(--lt-warning)' }">{{ d.value }}</span>
             </div>
-            <div class="m-history-content">
-              <p class="m-history-version">v{{ h.version }} · {{ h.trigger === 'chat' ? '对话更新' : h.trigger }}</p>
-              <p class="m-history-time">{{ h.createdAt }}</p>
-              <p v-if="h.summary.length > 0" class="m-history-summary">{{ h.summary.join('；') }}</p>
-            </div>
+            <p class="text-[10px] ml-[72px] mt-0.5" style="color: var(--lt-text-auxiliary);">{{ dimDescription(d.name, d.value) }}</p>
           </div>
         </div>
       </div>
 
-      <!-- 详细数据 -->
-      <div class="m-chart-card">
-        <h3 class="m-chart-title">详细数据</h3>
-        <div class="m-detail-list">
-          <div class="m-detail-row"><span class="m-detail-label">最长连续学习</span><span class="m-detail-value">{{ stats.value?.longestStreak ?? '-' }} 天</span></div>
-          <div class="m-detail-row"><span class="m-detail-label">平均每日</span><span class="m-detail-value">{{ stats.value?.avgDailyHours ?? '-' }} 小时</span></div>
-          <div class="m-detail-row"><span class="m-detail-label">生成总资源</span><span class="m-detail-value">{{ stats.value?.totalResources ?? '-' }} 份</span></div>
-          <div class="m-detail-row"><span class="m-detail-label">完成练习</span><span class="m-detail-value">{{ stats.value?.totalQuizzes ?? '-' }} 题</span></div>
+      <!-- 趋势图 -->
+      <div class="m-card" v-if="trendOption.xAxis?.data?.length">
+        <p class="m-card-title">📈 学习投入趋势</p>
+        <div class="h-44 mb-2">
+          <v-chart class="w-full h-full" :option="trendOption" autoresize />
+        </div>
+        <div class="flex items-center gap-2 text-xs" style="color: var(--lt-text-auxiliary);" v-if="stabilityAnalysis">
+          <span>稳定性：<strong>{{ stabilityAnalysis.label }}</strong></span>
+          <span>· 周均 <strong>{{ stabilityAnalysis.avg }}h</strong></span>
+          <span>· 趋势 <strong :style="{ color: stabilityAnalysis.trend === '上升' ? 'var(--lt-success)' : stabilityAnalysis.trend === '下降' ? 'var(--lt-danger)' : '' }">{{ stabilityAnalysis.trend }}</strong></span>
+        </div>
+      </div>
+
+      <!-- 薄弱项 -->
+      <div class="m-card">
+        <p class="m-card-title">🩺 薄弱项改善</p>
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-xs" style="color: var(--lt-text-auxiliary);">{{ weakAnalysis.previousCount }}→{{ weakAnalysis.currentCount }}</span>
+          <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--lt-bg-page); max-width: 80px;">
+            <div class="h-full rounded-full" :style="{ width: weakAnalysis.healRate + '%', background: weakAnalysis.healRate > 50 ? 'var(--lt-success)' : 'var(--lt-warning)' }" />
+          </div>
+          <span class="text-xs font-bold" :style="{ color: weakAnalysis.healRate > 50 ? 'var(--lt-success)' : 'var(--lt-warning)' }">{{ weakAnalysis.healRate }}%</span>
+        </div>
+        <div v-if="weakAnalysis.tags.length > 0" class="mb-2">
+          <p class="text-[10px] font-medium mb-1" style="color: var(--lt-danger);">待加强</p>
+          <div class="flex flex-wrap gap-1"><span v-for="tag in weakAnalysis.tags" :key="tag" class="m-badge danger">{{ tag }}</span></div>
+        </div>
+        <div v-if="weakAnalysis.mastered.length > 0">
+          <p class="text-[10px] font-medium mb-1" style="color: var(--lt-success);">已掌握</p>
+          <div class="flex flex-wrap gap-1"><span v-for="tag in weakAnalysis.mastered" :key="tag" class="m-badge success">{{ tag }}</span></div>
+        </div>
+      </div>
+
+      <!-- 画像演进 -->
+      <div v-if="versionHistory.length > 0" class="m-card">
+        <p class="m-card-title">🔄 画像演进</p>
+        <div class="flex flex-col gap-0">
+          <div v-for="(h, i) in versionHistory" :key="h.version" class="flex gap-2">
+            <div class="flex flex-col items-center w-2.5 shrink-0 pt-1">
+              <div class="w-2 h-2 rounded-full" :style="{ background: i === versionHistory.length - 1 ? 'var(--lt-brand)' : 'var(--lt-brand-lighter)' }" />
+              <div v-if="i < versionHistory.length - 1" class="w-px flex-1" style="background: var(--lt-border); margin-top: 2px;" />
+            </div>
+            <div class="flex-1 pb-2.5">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-xs font-semibold" style="color: var(--lt-text-primary);">v{{ h.version }}</span>
+                <span class="text-[9px] px-1 rounded" style="background: var(--lt-bg-page); color: var(--lt-text-auxiliary);">{{ h.label }}</span>
+                <span class="text-[9px] ml-auto" style="color: var(--lt-text-placeholder);">{{ h.createdAt }}</span>
+              </div>
+              <p class="text-[10px] mt-0.5" style="color: var(--lt-text-auxiliary);">{{ h.summary.join('；') }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- 全部课程模式 -->
+    <template v-else>
+      <!-- 课程概览行（水平滚动） -->
+      <div class="flex gap-2 mb-3 overflow-x-auto pb-1" style="-webkit-overflow-scrolling: touch;">
+        <div v-for="(card, i) in courseCards" :key="card.name"
+          class="m-course-card shrink-0"
+          :class="{ 'm-course-card-active': selectedCourseIndex === i }"
+          :style="{ '--card-color': card.color }"
+          @click="selectCourse(i)">
+          <span class="text-base">{{ card.emoji }}</span>
+          <p class="m-course-card-name">{{ card.name }}</p>
+          <div class="flex gap-2 text-[10px]" style="color: var(--lt-text-auxiliary);">
+            <span><strong class="text-xs" style="color:var(--lt-text-primary);">{{ card.totalHours }}</strong>h</span>
+            <span><strong class="text-xs" :style="{ color: card.score >= 70 ? 'var(--lt-success)' : 'var(--lt-warning)' }">{{ card.score }}</strong>分</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 综合评分 + 对比柱状图 -->
+      <div class="m-card">
+        <p class="m-card-title">🎯 跨课程综合评估</p>
+        <div class="flex items-center gap-3 mb-3">
+          <svg viewBox="0 0 100 100" width="72" height="72" class="shrink-0">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="var(--lt-bg-page)" stroke-width="8"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="var(--lt-brand)" stroke-width="8" stroke-linecap="round"
+              :stroke-dasharray="2 * Math.PI * 42"
+              :stroke-dashoffset="2 * Math.PI * 42 * (1 - overallAvgScore / 100)"
+              transform="rotate(-90, 50, 50)" style="transition: stroke-dashoffset 1s ease;"/>
+            <text x="50" y="38" text-anchor="middle" font-size="18" font-weight="800" fill="var(--lt-text-primary)">{{ overallAvgScore }}</text>
+            <text x="50" y="52" text-anchor="middle" font-size="8" fill="var(--lt-text-placeholder)">/ 100</text>
+          </svg>
+          <div>
+            <div class="text-lg font-extrabold" :style="{ color: overallAvgScore >= 70 ? 'var(--lt-success)' : 'var(--lt-warning)' }">{{ gradeLabel(overallAvgScore) }}</div>
+            <p class="text-[10px]" style="color: var(--lt-text-auxiliary);" v-if="bestCourse && mostInvestedCourse">
+              最高：{{ bestCourse.name }} {{ bestCourse.score }}分 · 最多：{{ mostInvestedCourse.name }} {{ mostInvestedCourse.totalHours }}h
+            </p>
+          </div>
+        </div>
+        <div class="h-48">
+          <v-chart v-if="courseComparisonOption.series?.length" class="w-full h-full" :option="courseComparisonOption" autoresize />
+        </div>
+      </div>
+
+      <!-- 时间分配饼图 -->
+      <div class="m-card">
+        <p class="m-card-title">🕐 学习时间分配</p>
+        <div class="h-48">
+          <v-chart v-if="timeDistributionOption.series?.length" class="w-full h-full" :option="timeDistributionOption" autoresize />
+        </div>
+      </div>
+
+      <!-- 多课程雷达 -->
+      <div class="m-card">
+        <p class="m-card-title">🎯 六维能力对比</p>
+        <div class="h-56">
+          <v-chart v-if="allRadarOption.series?.length" class="w-full h-full" :option="allRadarOption" autoresize />
+        </div>
+      </div>
+
+      <!-- 合并趋势 -->
+      <div class="m-card">
+        <p class="m-card-title">📈 每周投入趋势</p>
+        <div class="h-48">
+          <v-chart class="w-full h-full" :option="mergedTrendOption" autoresize />
+        </div>
+      </div>
+
+      <!-- 跨课程薄弱项 -->
+      <div class="m-card">
+        <p class="m-card-title">🩺 跨课程薄弱项</p>
+        <div class="flex items-center gap-3 text-xs mb-2" style="color: var(--lt-text-auxiliary);">
+          <span>共 <strong style="color:var(--lt-text-primary);">{{ allWeakAnalysis.totalWeak }}</strong> 个</span>
+          <span>已掌握 <strong style="color:var(--lt-success);">{{ allWeakAnalysis.totalMastered }}</strong> 项</span>
+        </div>
+        <div v-if="allWeakAnalysis.crossCutting.length" class="mb-2">
+          <p class="text-[10px] font-medium mb-1" style="color: var(--lt-orange);">跨课程共性问题</p>
+          <div class="flex flex-wrap gap-1"><span v-for="item in allWeakAnalysis.crossCutting" :key="item" class="m-badge" style="background:rgba(255,140,66,0.1);color:#EA580C;border-color:rgba(255,140,66,0.2)">{{ item }}</span></div>
+        </div>
+        <div>
+          <p class="text-[10px] font-medium mb-1" style="color: var(--lt-danger);">待加强</p>
+          <div class="flex flex-wrap gap-1"><span v-for="item in allWeakAnalysis.weakList" :key="item.tag" class="m-badge danger">{{ item.tag }}<span class="ml-0.5 opacity-60">×{{ item.count }}</span></span></div>
+        </div>
+      </div>
+
+      <!-- 诊断 -->
+      <div class="m-card" style="border-color:rgba(43,111,255,0.15);">
+        <p class="m-card-title">📝 综合诊断</p>
+        <div class="text-xs leading-relaxed" style="color: var(--lt-text-secondary);">
+          <p class="mb-1"><strong>整体：</strong>{{ gradeLabel(overallAvgScore) }}（均分{{ overallAvgScore }}）</p>
+          <p class="mb-1" v-if="bestCourse && mostInvestedCourse"><strong>投入产出：</strong>{{ mostInvestedCourse.name }} 投入最多（{{ mostInvestedCourse.totalHours }}h），{{ bestCourse.name }} 评分最高（{{ bestCourse.score }}分）</p>
+          <p v-if="allWeakAnalysis.crossCutting.length"><strong>共性问题：</strong>{{ allWeakAnalysis.crossCutting.length }} 个跨课程薄弱点</p>
         </div>
       </div>
     </template>
@@ -166,23 +323,14 @@ const barOption = computed(() => ({
 
 <style scoped>
 .m-report { padding: 16px; background: var(--lt-bg-page); min-height: 100%; }
-.m-report-header { margin-bottom: 16px; }
-.m-report-title { font-size: 20px; font-weight: 700; color: var(--lt-text-primary); display: flex; align-items: center; gap: 8px; margin: 0; }
-.m-report-subtitle { font-size: 12px; color: var(--lt-text-auxiliary); margin: 4px 0 0; }
-
-/* Metrics 2×2 */
-.m-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
-.m-metric-card { background: var(--lt-bg-card); border: 1px solid var(--lt-border); border-radius: 12px; padding: 14px; }
-.m-metric-label { font-size: 11px; color: var(--lt-text-auxiliary); margin: 0 0 4px; }
-.m-metric-value { font-size: 20px; font-weight: 700; color: var(--lt-text-primary); margin: 0; line-height: 1.2; }
-.m-metric-unit { font-size: 11px; font-weight: 400; color: var(--lt-text-placeholder); margin-left: 2px; }
-
-/* Chart cards */
-.m-chart-card { background: var(--lt-bg-card); border: 1px solid var(--lt-border); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
-.m-chart-title { font-size: 13px; font-weight: 600; color: var(--lt-text-secondary); margin: 0 0 10px; }
-.m-chart-box { background: var(--lt-bg-page); border-radius: 8px; padding: 4px; }
-
-/* Empty */
+.m-report-header { margin-bottom: 14px; }
+.m-report-title { font-size: 19px; font-weight: 700; color: var(--lt-text-primary); display: flex; align-items: center; gap: 6px; margin: 0; }
+.m-report-subtitle { font-size: 11px; color: var(--lt-text-auxiliary); margin: 3px 0 0; }
+.m-card { background: var(--lt-bg-card); border: 1px solid var(--lt-border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.m-card-title { font-size: 13px; font-weight: 600; color: var(--lt-text-primary); margin: 0 0 10px; }
+.m-badge { display: inline-flex; align-items: center; font-size: 10px; padding: 2px 8px; border-radius: 5px; font-weight: 500; border: 1px solid; line-height: 1.5; }
+.m-badge.danger { background: rgba(255,59,48,0.08); color: #DC2626; border-color: rgba(255,59,48,0.18); }
+.m-badge.success { background: rgba(34,197,94,0.1); color: #16A34A; border-color: rgba(34,197,94,0.2); }
 .m-report-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 60px 24px; }
 .m-empty-title { font-size: 16px; font-weight: 600; color: var(--lt-text-primary); margin: 12px 0 6px; }
 .m-empty-desc { font-size: 13px; color: var(--lt-text-auxiliary); max-width: 280px; margin: 0 0 20px; line-height: 1.5; }
@@ -190,23 +338,27 @@ const barOption = computed(() => ({
 .m-report-loading { display: flex; justify-content: center; padding: 80px 0; }
 .m-report-error { text-align: center; padding: 60px 0; }
 .m-retry-btn { padding: 8px 20px; border: 1px solid var(--lt-border); border-radius: 8px; background: var(--lt-bg-card); color: var(--lt-text-secondary); font-size: 13px; cursor: pointer; margin-top: 12px; }
-
-/* Version history (vertical timeline) */
-.m-history-list { display: flex; flex-direction: column; }
-.m-history-item { display: flex; gap: 12px; position: relative; }
-.m-history-indicator { display: flex; flex-direction: column; align-items: center; width: 12px; flex-shrink: 0; padding-top: 4px; }
-.m-history-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--lt-brand); flex-shrink: 0; }
-.m-history-line { width: 1px; flex: 1; background: var(--lt-border); margin-top: 4px; }
-.m-history-item:last-child .m-history-line { display: none; }
-.m-history-content { flex: 1; padding-bottom: 16px; }
-.m-history-version { font-size: 13px; font-weight: 500; color: var(--lt-text-primary); margin: 0; }
-.m-history-time { font-size: 10px; color: var(--lt-text-placeholder); margin: 2px 0; }
-.m-history-summary { font-size: 12px; color: var(--lt-text-auxiliary); margin: 4px 0 0; line-height: 1.4; }
-
-/* Detail list */
-.m-detail-list { display: flex; flex-direction: column; gap: 10px; }
-.m-detail-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--lt-border); }
-.m-detail-row:last-child { border-bottom: none; }
-.m-detail-label { font-size: 13px; color: var(--lt-text-auxiliary); }
-.m-detail-value { font-size: 14px; font-weight: 600; color: var(--lt-text-primary); }
+.m-course-card {
+  background: var(--lt-bg-card);
+  border: 1.5px solid var(--lt-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 110px;
+  border-top: 2.5px solid var(--card-color, var(--lt-brand));
+  transition: all 0.2s ease;
+}
+.m-course-card-active {
+  border-color: var(--card-color, var(--lt-brand)) !important;
+  background: color-mix(in srgb, var(--card-color, var(--lt-brand)) 6%, var(--lt-bg-card));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--card-color, var(--lt-brand)) 20%, transparent);
+}
+.m-course-card-name {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--lt-text-primary);
+  margin: 3px 0 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 </style>

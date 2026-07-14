@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import { useNotificationStore } from '@/stores/notification'
 import { useRouter } from 'vue-router'
+import type { NotificationItem } from '@/types'
 
 const notification = useNotificationStore()
 const router = useRouter()
 
-function handleNotificationClick(item: any) {
-  if (item.packId) {
-    router.push(`/studio/${item.taskId || ''}?pack_id=${item.packId}`)
+async function handleNotificationClick(item: NotificationItem) {
+  notification.remove(item.id)
+  if (item.dailyRefType === 'daily') {
+    router.push('/dashboard?focus=recommendations')
   } else if (item.taskId) {
     router.push(`/studio/${item.taskId}`)
+  } else if (item.packId) {
+    router.push(`/library?packId=${item.packId}`)
   }
-  notification.remove(item.id)
 }
 </script>
 
@@ -66,13 +69,13 @@ function handleNotificationClick(item: any) {
   padding: 0;
   text-align: left;
   max-width: none !important;
-  background-color: var(--lt-bg-page, #f5f7fb);
+  background: linear-gradient(174deg, #f9fbff 0%, #fafcff 22%, var(--lt-bg-page, #f5f7fb) 48%, var(--lt-bg-page, #f5f7fb) 52%, #fcfaff 78%, #faf8ff 100%);
 }
 
 body {
   margin: 0;
   padding: 0;
-  background-color: var(--lt-bg-page, #f5f7fb);
+  background: transparent;
 }
 
 .app-router-wrap {

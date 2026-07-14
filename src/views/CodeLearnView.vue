@@ -153,6 +153,17 @@
         <div v-if="currentHint?.codeSnippet" class="hint-code"><pre>{{ currentHint.codeSnippet }}</pre></div>
       </div>
     </Teleport>
+
+    <!-- 离开提示遮罩 -->
+    <Transition name="fade">
+      <div v-if="isLearningAway" class="learning-away-overlay">
+        <div class="learning-away-card">
+          <p class="text-lg font-semibold mb-2">你已离开一会儿了</p>
+          <p class="text-sm mb-4" style="color: var(--lt-text-auxiliary);">学习计时已暂停</p>
+          <el-button type="primary" @click="resumeTracking">继续学习</el-button>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -175,8 +186,16 @@ import type {
   VariableInfo, TraceStep, FoldableRegion, StepHint
 } from '@/types/code'
 import type { CodeRunResult } from '@/types'
+import { useProfileStore } from '@/stores/profile'
+import { useLearningTracker } from '@/composables/useLearningTracker'
 
 const router = useRouter()
+const profileStore = useProfileStore()
+
+// 学习心跳追踪
+const { isAway: isLearningAway, resumeTracking } = useLearningTracker({
+  courseId: profileStore.activeCourseId,
+})
 
 const LINE_H = 22
 
@@ -771,4 +790,19 @@ onUnmounted(() => {
 .hint-content { font-size: 13px; color: var(--lt-text-primary); line-height: 1.6; }
 .hint-code { margin-top: 8px; padding: 6px 10px; background: #1e1e2e; border-radius: var(--lt-radius-sm); }
 .hint-code pre { margin: 0; font-family: var(--lt-font-mono); font-size: 12px; color: #d4d4d4; }
+
+/* 离开提示遮罩 */
+.learning-away-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 3000; backdrop-filter: blur(4px);
+}
+.learning-away-card {
+  background: var(--lt-bg-card); border-radius: 16px;
+  padding: 32px 48px; text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+}
+.fade-enter-active, .fade-leave-active { transition: opacity 0.25s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

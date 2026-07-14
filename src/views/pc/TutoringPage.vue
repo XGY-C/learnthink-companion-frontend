@@ -34,6 +34,7 @@ onMounted(async () => {
     await startTutoring({
       question: q,
       chatId: routeChatId.value || null,
+      courseId: routeCourseId.value,
     })
     return
   }
@@ -63,7 +64,7 @@ onMounted(async () => {
       /* ignore */
     }
   } else if (questionFromQuery.value) {
-    await startTutoring({ question: questionFromQuery.value })
+    await startTutoring({ question: questionFromQuery.value, courseId: routeCourseId.value })
   }
 })
 

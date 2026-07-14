@@ -286,11 +286,7 @@ const correctCount = computed(() => {
       </button>
       <span class="quiz-progress">{{ activeIdx + 1 }} / {{ questions.length }}</span>
       <button class="quiz-action-btn secondary" @click="activeIdx < questions.length - 1 ? goTo(activeIdx + 1) : null" :disabled="activeIdx === questions.length - 1">
-        下一题 →
-      </button>
-      <span class="flex-1" />
-      <button class="quiz-action-btn primary" @click="$emit('open-practice')">
-        在练习模式中打开 →
+        下一题 ->
       </button>
     </div>
   </div>

@@ -1,5 +1,5 @@
 <template>
-  <div class="markdown-viewer">
+  <div class="markdown-viewer" :class="{ 'has-toc': props.showToc && tocVisible }">
     <!-- TOC toggle button (collapsible mode) -->
     <button
       v-if="props.showToc && props.tocCollapsible && headings.length > 0"
@@ -31,7 +31,7 @@
     <!-- 渲染内容 -->
     <div
       ref="contentRef"
-      class="markdown-content"
+      class="markdown-content lt-svg-root"
       v-html="sanitizedHtml"
       @click="onContentClick"
     />
@@ -45,7 +45,9 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
+import mermaid from 'mermaid'
 import MarkdownIt from 'markdown-it'
+import { processLinkCards, initLinkCardInteractions } from '../utils/linkCard'
 
 const props = withDefaults(defineProps<{
   content: string
@@ -95,7 +97,7 @@ function onContentClick(e: MouseEvent) {
 
 // ===== markdown-it 实例 =====
 const md = new MarkdownIt({
-  html: false,
+  html: true,
   linkify: true,
   typographer: false,
   breaks: false,
@@ -150,6 +152,10 @@ function headingIdPlugin(md: MarkdownIt) {
   }
 }
 md.use(headingIdPlugin)
+
+// ===== Mermaid 初始化 =====
+mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' })
+let mermaidCounter = 0
 
 // ===== 数学公式预处理（在 markdown-it 之前） =====
 const processMath = (text: string): { html: string; placeholders: Map<string, string> } => {
@@ -212,8 +218,40 @@ const fixConcatHeadings = (text: string): string => {
 // ===== Markdown 转 HTML =====
 const mdToHtml = (text: string): string => {
   const fixed = fixConcatHeadings(text)
-  const { html: preprocessed, placeholders } = processMath(fixed)
-  const rendered = md.render(preprocessed)
+
+  // Protect raw <svg> blocks from two pipeline hazards:
+  //
+  // 1. processMath $$...$$ regex - uses [\s\S]*? (cross-line); if an SVG
+  //    <text> contains "$$", the regex swallows everything from that $$ to
+  //    the next $$ in the document.
+  //
+  // 2. markdown-it HTML block splitting - type 7 HTML blocks end at blank
+  //    lines.  LLM-generated SVGs often contain blank lines (e.g. between
+  //    </defs> and diagram elements).  When split, the second fragment is
+  //    wrapped in <p>, which triggers the HTML5 parser's "breakout" rule:
+  //    the parser exits SVG namespace, placing <rect>/<text>/<line> in HTML
+  //    namespace.  DOMPurify then removes them because SVG-specific tags in
+  //    HTML namespace fail _checkValidNamespace() (they're in ALL_SVG_TAGS
+  //    but not in COMMON_SVG_AND_HTML_ELEMENTS).
+  //
+  // Fix: extract SVGs, strip internal blank lines, protect from processMath,
+  // then restore as a single unbroken HTML block for markdown-it.
+  const htmlBlocks: string[] = []
+  const protectedText = fixed.replace(/<svg\b[\s\S]*?<\/svg>/gi, (m) => {
+    const idx = htmlBlocks.length
+    htmlBlocks.push(m.replace(/\n[ \t]*\n/g, '\n'))
+    return `\n\n%%HTMLBLOCK_${idx}%%\n\n`
+  })
+
+  const { html: preprocessed, placeholders } = processMath(protectedText)
+
+  // Restore HTML blocks (with blank lines already removed) before rendering
+  let restored = preprocessed
+  htmlBlocks.forEach((block, i) => {
+    restored = restored.split(`%%HTMLBLOCK_${i}%%`).join(block)
+  })
+
+  const rendered = md.render(restored)
   return postProcess(rendered, placeholders)
 }
 
@@ -268,11 +306,25 @@ function stripControlBlock(text: string): string {
   return text.replace(/\[CONTROL\][\s\S]*?---CONTROL_END---/g, '').trim()
 }
 
-// ===== 消毒 HTML =====
+// ===== 消毒 HTML + 链接卡片 =====
 const sanitizedHtml = computed(() => {
   const rawHtml = mdToHtml(stripControlBlock(props.content))
-  return DOMPurify.sanitize(rawHtml, {
-    ADD_ATTR: ['id', 'target', 'rel', 'data-code', 'type', 'checked', 'disabled'],
+  const sanitized = DOMPurify.sanitize(rawHtml, {
+    ADD_ATTR: ['id', 'target', 'rel', 'data-code', 'type', 'checked', 'disabled',
+      'd', 'cx', 'cy', 'r', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
+      'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width',
+      'transform', 'font-size', 'font-weight', 'text-anchor',
+      'dominant-baseline', 'opacity', 'clip-path', 'mask',
+      'href', 'style', 'class', 'rx', 'ry',
+      'marker-end', 'marker-start', 'refX', 'refY',
+      'markerWidth', 'markerHeight', 'orient', 'points',
+      'version', 'xmlns', 'stroke-linecap', 'stroke-linejoin',
+      'fill-rule', 'clip-rule', 'stroke-dasharray',
+      'stroke-opacity', 'fill-opacity', 'preserveAspectRatio',
+      'stroke-miterlimit', 'stroke-dashoffset',
+      'font-family', 'font-style', 'text-decoration',
+      'letter-spacing', 'word-spacing',
+    ],
     ALLOWED_TAGS: [
       'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
       'p', 'br', 'hr',
@@ -281,18 +333,60 @@ const sanitizedHtml = computed(() => {
       'strong', 'em', 'a', 'span', 'div',
       'table', 'thead', 'tbody', 'tr', 'th', 'td',
       'blockquote', 'img', 'sup', 'sub', 'del',
-      'input'
+      'input',
+      'svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon',
+      'ellipse', 'text', 'tspan', 'g', 'defs', 'use',
+      'linearGradient', 'radialGradient', 'stop',
+      'clipPath', 'mask', 'marker', 'pattern',
+      'image', 'foreignObject', 'filter',
+      'feGaussianBlur', 'feOffset', 'feMerge', 'feMergeNode',
+      'feColorMatrix', 'feBlend', 'feComposite', 'feFlood',
+      'feDropShadow', 'animate', 'animateTransform', 'set',
     ]
   })
+  // 在消毒后处理链接卡片（卡片 HTML 由可信代码生成，动态内容已转义）
+  return processLinkCards(sanitized)
 })
 
-// ===== 代码高亮 =====
+// ===== Mermaid 图表渲染 =====
+const renderMermaidBlocks = () => {
+  if (!contentRef.value) return
+  const blocks = contentRef.value.querySelectorAll('code.language-mermaid')
+  blocks.forEach(async (block) => {
+    const wrapper = (block as HTMLElement).closest('.code-block-wrapper')
+    if (!wrapper || wrapper.getAttribute('data-mermaid-rendered')) return
+    wrapper.setAttribute('data-mermaid-rendered', 'true')
+
+    const code = block.textContent || ''
+    if (!code.trim()) return
+
+    const id = `mermaid-svg-${++mermaidCounter}`
+    try {
+      const { svg } = await mermaid.render(id, code.trim())
+      const container = document.createElement('div')
+      container.className = 'mermaid-container'
+      container.innerHTML = svg
+      wrapper.replaceWith(container)
+    } catch (e) {
+      // 渲染失败，保留原始代码块供用户查看
+      wrapper.removeAttribute('data-mermaid-rendered')
+    }
+  })
+}
+
+// ===== 代码高亮 + 链接卡片交互 =====
 const highlightAll = () => {
   if (!contentRef.value) return
   nextTick(() => {
     contentRef.value?.querySelectorAll('pre code').forEach((block) => {
       hljs.highlightElement(block as HTMLElement)
     })
+    // 初始化链接卡片交互（文章点击、视频展开、favicon 回退）
+    if (contentRef.value) {
+      initLinkCardInteractions(contentRef.value)
+    }
+    // 渲染 Mermaid 图表（在高亮之后，复用已构建的 DOM）
+    renderMermaidBlocks()
   })
 }
 
@@ -348,15 +442,21 @@ onUnmounted(() => {
   position: relative;
 }
 
+.markdown-viewer.has-toc {
+  height: 100%;
+  min-height: 0;
+}
+
 .toc-sidebar {
   width: 200px;
   flex-shrink: 0;
-  position: sticky;
-  top: 0;
-  max-height: calc(100vh - 200px);
   overflow-y: auto;
   border-right: 1px solid var(--lt-border);
   padding-right: 16px;
+}
+
+.markdown-viewer.has-toc .toc-sidebar {
+  height: 100%;
 }
 
 .toc-header {
@@ -447,6 +547,11 @@ onUnmounted(() => {
   font-size: 15px;
   line-height: 1.85;
   color: var(--lt-text-primary);
+}
+
+.markdown-viewer.has-toc .markdown-content {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .markdown-content :deep(h1) {
@@ -707,6 +812,23 @@ onUnmounted(() => {
 .markdown-content :deep(img) {
   max-width: 100%;
   border-radius: 8px;
+}
+
+.markdown-content :deep(svg) {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Mermaid 图表容器 */
+.markdown-content :deep(.mermaid-container) {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0;
+  padding: 20px;
+  background: var(--lt-bg-page);
+  border: 1px solid var(--lt-border);
+  border-radius: 8px;
+  overflow-x: auto;
 }
 
 /* highlight.js 主题微调 */

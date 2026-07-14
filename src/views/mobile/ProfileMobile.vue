@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { User, Bell, Lock, Timer, Document, Medal, SwitchButton } from '@element-plus/icons-vue'
+import { User, Lock, Timer, Document, Medal, SwitchButton, DataAnalysis } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useProfileStore } from '@/stores/profile'
 import { useAuth } from '@/composables/useAuth'
 import { apiFetch } from '@/utils/api'
 import type { LearningStats } from '@/types'
 import ProfileInfoTab from '@/views/profile/ProfileInfoTab.vue'
-import NotificationTab from '@/views/profile/NotificationTab.vue'
 import SecurityTab from '@/views/profile/SecurityTab.vue'
+import LearningProfileTab from '@/views/profile/LearningProfileTab.vue'
 
 const userStore = useUserStore()
 const profileStore = useProfileStore()
@@ -60,7 +60,7 @@ async function handleLogout() {
 
 const tabs = [
   { name: 'info', label: '个人信息', icon: User },
-  { name: 'notifications', label: '消息通知', icon: Bell },
+  { name: 'learning_profile', label: '学习画像', icon: DataAnalysis },
   { name: 'security', label: '账号安全', icon: Lock },
 ]
 
@@ -114,7 +114,7 @@ onMounted(() => { fetchStats() })
       </div>
       <div class="m-tab-content">
         <ProfileInfoTab v-if="activeTab === 'info'" />
-        <NotificationTab v-else-if="activeTab === 'notifications'" />
+        <LearningProfileTab v-else-if="activeTab === 'learning_profile'" />
         <SecurityTab v-else-if="activeTab === 'security'" />
       </div>
     </div>

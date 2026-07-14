@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useChatSSE } from '@/composables/useChatSSE'
@@ -14,10 +14,34 @@ import PlanOfferCard from '@/components/PlanOfferCard.vue'
 import PlanEditor from '@/components/PlanEditor.vue'
 import BottomSheet from '@/components/mobile/BottomSheet.vue'
 import ProfileSheet from '@/components/mobile/ProfileSheet.vue'
+import AnalysisBar from '@/components/tutoring/AnalysisBar.vue'
+import AnswerContainer from '@/components/tutoring/AnswerContainer.vue'
 
 const router = useRouter()
 const chat = useChatSSE()
 const profile = useProfileStore()
+
+const tutoringActiveMessage = computed<ChatMessage | null>(() => {
+  const msgs = chat.activeSession.value?.messages ?? []
+  return [...msgs].reverse().find(m => m.role === 'assistant' && m._tutoring?.completed) || null
+})
+
+const tutoringVisibleAnalysis = computed(() => tutoringActiveMessage.value?._tutoring?.snapshot?.analysis ?? null)
+const tutoringVisibleSections = computed(() => tutoringActiveMessage.value?._tutoring?.snapshot?.sections ?? null)
+const tutoringVisibleThoughtSteps = computed(() => {
+  const msg = tutoringActiveMessage.value
+  if (msg?._tutoring?.completed) {
+    return (msg._tutoring.snapshot?.reactThoughts ?? []).map((t, index) => ({
+      label: `ReAct 第 ${t.iteration || index + 1} 轮`,
+      icon: 'thought',
+      done: true,
+      phase: 'DECISION' as const,
+      detail: `Action: ${t.action}`,
+      thought: t.thought,
+    }))
+  }
+  return msg?.thinking?.steps ?? []
+})
 
 // ===== Session drawer =====
 const showSessions = ref(false)
@@ -32,6 +56,20 @@ const generateTopic = ref('')
 // ===== Input =====
 const inputMessage = ref('')
 const messageListRef = ref<HTMLElement | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const isUploading = ref(false)
+const ACCEPTED_TYPES = '.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.html,.htm,.pdf,.docx,.pptx,.py,.js,.ts,.tsx,.jsx,.vue,.java,.c,.cpp,.h,.hpp,.cs,.go,.rs,.rb,.php,.swift,.kt,.scala,.sh,.sql,.r,.tex,.bat,.ps1,.jpg,.jpeg,.png,.gif,.bmp,.webp,.svg'
+
+function handleFileSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+  isUploading.value = true
+  const promises = Array.from(input.files).map(file => chat.uploadFile(file))
+  Promise.allSettled(promises).finally(() => {
+    isUploading.value = false
+    input.value = ''
+  })
+}
 
 function scrollToBottom() {
   nextTick(() => {
@@ -40,9 +78,20 @@ function scrollToBottom() {
   })
 }
 
+function getFileExt(name: string): string {
+  const i = name.lastIndexOf('.')
+  return i > 0 ? name.slice(i + 1).toUpperCase() : ''
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + 'B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + 'MB'
+}
+
 function handleSendMessage() {
   const text = inputMessage.value.trim()
-  if (!text || chat.isStreaming.value) return
+  if ((!text && chat.pendingFiles.value.length === 0) || chat.isStreaming.value) return
   inputMessage.value = ''
   chat.sendMessage(text)
 }
@@ -190,6 +239,18 @@ window.addEventListener('beforeunload', onBeforeUnload)
         >
           <!-- AI 消息 -->
           <template v-if="msg.role === 'assistant'">
+            <div v-if="msg._tutoring?.completed && msg === tutoringActiveMessage" class="mobile-tutoring-inline">
+              <ThoughtChainTimeline
+                :steps="tutoringVisibleThoughtSteps"
+                :is-streaming="false"
+                :expanded="msg._tutoring?.snapshot?.expanded ?? false"
+                @update:expanded="msg._tutoring!.snapshot!.expanded = $event"
+                class="mobile-thinking-detail"
+              />
+              <AnalysisBar v-if="tutoringVisibleAnalysis" :analysis="tutoringVisibleAnalysis" class="mb-3" />
+              <AnswerContainer :sections="tutoringVisibleSections || undefined" :read-only="true" />
+            </div>
+
             <!-- 思考链：默认折叠，点击展开 -->
             <div
               v-if="msg.thinking && msg.thinking.steps.length > 0"
@@ -235,7 +296,7 @@ window.addEventListener('beforeunload', onBeforeUnload)
 
             <!-- 方案卡片 — 资源类型 -->
             <PlanOfferCard
-              v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.accepted && !msg._planOffer.dismissed"
+              v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.dismissed"
               :offer="msg._planOffer!"
               compact
               :loading="chat.isGenerating.value"
@@ -271,7 +332,15 @@ window.addEventListener('beforeunload', onBeforeUnload)
 
           <!-- 用户消息 -->
           <template v-else>
-            <div class="mobile-user-bubble">{{ msg.text }}</div>
+            <div class="mobile-user-bubble">
+              <div>{{ msg.text }}</div>
+              <div v-if="msg._files && msg._files.length > 0" class="mobile-user-files-row">
+                <div v-for="(f, fi) in msg._files" :key="fi" class="mobile-user-file-chip">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  {{ f.fileName.length > 15 ? f.fileName.slice(0, 13) + '…' : f.fileName }}
+                </div>
+              </div>
+            </div>
           </template>
         </div>
       </div>
@@ -279,7 +348,28 @@ window.addEventListener('beforeunload', onBeforeUnload)
 
     <!-- ===== 输入区域 ===== -->
     <div class="mobile-chat-input" :style="{ paddingBottom: 'var(--mobile-safe-area-inset-bottom)' }">
+      <!-- 文件预览（内联芯片行，极紧凑） -->
+      <div v-if="chat.pendingFiles.value.length > 0" class="mobile-file-chips-row">
+        <div v-for="(f, fi) in chat.pendingFiles.value" :key="fi" class="mobile-file-chip" :class="{ 'is-image': f.isImage }">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span class="mobile-file-chip-name">{{ f.fileName.length > 15 ? f.fileName.slice(0, 13) + '…' : f.fileName }}</span>
+          <button class="mobile-file-chip-remove" @click="chat.removePendingFile(f.fileUrl)">
+            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
       <div class="mobile-input-inner">
+        <button
+          class="mobile-upload-btn"
+          :disabled="chat.isStreaming.value || isUploading"
+          @click="fileInputRef?.click()"
+        >
+          <svg v-if="!isUploading" width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5.5498 9.75V5H6.9502V9.75C6.9502 10.3299 7.4201 10.7998 8 10.7998C8.5799 10.7998 9.0498 10.3299 9.0498 9.75V4.5C9.0498 2.9536 7.7964 1.7002 6.25 1.7002C4.7036 1.7002 3.4502 2.9536 3.4502 4.5V9.75C3.4502 12.2629 5.4871 14.2998 8 14.2998C10.5129 14.2998 12.5498 12.2629 12.5498 9.75V4H13.9502V9.75C13.9502 13.0361 11.2861 15.7002 8 15.7002C4.71391 15.7002 2.0498 13.0361 2.0498 9.75V4.5C2.04981 2.1804 3.9304 0.299806 6.25 0.299805C8.5696 0.299805 10.4502 2.1804 10.4502 4.5V9.75C10.4502 11.1031 9.3531 12.2002 8 12.2002C6.6469 12.2002 5.5498 11.1031 5.5498 9.75Z" fill="currentColor"></path>
+          </svg>
+          <span v-else class="mobile-upload-spinner"></span>
+        </button>
+        <input ref="fileInputRef" type="file" multiple :accept="ACCEPTED_TYPES" style="display:none" @change="handleFileSelect" />
         <input
           v-model="inputMessage"
           class="mobile-input-field"
@@ -290,7 +380,7 @@ window.addEventListener('beforeunload', onBeforeUnload)
         <button
           class="mobile-send-btn"
           :class="{ active: inputMessage.trim() && !chat.isStreaming.value }"
-          :disabled="!inputMessage.trim() || chat.isStreaming.value"
+          :disabled="(!inputMessage.trim() || chat.isStreaming.value) && chat.pendingFiles.value.length === 0"
           @click="handleSendMessage"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -330,7 +420,13 @@ window.addEventListener('beforeunload', onBeforeUnload)
           :class="{ active: sess.id === chat.activeSessionId.value }"
           @click="chat.switchSession(sess.id); showSessions = false"
         >
-          <div class="mobile-session-title">{{ sess.title }}</div>
+          <div class="mobile-session-title">
+            <span v-if="sess.type === 'lecture'" class="flex-shrink-0">📖</span>
+            <span v-else-if="sess.type === 'resource'" class="flex-shrink-0">📝</span>
+            <span v-else-if="sess.type === 'plan'" class="flex-shrink-0">🗺</span>
+            <span v-else class="flex-shrink-0">💬</span>
+            {{ sess.title }}
+          </div>
           <div class="mobile-session-meta">{{ sess.lastMessagePreview || (sess.messageCount ? sess.messageCount + ' 条消息' : '') }} · {{ chat.formatSessionTime(sess.updatedAt) }}</div>
         </div>
       </div>
@@ -753,6 +849,9 @@ window.addEventListener('beforeunload', onBeforeUnload)
   font-weight: 500;
   color: var(--lt-text-primary);
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .mobile-session-meta {
@@ -806,5 +905,68 @@ window.addEventListener('beforeunload', onBeforeUnload)
 }
 .mobile-gen-submit:not(:disabled):active {
   background: var(--lt-brand-dark);
+}
+
+/* ===== Mobile file upload ===== */
+.mobile-upload-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border: none; background: transparent;
+  color: var(--lt-text-auxiliary); cursor: pointer; flex-shrink: 0;
+  touch-action: manipulation; border-radius: 50%;
+}
+.mobile-upload-btn:active {
+  background: var(--mobile-active-bg);
+}
+.mobile-upload-btn:disabled {
+  opacity: 0.4;
+}
+.mobile-upload-spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid var(--lt-border);
+  border-top-color: var(--lt-brand);
+  border-radius: 50%;
+  animation: mobile-upload-spin 0.6s linear infinite;
+}
+@keyframes mobile-upload-spin {
+  to { transform: rotate(360deg); }
+}
+.mobile-file-chips-row {
+  display: flex; flex-wrap: wrap; gap: 3px;
+  padding: 0 0 4px;
+}
+.mobile-file-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 1px 3px 1px 5px; border-radius: 3px;
+  font-size: 10px; line-height: 1.4;
+  background: var(--lt-bg-page);
+  border: 0.5px solid var(--lt-border-light);
+  color: var(--lt-text-secondary);
+}
+.mobile-file-chip.is-image {
+  background: rgba(43,111,255,0.05);
+  border-color: var(--lt-brand-light-7);
+}
+.mobile-file-chip svg { flex-shrink: 0; color: var(--lt-text-auxiliary); }
+.mobile-file-chip.is-image svg { color: var(--lt-brand); }
+.mobile-file-chip-name {
+  max-width: 80px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.mobile-file-chip-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 12px; height: 12px; border: none; background: transparent;
+  color: var(--lt-text-placeholder); cursor: pointer;
+  border-radius: 2px; flex-shrink: 0; padding: 0;
+}
+.mobile-file-chip-remove:active { color: var(--lt-danger); background: rgba(255,59,48,0.1); }
+.mobile-user-files-row {
+  display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px;
+  padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.2);
+}
+.mobile-user-file-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 5px; border-radius: 3px;
+  font-size: 10px; background: rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.9);
 }
 </style>

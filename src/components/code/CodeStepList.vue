@@ -53,6 +53,12 @@ defineProps<{
   font-weight: 600;
   color: var(--lt-text-primary);
   margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  background: var(--lt-bg-page);
+  z-index: 1;
+  padding-top: 4px;
+  padding-bottom: 8px;
 }
 .code-step-card {
   padding: 12px 14px;
@@ -60,7 +66,8 @@ defineProps<{
   border-radius: var(--lt-radius-md);
   margin-bottom: 10px;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color var(--lt-transition-base), box-shadow var(--lt-transition-base);
+  background: var(--lt-bg-card);
 }
 .code-step-card:hover,
 .code-step-card.hovered {
@@ -110,5 +117,14 @@ defineProps<{
   font-family: var(--lt-font-mono);
   font-size: 11px;
   color: var(--lt-brand);
+}
+
+@media (min-width: 1200px) {
+  .code-steps {
+    margin-top: 0;
+  }
+  .code-steps-title {
+    background: var(--lt-bg-page);
+  }
 }
 </style>
