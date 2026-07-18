@@ -22,6 +22,7 @@
       </div>
       <div class="cp-progress-stats">
         <span v-if="generatingCount > 0" class="cp-stat generating">生成中 {{ generatingCount }}</span>
+        <span v-if="renderingCount > 0" class="cp-stat rendering">渲染中 {{ renderingCount }}</span>
         <span v-if="doneCount > 0" class="cp-stat done">✓ {{ doneCount }}</span>
         <span v-if="failedCount > 0" class="cp-stat failed">✗ {{ failedCount }}</span>
       </div>
@@ -42,6 +43,7 @@
           <span class="cp-status">
             <span v-if="item.status === 'pending'" class="cp-dot pending"></span>
             <span v-else-if="item.status === 'generating'" class="cp-spinner"></span>
+            <span v-else-if="item.status === 'rendering'" class="cp-spinner rendering"></span>
             <span v-else-if="item.status === 'done'" class="cp-check">✓</span>
             <span v-else-if="item.status === 'failed'" class="cp-cross">✗</span>
           </span>
@@ -81,7 +83,7 @@ export interface ChecklistItemData {
   description?: string
   difficulty: string
   estimatedMinutes: number
-  status: 'pending' | 'generating' | 'done' | 'failed'
+  status: 'pending' | 'generating' | 'rendering' | 'done' | 'failed'
 }
 
 const props = defineProps<{
@@ -102,6 +104,7 @@ const items = computed(() => props.checklist?.items ?? [])
 const doneCount = computed(() => props.checklist?.doneCount ?? 0)
 const failedCount = computed(() => props.checklist?.failedCount ?? 0)
 const generatingCount = computed(() => props.checklist?.generatingCount ?? 0)
+const renderingCount = computed(() => (props.checklist as any)?.renderingCount ?? 0)
 const totalCount = computed(() => props.checklist?.totalCount ?? 0)
 
 const percent = computed(() => {
@@ -113,14 +116,14 @@ const badgeClass = computed(() => {
   const p = percent.value
   if (p >= 100) return 'badge-done'
   if (failedCount.value > 0) return 'badge-has-errors'
-  if (generatingCount.value > 0) return 'badge-running'
+  if (generatingCount.value > 0 || renderingCount.value > 0) return 'badge-running'
   return 'badge-pending'
 })
 
 const typeLabel = (type: string) => {
   const map: Record<string, string> = {
     doc: '文档', quiz: '习题', reading: '阅读材料',
-    code: '代码', mindmap: '思维导图', video: '视频',
+    code: '代码', mindmap: '思维导图', video: '视频', html: '交互文档',
   }
   return map[type] || type
 }
@@ -129,6 +132,7 @@ const statusTooltip = (status: string) => {
   const map: Record<string, string> = {
     pending: '等待生成',
     generating: '正在生成中',
+    rendering: '视频渲染中',
     done: '已完成',
     failed: '生成失败',
   }
@@ -219,6 +223,7 @@ const statusTooltip = (status: string) => {
 }
 .cp-stat { font-weight: 500; }
 .cp-stat.generating { color: var(--lt-brand); }
+.cp-stat.rendering { color: var(--lt-warm); }
 .cp-stat.done { color: var(--lt-success); }
 .cp-stat.failed { color: var(--lt-danger); }
 
@@ -249,13 +254,22 @@ const statusTooltip = (status: string) => {
   opacity: 1;
 }
 .cp-item-failed {
-  background: rgba(255,59,48,0.04);
+  background: rgba(255,59,48,0.06);
+  border-left: 3px solid rgba(255,59,48,0.4);
+  padding-left: 7px;
 }
 .cp-item-failed:hover {
-  background: rgba(255,59,48,0.08);
+  background: rgba(255,59,48,0.12);
 }
 .cp-item-generating {
-  background: rgba(124,92,252,0.04);
+  background: rgba(124,92,252,0.06);
+  border-left: 3px solid rgba(124,92,252,0.3);
+  padding-left: 7px;
+}
+.cp-item-rendering {
+  background: rgba(255,140,66,0.06);
+  border-left: 3px solid rgba(255,140,66,0.3);
+  padding-left: 7px;
 }
 
 /* Status indicators */
@@ -283,6 +297,10 @@ const statusTooltip = (status: string) => {
   border: 2px solid var(--lt-brand);
   border-top-color: transparent;
   animation: cp-spin 0.7s linear infinite;
+}
+.cp-spinner.rendering {
+  border-color: var(--lt-warm);
+  border-top-color: transparent;
 }
 .cp-check {
   font-size: 13px;
@@ -373,5 +391,36 @@ const statusTooltip = (status: string) => {
 .cp-retry-btn:hover {
   color: var(--lt-brand);
   border-color: var(--lt-brand);
+}
+
+/* ── Mobile adaptation (max-width: 768px) ── */
+@media (max-width: 768px) {
+  .cp-item {
+    padding: 8px 12px;
+    min-height: 48px;
+  }
+  .cp-retry-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    opacity: 1;
+  }
+  .cp-type-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+  .cp-item-title {
+    font-size: 14px;
+  }
+  .cp-item-meta {
+    font-size: 12px;
+  }
+  .cp-title {
+    font-size: 15px;
+  }
+  .cp-summary-badge {
+    font-size: 14px;
+    padding: 4px 12px;
+  }
 }
 </style>

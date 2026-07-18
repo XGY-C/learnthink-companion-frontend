@@ -12,14 +12,19 @@
     <div class="flex items-center justify-between mb-5">
       <div class="flex items-center gap-2.5">
         <div
-          class="w-7 h-7 rounded-lg flex items-center justify-center"
+          class="ps-header-icon"
           :style="{
-            background: isAiStep
-              ? 'linear-gradient(135deg, var(--lt-ai), var(--lt-ai-dark-2))'
-              : 'linear-gradient(135deg, var(--lt-orange), var(--color-secondary-light-3, #E67A30))'
+            background: isAiStep ? 'var(--lt-ai-light-9)' : 'var(--lt-orange-light-9)',
+            color: isAiStep ? 'var(--lt-ai)' : 'var(--lt-orange)'
           }"
         >
-          <el-icon size="14" color="white"><Connection /></el-icon>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="16" y="16" width="6" height="6" rx="1"></rect>
+            <rect x="2" y="16" width="6" height="6" rx="1"></rect>
+            <rect x="9" y="2" width="6" height="6" rx="1"></rect>
+            <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path>
+            <path d="M12 12V8"></path>
+          </svg>
         </div>
         <h3 class="text-base font-semibold" style="color: var(--lt-text-primary);">多智能体协同流水线</h3>
       </div>
@@ -106,6 +111,18 @@
 </template>
 
 <style scoped>
+/* ── Header icon (matches ChecklistPanel / AgentActivityPanel style) ── */
+.ps-header-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.35s, color 0.35s;
+}
+
 /* ── Custom step nodes (replaces el-steps for better state control) ── */
 .ps-steps {
   display: flex;
@@ -227,6 +244,19 @@
 }
 .ps-step-desc.pending {
   color: var(--lt-text-placeholder);
+}
+
+/* ── Mobile adaptation (max-width: 768px) ── */
+@media (max-width: 768px) {
+  .pipeline-stepper {
+    padding: 16px;
+  }
+  .ps-step-title {
+    font-size: 14px;
+  }
+  .ps-step-desc {
+    font-size: 13px;
+  }
 }
 </style>
 

@@ -110,6 +110,18 @@ export interface ChapterNode {
   children: ChapterNode[]
 }
 
+/** 知识图谱数据（来自 GET /courses/{id}/knowledge-graph） */
+export interface KnowledgeGraphData {
+  courseId: string
+  courseName: string
+  textbookTitle: string
+  graph: {
+    nodes: { id: string; label: string; type?: string; description?: string; difficulty?: string; keywords?: string[] }[]
+    edges: { source: string; target: string; label?: string; type?: string }[]
+  } | null
+  generatedAt: string
+}
+
 // ========== 资源文件夹（Resource Folder）相关类型 ==========
 
 /** 资源文件夹（网盘式嵌套） */
@@ -129,7 +141,7 @@ export interface ResourceFile {
   id: string
   folderId: string | null
   packId?: string
-  type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video'
+  type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video' | 'html'
   title: string
   topic?: string
   status: 'pending' | 'ready' | 'failed' | 'rejected' | 'rendering'
@@ -151,7 +163,7 @@ export interface ResourceFile {
 export interface ResourceItem {
   id: string
   title: string
-  type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video'
+  type: 'doc' | 'mindmap' | 'quiz' | 'reading' | 'code' | 'video' | 'html'
   status: 'pending' | 'ready' | 'failed' | 'rejected' | 'rendering'
   confidence?: 'high' | 'medium' | 'low'
   sourcesCount?: number
@@ -291,6 +303,7 @@ export interface AgentThinkingTrace {
   agentName: string
   agentRole: string
   phase: string
+  pipelineStage: string
   context: string
   observation: string
   thought: string
@@ -406,7 +419,7 @@ export interface QuizContent {
 }
 
 /** SSE 事件类型汇总 */
-export type SSEEventType = 'task.accepted' | 'task.stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'task.done' | 'task.failed' | 'subtopic.started' | 'subtopic.completed' | 'checklist.created' | 'checklist.updated' | 'agent.generation.started' | 'agent.generation.done' | 'agent.generation.failed' | 'plan.gap_tasks'
+export type SSEEventType = 'task.accepted' | 'task.stage' | 'resource.ready' | 'review.flag' | 'agent.thought' | 'agent.message' | 'task.done' | 'task.failed' | 'subtopic.started' | 'subtopic.completed' | 'checklist.created' | 'checklist.updated' | 'agent.generation.started' | 'agent.generation.done' | 'agent.generation.failed' | 'plan.gap_tasks' | 'checklist.video.ready' | 'checklist.video.failed'
 
 // ========== 代码运行相关类型 ==========
 
@@ -481,6 +494,7 @@ export interface QuestionPage {
 /** 创建题目请求 */
 export interface CreateQBankQuestionRequest {
   courseId: string
+  sourceItemId?: string
   questionType: string
   difficulty: number
   title: string
@@ -488,15 +502,99 @@ export interface CreateQBankQuestionRequest {
   answer: any
   explanation?: string
   kpId?: string
+  tags?: string[]
+}
+
+/** 批量创建题目请求（从练习题资源批量入库） */
+export interface BatchCreateQBankQuestionsRequest {
+  courseId: string
+  sourceItemId: string
+  questions: CreateQBankQuestionRequest[]
+}
+
+/** 批量创建题目结果（含去重计数） */
+export interface BatchCreateQBankQuestionsResult {
+  addedCount: number
+  skippedCount: number
+  items: QBankQuestion[]
 }
 
 /** 知识点正确率（对应后端 KpAccuracyDTO） */
 export interface KpAccuracy {
   kpId: string
   kpName: string
+  questionCount: number
   totalAttempts: number
   correctCount: number
   accuracyRate: number
+}
+
+// ========== 练习刷题（Practice）相关类型 ==========
+
+/** 答题结果（对应后端 AnswerResultDTO） */
+export interface AnswerResult {
+  correct: boolean
+  correctAnswer: any
+  explanation?: string
+  attemptNumber: number
+  totalAttempts: number
+  kpId?: string
+  kpName?: string
+  attemptId?: string
+}
+
+/** 练习会话题目项（含 itemId 供作答回传） */
+export interface SessionQuestion {
+  itemId: string
+  sortOrder: number
+  questionId: string
+  questionType: string
+  difficulty: number
+  title: string
+  options?: { label: string; content: string }[]
+  kpId?: string
+  kpName?: string
+  answered: boolean
+  isCorrect?: boolean
+  correctAnswer?: any
+  explanation?: string
+  userAnswer?: any
+}
+
+/** 练习会话详情 */
+export interface PracticeSession {
+  id: string
+  sessionType: 'random' | 'weak_point' | 'wrong_review' | 'kp_focus' | 'custom'
+  questionCount: number
+  correctCount: number
+  totalDurationSeconds: number
+  completed: boolean
+  createdAt: string
+  completedAt?: string
+  aiGeneratedCount?: number
+  evaluation?: string
+  questions: SessionQuestion[]
+}
+
+/** 练习会话列表项 */
+export interface PracticeSessionSummary {
+  id: string
+  sessionType: string
+  questionCount: number
+  correctCount: number
+  totalDurationSeconds: number
+  completed: boolean
+  createdAt: string
+  completedAt?: string
+  accuracyRate: number
+}
+
+/** 练习核心统计 */
+export interface PracticeStats {
+  totalAnswered: number
+  avgAccuracy: number      // 0~1
+  currentStreak: number
+  wrongQuestionCount: number
 }
 
 // ========== 学习路径（Learning Path）相关类型 ==========
@@ -541,6 +639,7 @@ export interface Plan {
   profileVersion: number
   courseId: string
   status: string
+  lockMode: 'sequential' | 'free'
   createdAt: string | null
   modules: Module[]
   edges: Edge[]
@@ -964,3 +1063,56 @@ export interface UpdateNotebookRequest {
  * - 章节级：sectionTitle != null && selectedText == null
  * - 文本级：sectionTitle != null && selectedText != null
  */
+
+// ========== QuizPlayer 共享做题组件类型 ==========
+
+/** QuizPlayer 统一题目格式（适配层统一转换为此格式） */
+export interface PlayerQuestion {
+  id: string
+  type: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'TRUE_FALSE' | 'FILL_IN_BLANK' | 'SHORT_ANSWER'
+  content: string
+  options: string[]
+  answer: string
+  analysis: string
+  difficulty: number
+  kpId?: string
+  kpName?: string
+  knowledgeTags?: string[]
+  mistakeTags?: string[]
+}
+
+/** QuizPlayer 单题结果 */
+export interface PlayerQuestionResult {
+  questionId: string
+  result: 'correct' | 'wrong' | 'partial'
+}
+
+/** QuizPlayer 统一结果格式 */
+export interface PlayerResult {
+  score: number
+  totalCount: number
+  correctCount: number
+  durationSeconds: number
+  weakTags?: string[]
+  questionResults: PlayerQuestionResult[]
+}
+
+/** QuizPlayer 单题即时反馈 */
+export interface PlayerQuestionFeedback {
+  isCorrect: boolean
+  correctAnswer: string
+  explanation: string
+}
+
+/** 题目引用上下文（戳题问 AI） */
+export interface QuestionRef {
+  questionId: string
+  type: string
+  typeLabel: string
+  content: string
+  options?: string[]
+  userAnswer?: string
+  difficulty?: number
+  difficultyLabel?: string
+  knowledgeTags?: string[]
+}

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { QBankQuestion, QuestionPage, KpAccuracy } from '@/types'
+import type { QBankQuestion, QuestionPage, KpAccuracy, BatchCreateQBankQuestionsRequest, BatchCreateQBankQuestionsResult } from '@/types'
 import { apiFetch } from '@/utils/api'
 
 export const useQuestionBankStore = defineStore('questionBank', () => {
@@ -56,6 +56,16 @@ export const useQuestionBankStore = defineStore('questionBank', () => {
     }
   }
 
+  async function batchCreateFromResource(req: BatchCreateQBankQuestionsRequest): Promise<BatchCreateQBankQuestionsResult | null> {
+    try {
+      const res = await apiFetch<BatchCreateQBankQuestionsResult>('/questions/batch', { method: 'POST', body: req })
+      return res.data || null
+    } catch (e) {
+      console.error('[QuestionBankStore] batchCreateFromResource failed:', e)
+      return null
+    }
+  }
+
   async function deleteQuestion(id: string): Promise<boolean> {
     try {
       await apiFetch(`/questions/${id}`, { method: 'DELETE' })
@@ -100,6 +110,7 @@ export const useQuestionBankStore = defineStore('questionBank', () => {
     kpAccuracyList,
     fetchQuestions,
     fetchQuestionDetail,
+    batchCreateFromResource,
     deleteQuestion,
     fetchKpAccuracy,
     fetchWrongQuestions,

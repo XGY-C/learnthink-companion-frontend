@@ -93,6 +93,8 @@ const props = defineProps<{
   brief?: string
   pushReasons?: string[]
   rejectReason?: string
+  deepContent?: string
+  sources?: any[]
 }>()
 
 defineEmits<{

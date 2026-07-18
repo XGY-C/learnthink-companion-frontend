@@ -86,8 +86,14 @@
 
   /* ======================== 4. 语义色 ======================== */
   --lt-success: #34C759;          /* 掌握/优质/正确 */
+  --lt-success-bg: #E8F8EC;       /* 成功浅背景（反馈区/选项正确态） */
+  --lt-success-bg-light: #F0FBF3; /* 成功更浅背景（导航点正确态） */
+  --lt-success-text: #1A8A3E;     /* 成功文字色（浅背景，AA达标） */
   --lt-warning: #FF9F0A;          /* 进行中/待提升 */
   --lt-danger: #FF3B30;           /* 薄弱/错误/驳回 */
+  --lt-danger-bg: #FEECEA;        /* 错误浅背景（反馈区/选项错误态） */
+  --lt-danger-bg-light: #FEF5F4;  /* 错误更浅背景（导航点错误态） */
+  --lt-danger-text: #C8281E;      /* 错误文字色（浅背景，AA达标） */
 
   /* ======================== 5. 中性色 ======================== */
   --lt-text-primary: #1A1A2E;     /* 正文 */
@@ -163,7 +169,7 @@
   --lt-chart-split-bg-1: #EEF1F5;
   --lt-chart-split-bg-2: #E8ECF0;
   --lt-chart-split-bg-3: #DEE3E8;
-  --lt-chart-axis-label: #8E8EA0;
+  --lt-chart-axis-label: #3A3A54;
   --lt-chart-axis-line: #E8ECF0;
   /* 动效 */
   --lt-transition-base: 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -245,8 +251,14 @@ html[data-theme="dark"] {
   --lt-ai-dark-2: #B8A3FF;
 
   --lt-success: #34C759;
+  --lt-success-bg: rgba(52, 199, 89, 0.16);
+  --lt-success-bg-light: rgba(52, 199, 89, 0.10);
+  --lt-success-text: #5DD880;
   --lt-warning: #FF9F0A;
   --lt-danger: #FF453A;
+  --lt-danger-bg: rgba(255, 69, 58, 0.16);
+  --lt-danger-bg-light: rgba(255, 69, 58, 0.10);
+  --lt-danger-text: #FF7B73;
 
   --lt-text-primary: #E8EAED;
   --lt-text-secondary: #9AA0A8;
@@ -302,7 +314,7 @@ html[data-theme="dark"] {
   --lt-chart-split-bg-1: #181A25;
   --lt-chart-split-bg-2: #1A1D27;
   --lt-chart-split-bg-3: #222639;
-  --lt-chart-axis-label: #6B7280;
+  --lt-chart-axis-label: #D1D5DB;
   --lt-chart-axis-line: #2D3140;
 
   --mobile-ripple-color: rgba(43, 111, 255, 0.2);
@@ -531,6 +543,14 @@ body {
    =================================================================== */
 
 /* 涟漪触摸反馈 — 用于任意可点击元素 */
+.mobile-shell * {
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-shell button,
+.mobile-shell [role="button"] {
+  touch-action: manipulation;
+}
+
 @keyframes mobile-ripple {
   0% { box-shadow: 0 0 0 0 var(--mobile-ripple-color); }
   100% { box-shadow: 0 0 0 12px transparent; }
@@ -1095,5 +1115,17 @@ html[data-theme="dark"] .markdown-content .lt-link-card::after {
 
   .markdown-content .lt-link-card__play-icon {
     border-width: 5px 0 5px 8px;
+  }
+}
+
+/* ==================== 无障碍：尊重用户减少动效偏好 ==================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

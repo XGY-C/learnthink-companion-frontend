@@ -3,9 +3,15 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
 import { useLearningReport, useAllCoursesReport } from '@/composables/useLearningReport'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { RadarChart, BarChart, LineChart, PieChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { Timer, Right, Aim, TrendCharts } from '@element-plus/icons-vue'
+
+echarts.use([RadarChart, BarChart, LineChart, PieChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 import LearningCalendar from '@/components/report/LearningCalendar.vue'
+import MarkdownViewer from '@/components/MarkdownViewer.vue'
 
 const router = useRouter()
 const profile = useProfileStore()
@@ -68,13 +74,6 @@ const balance = computed(() => {
   return { max, min, gap: max - min, best: d.find(x => x.value === max)?.name || '', worst: d.find(x => x.value === min)?.name || '', flatness: scores.every(s => s >= avg - 15 && s <= avg + 15) ? '均衡' : '不均衡' }
 })
 
-function dimDesc(name: string, score: number): string {
-  if (score >= 80) { const m: Record<string, string> = { '知识基础': '积累扎实', '学习目标': '目标清晰', '认知风格': '策略成熟', '学习节奏': '节奏稳定', '专业理解': '认知深入', '兴趣广度': '兴趣广泛' }; return m[name] || '优秀' }
-  if (score >= 60) { const m: Record<string, string> = { '知识基础': '有基础，可提升', '学习目标': '方向明确', '认知风格': '可更多元', '学习节奏': '基本稳定', '专业理解': '成长中', '兴趣广度': '有待拓展' }; return m[name] || '成长中' }
-  const m: Record<string, string> = { '知识基础': '需系统补强', '学习目标': '目标模糊', '认知风格': '未形成稳定策略', '学习节奏': '需建立规律', '专业理解': '有待深化', '兴趣广度': '范围较窄' }
-  return m[name] || '需关注'
-}
-
 // ===== 稳定性 =====
 const stability = computed(() => {
   const hours = (stats.value?.weeklyActivity ?? []).map(w => w.hours)
@@ -101,6 +100,103 @@ const versionStat = computed(() => {
   const tLabel: Record<string, string> = { chat: '对话', quiz: '练习', path_update: '路径调整', manual: '手动' }
   return { total: vh.length, main: tLabel[main?.[0]] || '', mainCount: main?.[1] || 0, first: vh[0].createdAt, last: vh[vh.length - 1].createdAt }
 })
+
+// ===== AI 学情周报（示例内容，后续接后端接口）=====
+const weeklyReportMarkdown = ref(`<div class="wk-snap-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;">
+  <div style="padding:12px 10px;border-radius:8px;text-align:center;background:var(--lt-success-bg,#E8F8EC);">
+    <div style="font-size:11px;color:var(--lt-text-secondary,#5A5A72);">知识掌握度</div>
+    <div style="font-size:24px;font-weight:800;color:var(--lt-success-text,#1A8A3E);line-height:1.1;">72</div>
+    <div style="font-size:11px;color:var(--lt-success-text,#1A8A3E);">较上周 ↑5</div>
+  </div>
+  <div style="padding:12px 10px;border-radius:8px;text-align:center;background:var(--lt-danger-bg,#FEECEA);">
+    <div style="font-size:11px;color:var(--lt-text-secondary,#5A5A72);">单节投入</div>
+    <div style="font-size:24px;font-weight:800;color:var(--lt-danger-text,#C8281E);line-height:1.1;">3.2h</div>
+    <div style="font-size:11px;color:var(--lt-danger-text,#C8281E);">较上周 ↓12%</div>
+  </div>
+  <div style="padding:12px 10px;border-radius:8px;text-align:center;background:var(--lt-success-bg,#E8F8EC);">
+    <div style="font-size:11px;color:var(--lt-text-secondary,#5A5A72);">练习正确率</div>
+    <div style="font-size:24px;font-weight:800;color:var(--lt-success-text,#1A8A3E);line-height:1.1;">86%</div>
+    <div style="font-size:11px;color:var(--lt-success-text,#1A8A3E);">较上周 ↑3%</div>
+  </div>
+  <div style="padding:12px 10px;border-radius:8px;text-align:center;background:var(--lt-brand-lightest,#E8F0FE);">
+    <div style="font-size:11px;color:var(--lt-text-secondary,#5A5A72);">任务完成率</div>
+    <div style="font-size:24px;font-weight:800;color:var(--lt-brand,#2B6FFF);line-height:1.1;">90%</div>
+    <div style="font-size:11px;color:var(--lt-brand,#2B6FFF);">保持稳定 →</div>
+  </div>
+</div>
+
+<strong>本周整体稳中有升。</strong>知识掌握度连续两周上升，从上周的 67 提升到了 <strong style="color:var(--lt-success-text,#1A8A3E);">72<span class="wk-trend-pill up">+5</span></strong>，在数据结构和算法模块上进步最为明显，集中刷 LeetCode 的效果开始显现。正确率也小幅提升至 <strong style="color:var(--lt-success-text,#1A8A3E);">86%<span class="wk-trend-pill up">+3%</span></strong>，编程题得分率上升是主要拉动力——你正在从"能看懂"过渡到"能写出来"。
+
+但是单节平均投入时长出现了一组值得注意的矛盾数据：时长从 <strong style="color:var(--lt-danger-text,#C8281E);">3.6h → 3.2h<span class="wk-trend-pill down">↓12%</span></strong>，而专注度评分反而从 75 升到了 <strong style="color:var(--lt-brand,#2B6FFF);">78<span class="wk-trend-pill up">+3</span></strong>。表面上看，你在用更高的效率弥补时间的不足；但拆开逐日数据，周四和周五单节仅 <strong style="color:var(--lt-danger-text,#C8281E);">2.5h</strong>，后半周明显在"赶进度"。
+
+任务完成率维持在 <strong style="color:var(--lt-brand,#2B6FFF);">90%<span class="wk-trend-pill flat">→ 持平</span></strong> 说明你对自己有要求，但压缩时间换完成率的模式会伤害深度思考——尤其是面对算法题这类需要反复推敲的任务。长期来看，<strong>你需要的是节奏而不是冲刺</strong>。
+
+---
+
+## 薄弱知识点
+
+<div class="wk-weakness-list">
+  <div class="wk-weakness-item">
+    <div class="wk-weakness-head">
+      <span class="wk-weakness-name">排序算法</span>
+      <span class="wk-weakness-meta"><span>34%</span> 错误率 · 归并/堆排序实现细节混淆</span>
+    </div>
+    <div class="wk-weakness-desc">递归终止条件上反复出错。建议把两种算法的模板代码手写一遍，对照放在一起找差异，比单独记各自实现更有效。</div>
+    <div class="wk-progress-track"><div class="wk-progress-fill high" style="width:34%;"></div></div>
+  </div>
+  <div class="wk-weakness-item">
+    <div class="wk-weakness-head">
+      <span class="wk-weakness-name">SQL 多表 JOIN</span>
+      <span class="wk-weakness-meta"><span>28%</span> 错误率 · INNER / LEFT JOIN 场景判断不清</span>
+    </div>
+    <div class="wk-weakness-desc">遇到"保留左表所有行"的业务需求时，常犹豫是否需要子查询。建议整理一张 JOIN 决策速查表贴在桌面上。</div>
+    <div class="wk-progress-track"><div class="wk-progress-fill medium" style="width:28%;"></div></div>
+  </div>
+  <div class="wk-weakness-item">
+    <div class="wk-weakness-head">
+      <span class="wk-weakness-name">异步编程 (Promise)</span>
+      <span class="wk-weakness-meta"><span>25%</span> 错误率 · forEach + async/await 易出错</span>
+    </div>
+    <div class="wk-weakness-desc">多个异步操作的错误处理和结果合并上容易出错。花半天把 Promise 六种组合模式过一遍即可解决。</div>
+    <div class="wk-progress-track"><div class="wk-progress-fill medium" style="width:25%;"></div></div>
+  </div>
+</div>
+
+<blockquote class="wk-insight-box">
+  <strong>AI 判断</strong>
+  这三个薄弱点都集中在"编程实现细节"而非"概念理解"。你的理论学习是到位的，问题出在动手编码的熟练度上。好消息是这类问题解决起来最快——一个下午可以攻克一个。
+</blockquote>
+
+---
+
+## 下周学习建议
+
+<div class="wk-suggestions">
+  <div class="wk-suggest-item">
+    <span class="wk-suggest-idx">1</span>
+    <div class="wk-suggest-body">
+      <span class="wk-suggest-title">保持上午高效，别压榨时间</span>
+      <span class="wk-suggest-desc">你的最佳学习窗口在 9:00—11:00，该时段正确率比下午高约 8%。高难度任务全部放上午，下午用来复习和整理笔记。</span>
+    </div>
+  </div>
+  <div class="wk-suggest-item">
+    <span class="wk-suggest-idx">2</span>
+    <div class="wk-suggest-body">
+      <span class="wk-suggest-title">逐个击破薄弱点</span>
+      <span class="wk-suggest-desc">按 排序算法 → SQL JOIN → Promise 顺序攻克，每搞定一个做 3 道针对性练习验证。排序算法卡点最多，解决了知识掌握度提升最大。</span>
+    </div>
+  </div>
+  <div class="wk-suggest-item">
+    <span class="wk-suggest-idx">3</span>
+    <div class="wk-suggest-body">
+      <span class="wk-suggest-title">周四、五改成轻量复习</span>
+      <span class="wk-suggest-desc">后半周投入下降是真实的生理疲劳信号。与其硬撑，不如把周四周五改成"复习 + 错题回顾"，用主动回忆代替高强度输入。</span>
+    </div>
+  </div>
+</div>
+
+> <strong>一句话：</strong> 底子在变好，保持节奏比冲刺更重要——<strong style="color:var(--lt-success-text,#1A8A3E);">知识掌握 +5</strong>、<strong style="color:var(--lt-success-text,#1A8A3E);">正确率 +3%</strong> 的趋势如果配上稳定的投入，下周数据会更好看。
+`)
 
 // ===== 维度排序柱状图 =====
 const dimBarChart = computed(() => {
@@ -274,14 +370,18 @@ const halfCompare = computed(() => {
           </div>
         </div>
 
-        <!-- ===== ROW 1.5: 各维度详解 ===== -->
+        <!-- ===== ROW 1.5: AI 学情周报 ===== -->
         <div class="r-card mb-4">
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-            <div v-for="d in dimData" :key="d.name" class="text-center p-2 rounded-lg" style="background: var(--lt-bg-page);">
-              <p class="text-xs font-semibold" style="color: var(--lt-text-secondary);">{{ d.name }}</p>
-              <p class="text-xl font-bold" :style="{ color: d.value >= 80 ? 'var(--lt-success)' : d.value >= 60 ? 'var(--lt-brand)' : 'var(--lt-warning)' }">{{ d.value }}</p>
-              <p class="text-[10px]" style="color: var(--lt-text-auxiliary);">{{ dimDesc(d.name, d.value) }}</p>
+          <div class="flex items-center justify-between pb-3 mb-3" style="border-bottom:1px solid var(--lt-border);">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold" style="color: var(--lt-text-primary);">学情周报</span>
+              <span class="text-[11px] px-2 py-0.5 rounded-full font-medium" style="background:var(--lt-brand-lightest);color:var(--lt-brand);">7/12 — 7/18</span>
             </div>
+            <span class="text-[11px] px-2.5 py-1 rounded-full font-medium" style="background:var(--lt-ai-light-9,#F5F0FF);color:var(--lt-ai,#7C5CFC);">✨ AI 自动生成</span>
+          </div>
+          <div class="wk-report-scroll" style="max-height:360px;overflow-y:auto;position:relative;">
+            <MarkdownViewer :content="weeklyReportMarkdown" :showToc="false" />
+            <div class="wk-report-fade" style="position:sticky;bottom:0;left:0;right:0;height:40px;background:linear-gradient(transparent,var(--lt-bg-card));pointer-events:none;"></div>
           </div>
         </div>
 
@@ -601,5 +701,119 @@ const halfCompare = computed(() => {
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: var(--lt-border);
   border-radius: 2px;
+}
+</style>
+
+<!-- AI 学情周报 - 全局样式（需穿透 MarkdownViewer 的 scoped 样式） -->
+<style>
+.wk-report-scroll { scrollbar-width: thin; scrollbar-color: var(--lt-border) transparent; }
+.wk-report-scroll::-webkit-scrollbar { width: 4px; }
+.wk-report-scroll::-webkit-scrollbar-thumb { background: var(--lt-border); border-radius: 2px; }
+
+/* 正文 */
+.wk-report-scroll .markdown-content { font-size: 13px; line-height: 1.9; color: var(--lt-text-primary); }
+.wk-report-scroll .markdown-content p { margin: 10px 0; }
+
+/* ---- ① h2 / h3 标题左侧装饰条 ---- */
+.wk-report-scroll .markdown-content h2 {
+  font-size: 15px !important; font-weight: 700 !important; color: var(--lt-text-primary) !important;
+  margin: 28px 0 14px !important; display: flex; align-items: center; gap: 8px;
+  border: none !important; padding: 0 !important;
+}
+.wk-report-scroll .markdown-content h2::before {
+  content: ''; display: inline-block; width: 4px; height: 16px;
+  background: var(--lt-brand); border-radius: 2px; flex-shrink: 0;
+}
+.wk-report-scroll .markdown-content h3 {
+  font-size: 14px; font-weight: 700; color: var(--lt-text-primary);
+  margin: 22px 0 12px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--lt-border);
+}
+
+/* ---- ② 趋势徽章 pill ---- */
+.wk-trend-pill {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px 8px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  vertical-align: middle; margin: 0 2px;
+}
+.wk-trend-pill.up   { color: #065F46; background: #D1FAE5; }
+.wk-trend-pill.down { color: #991B1B; background: #FEE2E2; }
+.wk-trend-pill.flat { color: var(--lt-text-auxiliary); background: var(--lt-bg-page); }
+
+/* ---- ③ 弱项进度条列表 ---- */
+.wk-weakness-list { display: flex; flex-direction: column; gap: 14px; margin: 10px 0 20px; padding: 0; list-style: none; }
+.wk-weakness-item { display: flex; flex-direction: column; gap: 8px; }
+.wk-weakness-head { display: flex; justify-content: space-between; align-items: baseline; }
+.wk-weakness-head .wk-weakness-name { font-size: 14px; font-weight: 700; color: var(--lt-text-primary); }
+.wk-weakness-head .wk-weakness-meta { font-size: 12px; color: var(--lt-text-auxiliary); }
+.wk-weakness-head .wk-weakness-meta span { color: var(--lt-danger); font-weight: 600; margin-right: 2px; }
+.wk-weakness-desc { font-size: 12px; color: var(--lt-text-secondary); line-height: 1.65; padding-left: 2px; }
+.wk-progress-track { width: 100%; height: 6px; background: var(--lt-bg-page); border-radius: 3px; overflow: hidden; }
+.wk-progress-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+.wk-progress-fill.high   { background: linear-gradient(90deg, #FF6B6B, var(--lt-danger)); }
+.wk-progress-fill.medium { background: linear-gradient(90deg, #FFB347, var(--lt-warning)); }
+
+/* ---- ④ AI 洞察特殊引用块 ---- */
+.wk-report-scroll .markdown-content blockquote {
+  border-left: 3px solid var(--lt-brand) !important;
+  padding: 12px 16px !important; margin: 14px 0 !important;
+  background: var(--lt-brand-lightest) !important;
+  border-radius: 0 8px 8px 0 !important;
+  font-size: 13px !important; color: var(--lt-text-secondary) !important;
+  line-height: 1.8 !important;
+}
+/* 特殊洞察块覆盖普通 blockquote */
+.wk-report-scroll .markdown-content blockquote.wk-insight-box {
+  position: relative; padding: 18px 22px 18px 44px !important; margin: 20px 0 24px !important;
+  background: linear-gradient(135deg, rgba(43,111,255,0.04), var(--lt-brand-lightest)) !important;
+  border: 1px solid rgba(43,111,255,0.12) !important;
+  border-radius: 12px !important;
+  font-size: 13px !important;
+}
+.wk-report-scroll .markdown-content blockquote.wk-insight-box::before {
+  content: '✨'; position: absolute; left: 16px; top: 16px; font-size: 16px;
+}
+.wk-report-scroll .markdown-content blockquote.wk-insight-box p { margin: 0 !important; }
+.wk-report-scroll .markdown-content blockquote.wk-insight-box strong {
+  display: block; margin-bottom: 4px; font-size: 14px; color: var(--lt-brand);
+}
+
+/* ---- ⑤ 建议卡片 ---- */
+.wk-suggestions { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.wk-suggest-item {
+  display: flex; gap: 14px; align-items: flex-start;
+  padding: 14px 16px; border-radius: 10px;
+  background: var(--lt-bg-page); border: 1px solid var(--lt-border);
+  transition: all 0.2s ease;
+}
+.wk-suggest-item:hover { background: #fff; border-color: var(--lt-brand-lighter); transform: translateY(-1px); }
+.wk-suggest-item .wk-suggest-idx {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 8px;
+  background: var(--lt-brand); color: #fff;
+  font-size: 13px; font-weight: 700; flex-shrink: 0;
+}
+.wk-suggest-item .wk-suggest-body { flex: 1; min-width: 0; }
+.wk-suggest-item .wk-suggest-body .wk-suggest-title { font-size: 14px; font-weight: 700; color: var(--lt-text-primary); display: block; margin-bottom: 2px; }
+.wk-suggest-item .wk-suggest-body .wk-suggest-desc { font-size: 12px; color: var(--lt-text-secondary); line-height: 1.6; }
+
+/* 加粗 */
+.wk-report-scroll .markdown-content strong { color: var(--lt-text-primary); font-weight: 700; }
+
+/* 分割线 */
+.wk-report-scroll .markdown-content hr {
+  margin: 18px 0 !important; border: none !important;
+  background: linear-gradient(to right, transparent, var(--lt-border), transparent) !important;
+  height: 1px !important;
+}
+
+/* 有序列表 */
+.wk-report-scroll .markdown-content ol { padding-left: 20px; margin: 10px 0; }
+.wk-report-scroll .markdown-content li { margin: 8px 0; }
+
+/* 响应式 */
+@media (max-width: 640px) {
+  .wk-report-scroll .wk-snap-row { grid-template-columns: repeat(2, 1fr) !important; }
+  .wk-report-scroll { max-height: 420px !important; }
 }
 </style>

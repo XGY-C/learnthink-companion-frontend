@@ -107,7 +107,7 @@ const doneHistory = computed(() =>
 const hasActivity = computed(() => props.agents.length > 0)
 
 const typeLabel = (t: string) => {
-  const m: Record<string, string> = { doc: '文档', quiz: '习题', reading: '阅读', code: '代码', mindmap: '思维导图', video: '视频' }
+  const m: Record<string, string> = { doc: '文档', quiz: '习题', reading: '阅读', code: '代码', mindmap: '思维导图', video: '视频', html: '交互文档' }
   return m[t] || t
 }
 </script>
@@ -388,5 +388,38 @@ const typeLabel = (t: string) => {
 .ap-collapse-leave-from {
   opacity: 1;
   max-height: 500px;
+}
+
+/* ── Mobile adaptation (max-width: 768px) ── */
+@media (max-width: 768px) {
+  .ap-history-toggle {
+    min-height: 44px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  .ap-title {
+    font-size: 15px;
+  }
+  .ap-type-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+  .ap-agent-title {
+    font-size: 14px;
+  }
+  .ap-status-label {
+    font-size: 11px;
+  }
+  .ap-time {
+    font-size: 11px;
+  }
+  .ap-row {
+    padding: 8px 10px;
+    min-height: 44px;
+  }
+  .ap-count-badge {
+    font-size: 11px;
+    padding: 2px 10px;
+  }
 }
 </style>

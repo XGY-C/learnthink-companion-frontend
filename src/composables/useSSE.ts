@@ -14,6 +14,8 @@ export interface SSECallbacks {
   onSubTopicCompleted?: (data: { index: number; total: number; title: string; publishedItems: string[] }) => void
   onChecklistCreated?: (data: any) => void
   onChecklistUpdated?: (data: any) => void
+  onChecklistVideoReady?: (data: { type: string; title: string }) => void
+  onChecklistVideoFailed?: (data: { type: string; title: string }) => void
   onAgentGenerationStarted?: (data: any) => void
   onAgentGenerationDone?: (data: any) => void
   onAgentGenerationFailed?: (data: any) => void
@@ -73,6 +75,8 @@ export function useSSE() {
       'subtopic.completed': callbacks.onSubTopicCompleted,
       'checklist.created': callbacks.onChecklistCreated,
       'checklist.updated': callbacks.onChecklistUpdated,
+      'checklist.video.ready': callbacks.onChecklistVideoReady,
+      'checklist.video.failed': callbacks.onChecklistVideoFailed,
       'agent.generation.started': callbacks.onAgentGenerationStarted,
       'agent.generation.done': callbacks.onAgentGenerationDone,
       'agent.generation.failed': callbacks.onAgentGenerationFailed,

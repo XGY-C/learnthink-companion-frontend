@@ -424,7 +424,7 @@ export const useProfileStore = defineStore('profile', () => {
       major_context: [
         { id: 'mc1', dimension, signal_key: 'core.major', value: '计算机科学与技术',
           source: 'user_said', status: 'written', created_at: min(720) },
-        { id: 'mc2', dimension, signal_key: 'core.grade', value: '大三',
+        { id: 'mc2', dimension, signal_key: 'core.grade', value: '大二',
           source: 'user_corrected', status: 'written', created_at: min(360) },
       ],
       interest_direction: [

@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useForumStore } from '@/stores/forum'
 import { useUserStore } from '@/stores/user'
 import ForumContent from '@/components/forum/ForumContent.vue'
 import CommentSection from '@/components/forum/CommentSection.vue'
+import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import { ArrowLeft, Edit, Delete, Star, Share } from '@element-plus/icons-vue'
+import { apiFetch } from '@/utils/api'
+import type { ForumResource } from '@/types/forum'
 
 const route = useRoute()
 const router = useRouter()
@@ -91,6 +94,58 @@ function goEdit() {
 function goBack() {
   router.push('/forum')
 }
+
+const drawerVisible = ref(false)
+const previewResource = ref<any>(null)
+const previewContent = ref('')
+const previewLoading = ref(false)
+
+async function handleResourcePreview(resource: ForumResource) {
+  previewResource.value = resource
+  previewLoading.value = true
+  drawerVisible.value = true
+  try {
+    const res: any = await apiFetch(`/forum/resources/${resource.resourceItemId}`)
+    previewContent.value = res.data?.content || ''
+    previewResource.value = { ...resource, ...res.data }
+  } catch {
+    previewContent.value = ''
+    ElMessage.error('无法加载资源内容')
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+async function handleResourceNavigate(resource: ForumResource) {
+  try {
+    await ElMessageBox.confirm(
+      `「${resource.title}」为 ${resource.type} 类型资源，将在资源库中查看完整内容。`,
+      '跳转到资源库',
+      { confirmButtonText: '前往查看', cancelButtonText: '取消', type: 'info' }
+    )
+    router.push(`/learn/resource/${resource.packId}?resourceId=${resource.resourceItemId}`)
+  } catch {
+    // user cancelled
+  }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function getFileTypeLabel(mimeType: string): string {
+  if (!mimeType) return '文件'
+  if (mimeType.startsWith('image/')) return '图片'
+  if (mimeType.includes('pdf')) return 'PDF'
+  if (mimeType.includes('word') || mimeType.includes('document')) return '文档'
+  if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return '表格'
+  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '幻灯片'
+  if (mimeType.startsWith('text/')) return '文本'
+  if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('compress')) return '压缩包'
+  return mimeType.split('/').pop() || '文件'
+}
 </script>
 
 <template>
@@ -173,6 +228,8 @@ function goBack() {
             <ForumContent
               :content="store.currentPost.content"
               :resources="store.currentPost.resources"
+              @resource-preview="handleResourcePreview"
+              @resource-navigate="handleResourceNavigate"
             />
           </div>
 
@@ -181,15 +238,20 @@ function goBack() {
             <h4 class="text-sm font-semibold mb-3 flex items-center gap-1" style="color: var(--lt-text-secondary);">
               📎 附件
             </h4>
-            <div class="flex flex-wrap gap-3">
+            <div class="flex flex-col gap-2">
               <a
                 v-for="file in store.currentPost.files" :key="file.id"
                 :href="file.fileUrl" target="_blank"
-                class="file-link flex items-center gap-2 px-3 py-2 rounded-md text-sm"
-                style="background: var(--lt-brand-lightest); color: var(--lt-brand);"
+                class="file-card flex items-center gap-3 px-4 py-3 rounded-lg text-sm"
+                style="background: var(--lt-brand-lightest); color: var(--lt-text-primary); text-decoration: none;"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                {{ file.fileName }}
+                <div class="file-icon flex items-center justify-center rounded-lg w-10 h-10 flex-shrink-0" style="background: var(--lt-brand); color: #fff;">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium truncate m-0" style="color: var(--lt-text-primary);">{{ file.fileName }}</p>
+                  <p class="text-xs m-0" style="color: var(--lt-text-auxiliary);">{{ getFileTypeLabel(file.fileType) }} · {{ formatFileSize(file.fileSize) }}</p>
+                </div>
               </a>
             </div>
           </div>
@@ -227,6 +289,30 @@ function goBack() {
         <div class="comment-card card-elevated rounded-lg p-6 mt-4">
           <CommentSection :post-id="postId" />
         </div>
+
+        <!-- 资源预览抽屉 -->
+        <el-drawer
+          v-model="drawerVisible"
+          :title="previewResource?.title || '资源预览'"
+          size="680px"
+          direction="rtl"
+        >
+          <div v-loading="previewLoading" style="min-height: 200px">
+            <MarkdownViewer
+              v-if="previewContent"
+              :content="previewContent"
+              :show-toc="false"
+            />
+            <div v-else-if="!previewLoading" class="text-center" style="color: var(--lt-text-auxiliary); padding: 40px 0">
+              无法加载资源内容
+            </div>
+          </div>
+          <template v-if="previewResource?.packId" #footer>
+            <el-button @click="router.push(`/learn/resource/${previewResource.packId}?resourceId=${previewResource.resourceItemId}`)">
+              在资源库中查看完整资源
+            </el-button>
+          </template>
+        </el-drawer>
       </template>
     </div>
   </div>
@@ -267,11 +353,11 @@ function goBack() {
   background: transparent;
   color: var(--lt-text-auxiliary);
 }
-.file-link {
+.file-card {
   text-decoration: none;
   transition: all var(--lt-transition-base);
 }
-.file-link:hover {
+.file-card:hover {
   box-shadow: var(--lt-shadow-blue);
 }
 .forum-tag {
@@ -282,5 +368,29 @@ function goBack() {
   line-height: 22px;
   font-size: 11px;
   border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+  .post-detail-page {
+    padding: 12px 16px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  .detail-card, .comment-card {
+    padding: 12px;
+    border-radius: var(--lt-radius-lg);
+  }
+  .detail-card h1 {
+    font-size: 18px;
+  }
+  .stat-action {
+    padding: 10px 14px;
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .file-card {
+    padding: 10px 12px;
+    min-height: 44px;
+    box-sizing: border-box;
+  }
 }
 </style>

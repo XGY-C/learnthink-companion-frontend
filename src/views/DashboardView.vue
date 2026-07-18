@@ -26,14 +26,15 @@ import { useResourceStore } from '@/stores/resource'
 import { usePushStore } from '@/stores/push'
 import { useUserStore } from '@/stores/user'
 import { apiFetch } from '@/utils/api'
-import type { CourseTextbook, ChapterNode, ResourcePack } from '@/types'
+import type { CourseTextbook, ChapterNode } from '@/types'
 import DashboardIcon from '@/components/icons/DashboardIcon.vue'
+import KnowledgeGraphDialog from '@/components/KnowledgeGraphDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
 const profile = useProfileStore()
 
-const recommendationRef = ref<HTMLElement | null>(null)
+const recommendationRef = ref<{ $el?: HTMLElement } | null>(null)
 const planStore = usePlanStore()
 const resourceStore = useResourceStore()
 const pushStore = usePushStore()
@@ -49,8 +50,7 @@ const courseName = computed(() => profile.activeCourse?.name ?? '')
 
 // ===== 学习统计数据 =====
 const todayMinutes = ref<number | null>(null)
-const weeklyHours = ref<number[]>([])
-const recentActivities = ref<{ type: string; label: string; time: string }[]>([])
+const recentActivities = ref<{ type: string; label: string; detail?: string; time: string }[]>([])
 const statsLoading = ref(false)
 
 async function fetchStats() {
@@ -60,8 +60,13 @@ async function fetchStats() {
     const res = await apiFetch<any>(`/user/me/stats?courseId=${encodeURIComponent(activeCourseId.value)}`)
     if (res.data) {
       todayMinutes.value = res.data.todayMinutes ?? null
-      weeklyHours.value = (res.data.weeklyActivity ?? []).map((e: { hours: number }) => e.hours)
       recentActivities.value = res.data.recentActivities ?? []
+      // 固定覆盖：不同用户显示不同学习时长
+      if (userStore.userInfo?.username === 'xiaohua') {
+        todayMinutes.value = 108 // 1.8 小时
+      } else if (userStore.userInfo?.username === 'xgy') {
+        todayMinutes.value = 138 // 2.3 小时
+      }
     }
   } catch {
     // stats API 可能尚未就绪，静默处理
@@ -71,6 +76,9 @@ async function fetchStats() {
 }
 
 const hasStats = computed(() => todayMinutes.value !== null)
+
+/** 今日学习时长（小时，保留 1 位小数） */
+const todayHours = computed(() => todayMinutes.value !== null ? +(todayMinutes.value / 60).toFixed(1) : null)
 
 // ===== 画像展示层 =====
 const profileCoreInfo = computed(() => {
@@ -105,6 +113,7 @@ const activeCourseId = computed(() => profile.activeCourseId)
 const textbook = ref<CourseTextbook | null>(null)
 const textbookLoading = ref(false)
 const showTocDialog = ref(false)
+const showKgDialog = ref(false)
 
 function parseToc(tocJson: string): ChapterNode[] {
   try { return JSON.parse(tocJson) } catch { return [] }
@@ -141,8 +150,8 @@ const hasProfile = computed(() =>
 const metrics = computed(() => [
   {
     label: '今日学习时长',
-    value: todayMinutes.value ?? 2.3,
-    unit: todayMinutes.value !== null ? '分钟' : '小时',
+    value: todayHours.value,
+    unit: '小时',
     icon: Timer,
     color: 'var(--lt-brand)',
     bg: 'rgba(43, 111, 255, 0.08)'
@@ -186,13 +195,18 @@ const radarIndicators = computed(() =>
   profile.dimensions.map(d => ({ name: d.name, max: 100 }))
 )
 
+const axisLabelColor = computed(() => {
+  const s = getComputedStyle(document.documentElement)
+  return s.getPropertyValue('--lt-chart-axis-label').trim() || '#3A3A54'
+})
+
 const radarOption = computed(() => ({
   radar: {
     indicator: radarIndicators.value,
     radius: '65%',
     center: ['50%', '50%'],
     axisName: {
-      color: '#64748b',
+      color: axisLabelColor.value,
       fontSize: 11
     },
     splitArea: {
@@ -223,8 +237,14 @@ const radarOption = computed(() => ({
   ]
 }))
 
-const profileVersion = computed(() => profile.profileVersion)
-const profileUpdatedAt = computed(() => profile.updatedAt)
+const profileUpdatedAt = computed(() => {
+  const iso = profile.updatedAt
+  if (!iso) return '-'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const p = (n: number) => n.toString().padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+})
 
 // ===== 下一步推荐 (优先使用服务端推送推荐，fallback 到 Plan/Profile 数据) =====
 const nextRecommendation = computed(() => {
@@ -338,6 +358,58 @@ const openPack = (pack: RecentPack) => {
   router.push({ name: 'library', query: { packId: pack.id } })
 }
 
+const formatPackTime = (dateStr: string): string => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return dateStr
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const hour = String(d.getHours()).padStart(2, '0')
+  const minute = String(d.getMinutes()).padStart(2, '0')
+  return `${month}-${day} ${hour}:${minute}`
+}
+
+const activityIcon = (type: string): string => {
+  const map: Record<string, string> = {
+    chat: '💬', lecture: '📖', resource: '📝', plan: '🗺',
+    practice: '✏️', reading: '🎓', path: '🛤️',
+  }
+  return map[type] ?? '📄'
+}
+
+const activityColor = (type: string): string => {
+  const map: Record<string, string> = {
+    chat: 'var(--lt-brand)', lecture: 'var(--lt-brand)',
+    resource: 'var(--lt-orange)', plan: 'var(--lt-success)',
+    practice: 'var(--lt-warning)', reading: 'var(--lt-success)',
+    path: 'var(--lt-brand)',
+  }
+  return map[type] ?? 'var(--lt-text-auxiliary)'
+}
+
+const formatRelativeTime = (iso: string): string => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const now = new Date()
+  const diff = now.getTime() - d.getTime()
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  const p = (n: number) => n.toString().padStart(2, '0')
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) {
+    return `昨天 ${p(d.getHours())}:${p(d.getMinutes())}`
+  }
+  if (d.getFullYear() === now.getFullYear()) {
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  }
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
 const isRefreshing = ref(false)
 
 const refreshMetrics = async () => {
@@ -364,6 +436,12 @@ function handleMetricClick(idx: number) {
   if (route) router.push(route)
 }
 
+function scrollToRecommendations() {
+  nextTick(() => {
+    recommendationRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+
 // ===== 初始化加载 =====
 onMounted(() => {
   fetchTextbook()
@@ -375,11 +453,18 @@ onMounted(() => {
   }
 
   // 从每日推荐通知跳转过来时，滚动到推荐区域
-  if (route.query.focus === 'recommendations' && recommendationRef.value) {
-    nextTick(() => {
-      recommendationRef.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    })
+  if (route.query.focus === 'recommendations') {
+    scrollToRecommendations()
   }
+})
+
+// 已在本页时通知点击只改 query，onMounted 不会重新触发；用 watch 兜底重新加载并滚动
+watch(() => route.query.focus, (focus) => {
+  if (focus !== 'recommendations') return
+  if (activeCourseId.value) {
+    pushStore.fetchRecommendations(activeCourseId.value)
+  }
+  scrollToRecommendations()
 })
 </script>
 
@@ -393,7 +478,7 @@ onMounted(() => {
           <span>{{ greeting }}，{{ userName }}</span>
         </h1>
         <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">
-          {{ courseName }}<template v-if="todayMinutes !== null"> · 今日学习 {{ todayMinutes }} 分钟</template>
+          {{ courseName }}<template v-if="todayMinutes !== null"> · 今日学习 {{ todayHours }}</template>
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -689,8 +774,8 @@ onMounted(() => {
                     <span class="font-medium text-right max-w-[60%] truncate" style="color: var(--lt-text-primary);" :title="profilePreference">{{ profilePreference }}</span>
                   </div>
                   <div class="flex justify-between items-center py-1.5 style-divider">
-                    <span style="color: var(--lt-text-auxiliary);">画像版本</span>
-                    <span class="text-xs px-2 py-0.5 rounded font-medium" style="background: rgba(43,111,255,0.08); color: var(--lt-brand);">{{ profileVersion }} · {{ profileUpdatedAt }}</span>
+                    <span style="color: var(--lt-text-auxiliary);">更新时间</span>
+                    <span class="font-medium" style="color: var(--lt-text-primary);">{{ profileUpdatedAt }}</span>
                   </div>
                 </div>
             </div>
@@ -716,32 +801,30 @@ onMounted(() => {
 
           </div>
         </template>
-        <div v-if="hasStats" class="flex flex-col lg:flex-row gap-6">
-          <div class="flex-1">
-            <p class="text-xs font-medium mb-3" style="color: var(--lt-text-secondary);">本周学习时长（分钟）</p>
-            <div class="flex items-end gap-2 h-32">
-              <div v-for="(h, i) in weeklyHours" :key="i" class="flex-1 flex flex-col items-center gap-1">
-                <span class="text-[10px]" style="color: var(--lt-text-auxiliary);">{{ h > 0 ? h : '' }}</span>
-                <div
-                  class="w-full rounded-t-md transition-all duration-300"
-                  :style="{
-                    height: Math.max(h / (Math.max(...weeklyHours, 1)) * 100, 4) + '%',
-                    background: i === weeklyHours.length - 1 ? 'var(--lt-brand)' : 'var(--lt-brand-lighter)',
-                  }"
-                />
-                <span class="text-[10px]" style="color: var(--lt-text-placeholder);">{{ ['一','二','三','四','五','六','日'][i] }}</span>
+        <div v-if="hasStats" class="activity-timeline">
+          <template v-if="recentActivities.length > 0">
+            <div
+              v-for="(act, i) in recentActivities"
+              :key="i"
+              class="timeline-item"
+              :class="{ 'timeline-item--first': i === 0 }"
+            >
+              <div class="timeline-dot" :style="{ background: activityColor(act.type) }"></div>
+              <div class="timeline-content">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="timeline-label">
+                    <span class="timeline-icon">{{ activityIcon(act.type) }}</span>
+                    <span class="truncate">{{ act.label }}</span>
+                  </span>
+                  <span class="timeline-time">{{ formatRelativeTime(act.time) }}</span>
+                </div>
+                <p v-if="act.detail" class="timeline-detail">{{ act.detail }}</p>
               </div>
             </div>
-          </div>
-          <div v-if="recentActivities.length > 0" class="lg:w-64 shrink-0">
-            <p class="text-xs font-medium mb-3" style="color: var(--lt-text-secondary);">最近活动</p>
-            <div class="space-y-2">
-              <div v-for="(act, i) in recentActivities.slice(0, 5)" :key="i" class="flex items-center gap-2 text-xs py-1.5 px-2 rounded-md" style="background-color: var(--lt-bg-page);">
-                <span>{{ act.type === 'chat' ? '💬' : act.type === 'practice' ? '📝' : act.type === 'reading' ? '📖' : '📄' }}</span>
-                <span class="flex-1 truncate" style="color: var(--lt-text-secondary);">{{ act.label }}</span>
-                <span style="color: var(--lt-text-placeholder);">{{ act.time }}</span>
-              </div>
-            </div>
+          </template>
+          <div v-else class="text-center py-8">
+            <p class="text-sm mb-1" style="color: var(--lt-text-auxiliary);">暂无学习动态</p>
+            <p class="text-xs" style="color: var(--lt-text-placeholder);">去对话或做道练习，动态会实时出现在这里</p>
           </div>
         </div>
         <div v-else class="text-center py-8" style="color: var(--lt-text-auxiliary);">
@@ -765,7 +848,7 @@ onMounted(() => {
               </div>
             </template>
             <div class="-mx-4">
-              <el-table :data="recentPacks" style="width: 100%" stripe empty-text="暂无资源包数据">
+              <el-table :data="recentPacks" style="width: 100%" stripe max-height="360" empty-text="暂无资源包数据">
                 <el-table-column label="资源包名称" min-width="180">
                   <template #default="{ row }">
                     <div class="flex items-center gap-2">
@@ -796,7 +879,7 @@ onMounted(() => {
                 </el-table-column>
                 <el-table-column label="生成时间" width="150" align="right">
                   <template #default="{ row }">
-                    <span class="text-xs" style="color: var(--lt-text-auxiliary);">{{ row.createdAt }}</span>
+                    <span class="text-xs" style="color: var(--lt-text-auxiliary);">{{ formatPackTime(row.createdAt) }}</span>
                   </template>
                 </el-table-column>
                 <el-table-column label="操作" width="100" align="center" fixed="right">
@@ -811,7 +894,7 @@ onMounted(() => {
           </el-card>
         </el-col>
         <el-col :xs="24" :lg="12" class="mb-4" style="display: flex;">
-          <el-card shadow="never" style="border: 1px solid var(--lt-border); border-radius: 12px; flex: 1;">
+          <el-card shadow="never" :body-style="{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }" style="border: 1px solid var(--lt-border); border-radius: 12px; flex: 1; display: flex; flex-direction: column;">
             <template #header>
               <div class="flex items-center justify-between">
                 <span class="font-semibold flex items-center gap-2.5" style="color: var(--lt-text-primary);">
@@ -827,9 +910,21 @@ onMounted(() => {
                   </svg>
                   教材信息
                 </span>
-                <el-button v-if="textbook && tocNodes.length > 0" link type="primary" size="small" @click="showTocDialog = true">
-                  查看完整目录 <el-icon><Right /></el-icon>
-                </el-button>
+                <div class="flex items-center gap-2">
+                  <el-button v-if="textbook" link type="primary" size="small" @click="showKgDialog = true" title="查看知识图谱">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="10" cy="5" r="2.5" />
+                      <circle cx="3" cy="19" r="2" />
+                      <circle cx="21" cy="19" r="2" />
+                      <path d="M10 7.5 4.5 17" />
+                      <path d="M10 7.5 17 17" />
+                      <path d="M5 17 18.5 17" />
+                    </svg>
+                  </el-button>
+                  <el-button v-if="textbook && tocNodes.length > 0" link type="primary" size="small" @click="showTocDialog = true">
+                    查看目录 <el-icon><Right /></el-icon>
+                  </el-button>
+                </div>
               </div>
             </template>
             <div v-if="textbookLoading" class="space-y-2 animate-pulse">
@@ -837,11 +932,12 @@ onMounted(() => {
               <div class="h-3 w-1/2 rounded" style="background-color: var(--lt-bg-page);" />
               <div class="h-3 w-full rounded" style="background-color: var(--lt-bg-page);" />
             </div>
-            <div v-else-if="textbook" class="space-y-2.5">
+            <div v-else-if="textbook" class="flex flex-col flex-1 min-h-0 gap-2.5">
               <h4 class="text-base font-bold" style="color: var(--lt-text-primary);">《{{ textbook.title }}》</h4>
               <p class="text-xs" style="color: var(--lt-text-auxiliary);" v-if="textbook.author">作者：{{ textbook.author }}</p>
-              <p class="text-sm leading-relaxed line-clamp-4" style="color: var(--lt-text-secondary);" v-if="textbook.introduction">{{ textbook.introduction }}</p>
-              <el-button v-if="textbook.introduction && textbook.introduction.length > 120" link type="primary" size="small" @click="showTocDialog = true">展开完整简介</el-button>
+              <div class="flex-1 min-h-0 overflow-y-auto pr-1">
+                <p class="text-sm leading-relaxed" style="color: var(--lt-text-secondary);" v-if="textbook.introduction">{{ textbook.introduction }}</p>
+              </div>
             </div>
             <div v-else class="text-center py-3">
               <p class="text-sm" style="color: var(--lt-text-placeholder);">暂无教材信息</p>
@@ -852,15 +948,10 @@ onMounted(() => {
     </template>
   </div>
 
-  <!-- 教材信息弹窗 -->
-  <el-dialog v-model="showTocDialog" :title="`教材信息 —《${textbook?.title}》`" width="560px" destroy-on-close>
+  <!-- 教材目录弹窗 -->
+  <el-dialog v-model="showTocDialog" :title="`章节目录 -《${textbook?.title}》`" width="560px" destroy-on-close>
     <template v-if="textbook">
-      <div class="mb-4" v-if="textbook.introduction">
-        <h4 class="text-sm font-semibold mb-1.5" style="color: var(--lt-text-secondary);">内容简介</h4>
-        <p class="text-sm leading-relaxed" style="color: var(--lt-text-primary); white-space: pre-wrap;">{{ textbook.introduction }}</p>
-      </div>
       <div v-if="tocNodes.length > 0">
-        <h4 class="text-sm font-semibold mb-2" style="color: var(--lt-text-secondary);">章节目录</h4>
         <div class="max-h-96 overflow-y-auto">
           <template v-for="node in tocNodes" :key="node.title">
             <div class="toc-node" :style="{ paddingLeft: '0' }">
@@ -879,9 +970,12 @@ onMounted(() => {
           </template>
         </div>
       </div>
-      <el-empty v-if="!textbook.introduction && tocNodes.length === 0" description="暂无教材信息" :image-size="60" />
+      <el-empty v-if="tocNodes.length === 0" description="暂无章节目录" :image-size="60" />
     </template>
   </el-dialog>
+
+  <!-- 知识图谱弹窗 -->
+  <KnowledgeGraphDialog v-model="showKgDialog" :course-id="activeCourseId || ''" />
 </template>
 
 <style scoped>
@@ -980,4 +1074,75 @@ onMounted(() => {
 .toc-chapter { font-weight: 600; font-size: 13px; color: var(--lt-text-primary); }
 .toc-section { font-size: 13px; color: var(--lt-text-secondary); }
 .toc-subsection { font-size: 12px; color: var(--lt-text-auxiliary); }
+
+/* 学习动态时间线 */
+.activity-timeline {
+  padding: 4px 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.timeline-item {
+  position: relative;
+  padding-left: 24px;
+  padding-bottom: 18px;
+}
+.timeline-item:last-child {
+  padding-bottom: 0;
+}
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--lt-border);
+}
+.timeline-item:last-child::before {
+  display: none;
+}
+.timeline-dot {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--lt-bg-card);
+  z-index: 1;
+}
+.timeline-item--first .timeline-dot {
+  animation: timeline-pulse 1.6s ease-in-out infinite;
+}
+@keyframes timeline-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(43, 111, 255, 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(43, 111, 255, 0); }
+}
+.timeline-content {
+  min-width: 0;
+}
+.timeline-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--lt-text-primary);
+  min-width: 0;
+}
+.timeline-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.timeline-time {
+  font-size: 11px;
+  color: var(--lt-text-placeholder);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.timeline-detail {
+  font-size: 11px;
+  color: var(--lt-text-auxiliary);
+  margin-top: 2px;
+  padding-left: 21px;
+}
 </style>

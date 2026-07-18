@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { User, Lock, Timer, Document, Medal, SwitchButton, DataAnalysis } from '@element-plus/icons-vue'
+import { User, Lock, Timer, Document, Medal, DataAnalysis, ArrowRight, ChatDotSquare } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useProfileStore } from '@/stores/profile'
-import { useAuth } from '@/composables/useAuth'
 import { apiFetch } from '@/utils/api'
 import type { LearningStats } from '@/types'
 import ProfileInfoTab from '@/views/profile/ProfileInfoTab.vue'
 import SecurityTab from '@/views/profile/SecurityTab.vue'
 import LearningProfileTab from '@/views/profile/LearningProfileTab.vue'
+import ForumActivityTab from '@/views/profile/ForumActivityTab.vue'
 
 const userStore = useUserStore()
 const profileStore = useProfileStore()
-const { logout } = useAuth()
 const route = useRoute()
 const router = useRouter()
 const activeTab = ref((route.query.tab as string) || 'info')
@@ -53,14 +52,10 @@ async function fetchStats() {
   } catch { /* silent */ }
 }
 
-async function handleLogout() {
-  await logout()
-  router.push('/login')
-}
-
 const tabs = [
   { name: 'info', label: '个人信息', icon: User },
   { name: 'learning_profile', label: '学习画像', icon: DataAnalysis },
+  { name: 'forum_activity', label: '我的论坛', icon: ChatDotSquare },
   { name: 'security', label: '账号安全', icon: Lock },
 ]
 
@@ -115,15 +110,17 @@ onMounted(() => { fetchStats() })
       <div class="m-tab-content">
         <ProfileInfoTab v-if="activeTab === 'info'" />
         <LearningProfileTab v-else-if="activeTab === 'learning_profile'" />
+        <ForumActivityTab v-else-if="activeTab === 'forum_activity'" />
         <SecurityTab v-else-if="activeTab === 'security'" />
       </div>
     </div>
 
-    <!-- 退出登录 -->
-    <div class="m-logout-wrap">
-      <button class="m-logout-btn" @click="handleLogout">
-        <el-icon :size="16"><SwitchButton /></el-icon>
-        退出登录
+    <!-- 功能入口列表 -->
+    <div class="m-menu-list">
+      <button class="m-menu-item" @click="router.push('/library')">
+        <el-icon :size="18" style="color: var(--lt-brand)"><Document /></el-icon>
+        <span class="m-menu-label">我的资料库</span>
+        <el-icon :size="14" style="color: var(--lt-text-auxiliary)"><ArrowRight /></el-icon>
       </button>
     </div>
   </div>
@@ -132,8 +129,11 @@ onMounted(() => { fetchStats() })
 <style scoped>
 .m-profile {
   padding: 16px;
+  padding-bottom: calc(16px + 24px + env(safe-area-inset-bottom, 0px));
   background: var(--lt-bg-page);
   min-height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ===== Banner ===== */
@@ -186,13 +186,19 @@ onMounted(() => { fetchStats() })
 .m-tab-btn:active:not(.active) { color: var(--lt-brand); }
 .m-tab-content { padding: 16px; }
 
-/* ===== Logout ===== */
-.m-logout-wrap { margin-bottom: 24px; }
-.m-logout-btn {
-  width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 14px; border: 1px solid var(--lt-border); border-radius: 12px;
-  background: var(--lt-bg-card); color: var(--lt-text-secondary); font-size: 15px;
-  cursor: pointer; touch-action: manipulation;
+/* ===== Menu list ===== */
+.m-menu-list {
+  margin-bottom: 12px; background: var(--lt-bg-card);
+  border: 1px solid var(--lt-border); border-radius: 12px; overflow: hidden;
 }
-.m-logout-btn:active { background: rgba(255,59,48,0.04); border-color: rgba(255,59,48,0.2); color: var(--lt-danger); }
+.m-menu-item {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 13px 16px; min-height: 44px;
+  border: none; background: transparent; cursor: pointer;
+  font-size: 14px; color: var(--lt-text-primary);
+  touch-action: manipulation;
+}
+.m-menu-item:active { background: var(--lt-bg-active, rgba(0,0,0,0.03)); }
+.m-menu-label { flex: 1; text-align: left; }
+
 </style>

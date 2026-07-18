@@ -7,6 +7,7 @@ export const RESOURCE_TYPE_LABEL: Record<string, string> = {
   reading: '拓展阅读',
   code: '代码案例',
   video: '讲解视频',
+  html: '交互文档',
 }
 
 export const RESOURCE_TYPE_TAG: Record<string, string> = {
@@ -16,6 +17,7 @@ export const RESOURCE_TYPE_TAG: Record<string, string> = {
   reading: 'info',
   code: 'danger',
   video: 'danger',
+  html: 'primary',
 }
 
 // ===== 置信度映射 =====

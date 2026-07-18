@@ -1,7 +1,7 @@
 // ========== 视频讲解 Scene 协议类型 ==========
 
 /** 场景类型 */
-export type SceneType = 'title' | 'text' | 'diagram' | 'code' | 'comparison' | 'summary' | 'ending'
+export type SceneType = 'title' | 'text' | 'diagram' | 'code' | 'comparison' | 'summary' | 'ending' | 'html'
 
 /** 转场类型 */
 export type TransitionType = 'fade' | 'slide-left' | 'slide-up' | 'zoom' | 'none'
@@ -24,12 +24,37 @@ export interface Scene {
   steps?: SceneStep[]
   background?: string
   audioUrl?: string   // TTS 合成后回填的音频 URL
+  interactive?: InteractiveConfig  // 交互配置--存在则场景播完后暂停等待用户交互
+  waitForUser?: boolean   // 交互型可视化--true 表示到 duration 暂停等用户操作后点"继续"
+  interactHint?: string   // 交互提示文案，显示在"继续"按钮上方
 }
 
-/** SSE item 事件——后端推送的单个场景 */
+/** SSE item 事件--后端推送的单个场景 */
 export interface SceneItemEvent {
   sceneIndex: number
   scene: Scene
+}
+
+// ===== 交互配置 =====
+
+/** 交互选项 */
+export interface InteractiveOption {
+  id: string
+  label: string
+}
+
+/** 交互配置--场景播完后暂停，等待用户选择 */
+export interface InteractiveConfig {
+  /** 问题文本 */
+  question: string
+  /** 选项列表 */
+  options: InteractiveOption[]
+  /** 正确选项的 ID 列表 */
+  correctIds: string[]
+  /** 答题后的解析说明 */
+  explanation?: string
+  /** 是否多选（默认 false 单选） */
+  multiSelect?: boolean
 }
 
 // ===== 各场景类型的 content 结构 =====
@@ -83,6 +108,13 @@ export interface EndingContent {
   actions: string[]
 }
 
+/** HTML 场景 -- AI 自由描述画面 */
+export interface HtmlSceneContent {
+  html: string       // AI 产出的 HTML 片段（含 <lt-*> 自定义标签和 data-* 属性）
+  css?: string       // AI 产出的 CSS（布局 + 自定义动画，可选）
+  duration: number   // 场景时长（ms），由 AI 根据 narration 长度估算
+}
+
 // ===== 视频记录卡片 =====
 
 export interface VideoRecordCard {
@@ -104,6 +136,7 @@ export type PlayerPhase =
   | 'playing'       // 播放中
   | 'paused'        // 暂停
   | 'buffering'     // 等待下一个 Scene
+  | 'interactive-paused'  // 交互暂停--等待用户完成交互（选择题或探索）
   | 'closing'       // 关闭动画中
 
 export type PlaybackSpeed = 0.75 | 1.0 | 1.25 | 1.5 | 2.0

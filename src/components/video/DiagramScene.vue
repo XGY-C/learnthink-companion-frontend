@@ -56,6 +56,12 @@ function scaleData(datasets: DiagramContent['datasets']) {
   }
   if (xMax === xMin) xMax = xMin + 10
   if (yMax === yMin) yMax = yMin + 10
+
+  // 修复：检查是否存在有效数据点
+  if (xMin === Infinity || yMin === Infinity) {
+    return { datasets, xMax: 10, yMax: 10, xMin: 0, yMin: 0 }
+  }
+
   return { datasets, xMax, yMax, xMin, yMin }
 }
 
@@ -128,11 +134,12 @@ function staggerDelay(index: number, total: number): string {
 
         <!-- LINE CHART -->
         <template v-if="chartType === 'line' && scaled.datasets">
-          <polyline v-for="(ds, di) in scaled.datasets" :key="'line'+di"
-            :points="ds.points.map((p: any) => `${toX(p.x)},${toY(p.y)}`).join(' ')"
-            fill="none" :stroke="COLORS[di % COLORS.length]" stroke-width="2.5"
-            :stroke-dasharray="chartReady ? 'none' : '0'"
-            :class="{ 'chart-line-draw': chartReady }" />
+          <template v-if="chartReady">
+            <polyline v-for="(ds, di) in scaled.datasets" :key="'line'+di"
+              :points="ds.points.map((p: any) => `${toX(p.x)},${toY(p.y)}`).join(' ')"
+              fill="none" :stroke="COLORS[di % COLORS.length]" stroke-width="2.5"
+              class="chart-line-draw" />
+          </template>
           <template v-for="(ds, di) in scaled.datasets" :key="'pts'+di">
             <circle v-for="(pt, pi) in ds.points" :key="'pt'+di+'-'+pi"
               :cx="toX(pt.x)" :cy="toY(pt.y)" r="4"
@@ -158,7 +165,7 @@ function staggerDelay(index: number, total: number): string {
           text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="12">{{ data.xLabel }}</text>
         <text v-if="data.yLabel" :x="16" :y="MARGIN.top + PLOT_H / 2"
           text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="12"
-          transform="rotate(-90,16,175)">{{ data.yLabel }}</text>
+          :transform="`rotate(-90,16,${MARGIN.top + PLOT_H / 2})`">{{ data.yLabel }}</text>
       </svg>
     </div>
     <div class="chart-legend" v-if="scaled.datasets">
@@ -174,7 +181,7 @@ function staggerDelay(index: number, total: number): string {
 .diagram-scene {
   width: 100%; height: 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: #0f0f13; padding: 40px;
+  background: radial-gradient(ellipse at 70% 15%, rgba(43, 111, 255, 0.08), transparent 55%), radial-gradient(ellipse at 20% 85%, rgba(255, 140, 66, 0.05), transparent 55%), radial-gradient(ellipse at 50% 50%, #14141f 0%, #0d0d12 65%, #08080c 100%); padding: 40px;
 }
 .diagram-heading { font-size: 18px; font-weight: 600; color: rgba(255,255,255,0.8); margin: 0 0 16px; }
 .chart-container { width: 100%; max-width: 600px; }

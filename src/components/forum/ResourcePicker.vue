@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useForumStore } from '@/stores/forum'
 import type { ForumResource } from '@/types/forum'
-import { Search, Document, Reading, List, Monitor } from '@element-plus/icons-vue'
+import { Search, Document, Reading, List, Monitor, Connection, VideoCamera, Share } from '@element-plus/icons-vue'
 
 const emit = defineEmits<{
   (e: 'select', resources: ForumResource[]): void
@@ -14,12 +14,18 @@ const selected = ref<ForumResource[]>([])
 const filterType = ref('all')
 const searchQuery = ref('')
 
-const typeMeta: Record<string, { icon: any; label: string }> = {
-  document: { icon: Document, label: '文档' },
-  exercise: { icon: List, label: '习题' },
-  reading: { icon: Reading, label: '阅读' },
-  code: { icon: Monitor, label: '代码' },
-  mindmap: { icon: Document, label: '思维导图' },
+const typeMeta: Record<string, { icon: any; label: string; color: string }> = {
+  doc: { icon: Document, label: '文档', color: 'var(--lt-brand)' },
+  quiz: { icon: List, label: '习题', color: 'var(--lt-orange)' },
+  reading: { icon: Reading, label: '阅读', color: 'var(--lt-ai)' },
+  code: { icon: Monitor, label: '代码', color: 'var(--lt-success)' },
+  mindmap: { icon: Share, label: '思维导图', color: 'var(--lt-orange)' },
+  html: { icon: Connection, label: '交互文档', color: 'var(--lt-ai)' },
+  video: { icon: VideoCamera, label: '视频', color: 'var(--lt-ai)' },
+}
+
+function getMeta(type: string) {
+  return typeMeta[type] || { icon: Document, label: type, color: 'var(--lt-text-secondary)' }
 }
 
 const filteredResources = computed(() => {
@@ -92,15 +98,20 @@ onMounted(() => {
           @click="toggleSelect(r)"
         >
           <div class="flex items-center gap-3">
+            <div
+              class="resource-type-icon flex items-center justify-center rounded-lg w-9 h-9 flex-shrink-0"
+              :style="{ background: getMeta(r.type).color + '15', color: getMeta(r.type).color }"
+            >
+              <el-icon :size="18"><component :is="getMeta(r.type).icon" /></el-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium truncate m-0" style="color: var(--lt-text-primary);">{{ r.title }}</p>
+              <p class="text-xs m-0 mt-0.5" style="color: var(--lt-text-auxiliary);">{{ getMeta(r.type).label }}</p>
+            </div>
             <el-checkbox
               :model-value="selected.some(s => s.resourceItemId === r.resourceItemId)"
               @click.stop
-              @change="toggleSelect(r)"
             />
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium truncate m-0">{{ r.title }}</p>
-              <p class="text-xs m-0" style="color: var(--lt-text-auxiliary);">{{ typeMeta[r.type]?.label || r.type }}</p>
-            </div>
           </div>
         </div>
         <div v-if="filteredResources.length === 0" class="text-center py-6 text-sm" style="color: var(--lt-text-auxiliary);">
@@ -159,15 +170,21 @@ onMounted(() => {
 }
 .resource-item {
   padding: 10px 12px;
+  border: 1px solid transparent;
   border-radius: var(--lt-radius-md);
   cursor: pointer;
   transition: all var(--lt-transition-base);
 }
 .resource-item:hover {
-  background: var(--lt-brand-lightest);
+  background: var(--lt-bg-card);
+  border-color: var(--lt-border);
+  box-shadow: var(--lt-shadow-hover);
 }
 .resource-item.selected {
   background: var(--lt-brand-lightest);
-  border: 1px solid var(--lt-brand-lighter);
+  border-color: var(--lt-brand-lighter);
+}
+.resource-type-icon {
+  border-radius: var(--lt-radius-md);
 }
 </style>

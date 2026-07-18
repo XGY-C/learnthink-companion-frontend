@@ -4,10 +4,11 @@ import { useRoute, useRouter, onBeforeRouteUpdate, type RouteLocationNormalized 
 import { usePlanStore } from '@/stores/plan'
 import { useActivityStore } from '@/stores/activity'
 import { useProfileStore } from '@/stores/profile'
-import type { Activity, ActivityResource, ActivitySubmitResponse } from '@/types'
+import type { Activity, ActivityResource, ActivitySubmitResponse, QuestionRef } from '@/types'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
 import CodeLearningViewer from '@/components/code/CodeLearningViewer.vue'
+import HtmlSandboxViewer from '@/components/HtmlSandboxViewer.vue'
 import ResourceNavigator from '@/components/ResourceNavigator.vue'
 import StepCompleteZone from '@/components/learn/StepCompleteZone.vue'
 import QuizFocusModal from '@/components/learn/QuizFocusModal.vue'
@@ -43,6 +44,7 @@ const routeModuleId = computed(() => route.query.moduleId as string | undefined)
 // ===== Tutoring entry =====
 const showTutoringDrawer = ref(false)
 const selectedText = ref('')
+const questionRef = ref<QuestionRef | null>(null)
 const showAskAiButton = ref(false)
 const showNoteButton = ref(false)
 const askAiPosition = ref({ x: 0, y: 0 })
@@ -76,9 +78,20 @@ function handleAskAi() {
   showTutoringDrawer.value = true
 }
 
+function handleQuestionAskAi(_questionId: string, data: QuestionRef) {
+  questionRef.value = data
+  selectedText.value = ''
+  showTutoringDrawer.value = true
+}
+
+function handleDismissQuestionRef() {
+  questionRef.value = null
+}
+
 function handleFabClick() {
   if (!showTutoringDrawer.value) {
     selectedText.value = ''
+    questionRef.value = null
   }
   showTutoringDrawer.value = !showTutoringDrawer.value
 }
@@ -86,6 +99,7 @@ function handleFabClick() {
 function handleTutoringClose() {
   showTutoringDrawer.value = false
   selectedText.value = ''
+  questionRef.value = null
 }
 
 function handleAddNote() {
@@ -489,10 +503,10 @@ const remainingMin = computed(() => {
 // ===== Resource type helpers =====
 const TYPE_ICONS: Record<string, string> = {
   doc: '\uD83D\uDCC4', reading: '\uD83D\uDCD6', mindmap: '\uD83E\uDDE0',
-  video: '\uD83C\uDFAC', code: '\uD83D\uDCBB', quiz: '\uD83D\uDCDD',
+  video: '\uD83C\uDFAC', code: '\uD83D\uDCBB', quiz: '\uD83D\uDCDD', html: '\uD83C\uDF10',
 }
 const TYPE_LABELS: Record<string, string> = {
-  doc: '文档', reading: '阅读', mindmap: '思维导图', video: '视频', code: '代码', quiz: '测验',
+  doc: '文档', reading: '阅读', mindmap: '思维导图', video: '视频', code: '代码', quiz: '测验', html: '交互文档',
 }
 
 const RESOURCE_ACCENT_COLORS: Record<string, string> = {
@@ -502,6 +516,7 @@ const RESOURCE_ACCENT_COLORS: Record<string, string> = {
   video: '#FF3B30',
   code: '#5A5A72',
   quiz: '#FF8C42',
+  html: '#7C5CFC',
 }
 
 function typeIcon(type: string): string { return TYPE_ICONS[type] || '\uD83D\uDCC4' }
@@ -569,9 +584,19 @@ async function loadAllResources() {
           loadedResources.value[i].title = typeLabel(r.resourceType)
           continue
         }
-        const expectedIdx = (activity.value?.order || 1) - 1
-        const item = matches.find((m: any) => m.subtopic_index === expectedIdx) || matches[0]
-        console.log(`[ResourceLoad] activityId=${activity.value?.activityId} order=${activity.value?.order} type=${r.resourceType} packId=${r.resourcePackId} expectedIdx=${expectedIdx} matchedTitle="${item?.title}" subtopicIndex=${item?.subtopic_index} totalMatches=${matches.length}`)
+        // 用 activity 在 subPlan 列表中的实际位置匹配 subtopic_index，
+        // 因为 activity.order 由 LLM 生成可能不连续（如 3,4,5,6），
+        // 而 subtopic_index 是在 doPlanDriven 中按列表位置 0,1,2,3 赋值的
+        let actIdx = 0
+        const subPlan = Array.from(planStore.subPlans.values()).find(sp =>
+          sp.activities?.some(a => a.activityId === activity.value?.activityId)
+        )
+        if (subPlan?.activities) {
+          actIdx = subPlan.activities.findIndex(a => a.activityId === activity.value?.activityId)
+          if (actIdx < 0) actIdx = 0
+        }
+        const item = matches.find((m: any) => m.subtopic_index === actIdx) || matches[0]
+        console.log(`[ResourceLoad] activityId=${activity.value?.activityId} order=${activity.value?.order} actIdx=${actIdx} type=${r.resourceType} packId=${r.resourcePackId} matchedTitle="${item?.title}" subtopicIndex=${item?.subtopic_index} totalMatches=${matches.length}`)
         loadedResources.value[i].title = item.title || typeLabel(r.resourceType)
         loadedResources.value[i].qualityScore = item.qualityScore || item.metadata?.quality_score || 0
         loadedResources.value[i].sourcesCount = item.sourcesCount || item.sources?.length || 0
@@ -1111,6 +1136,15 @@ onUnmounted(() => {
           <el-tag v-if="activity" size="small" effect="plain" :disable-transitions="true">
             {{ activity.type === 'learn' ? '学习' : '拓展' }}
           </el-tag>
+          <template v-if="currentResource">
+            <span>·</span>
+            <span class="topbar-res-title">{{ currentResource.title }}</span>
+            <span
+              class="topbar-res-type"
+              :style="{ color: RESOURCE_ACCENT_COLORS[currentResource.planRef.resourceType] || '#2B6FFF' }"
+            >{{ typeIcon(currentResource.planRef.resourceType) }} {{ typeLabel(currentResource.planRef.resourceType) }}</span>
+            <span v-if="currentResource.estimatedMin" class="topbar-res-duration">· {{ currentResource.estimatedMin }}分钟</span>
+          </template>
         </div>
       </div>
       <div class="flex items-center gap-4">
@@ -1176,19 +1210,6 @@ onUnmounted(() => {
             :key="activeResIndex"
             class="resource-step"
           >
-            <!-- Resource Title + Info -->
-            <div v-if="currentResource.planRef.resourceType !== 'quiz'" class="resource-immersive-header">
-              <h2 class="resource-immersive-title">{{ currentResource.title }}</h2>
-              <div class="resource-immersive-info">
-                <span class="resource-immersive-type"
-                  :style="{ color: RESOURCE_ACCENT_COLORS[currentResource.planRef.resourceType] || '#2B6FFF' }"
-                >{{ typeIcon(currentResource.planRef.resourceType) }} {{ typeLabel(currentResource.planRef.resourceType) }}</span>
-                <span v-if="currentResource.estimatedMin" class="resource-immersive-duration">· 约{{ currentResource.estimatedMin }}分钟</span>
-                <span class="resource-immersive-duration">· 已学 {{ formatTime(liveResourceTime) }}</span>
-              </div>
-              <div class="resource-immersive-divider"></div>
-            </div>
-
             <!-- Resource Body -->
             <div class="resource-section-body">
               <!-- Generating placeholder -->
@@ -1257,6 +1278,7 @@ onUnmounted(() => {
                 teleport-bar
                 @complete="onQuizComplete"
                 @back-to-path="clearState(); router.push('/path')"
+                @ask-ai="handleQuestionAskAi"
               />
 
               <!-- code -->
@@ -1268,6 +1290,11 @@ onUnmounted(() => {
                   :sources-count="currentResource.sourcesCount"
                 />
               </template>
+
+              <!-- html 交互文档 -->
+              <div v-else-if="currentResource.planRef.resourceType === 'html'" class="resource-html">
+                <HtmlSandboxViewer :content="currentResource.content || ''" :title="currentResource.title" />
+              </div>
 
               <!-- doc / reading with TOC sidebar -->
               <div v-else class="resource-doc-layout" @mouseup="onResourceMouseUp">
@@ -1400,8 +1427,10 @@ onUnmounted(() => {
     <TutoringDrawer
       :visible="showTutoringDrawer"
       :initial-question="selectedText"
+      :question-ref="questionRef"
       :course-id="profileStore.activeCourseId"
       @close="handleTutoringClose"
+      @dismiss-question-ref="handleDismissQuestionRef"
     />
 
     <!-- Floating FAB (entry 3) -->
@@ -1556,6 +1585,17 @@ onUnmounted(() => {
   min-width: 28px;
 }
 
+.topbar-res-title {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--lt-text-primary);
+}
+.topbar-res-type { font-size: 12px; font-weight: 600; }
+.topbar-res-duration { font-size: 12px; color: var(--lt-text-auxiliary); white-space: nowrap; }
+
 /* ── Content area ── */
 .learn-content {
   flex: 1;
@@ -1615,6 +1655,13 @@ onUnmounted(() => {
 
 .resource-section-body {
   padding: 0;
+}
+.resource-html {
+  width: 100vw;
+  margin-left: calc(-50vw + 50%);
+  margin-right: calc(-50vw + 50%);
+  margin-top: -32px;
+  max-width: none;
 }
 
 .resource-placeholder {
@@ -2056,6 +2103,13 @@ onUnmounted(() => {
 
   .resource-section-body {
     padding: 0;
+  }
+
+  .resource-html {
+    width: 100vw;
+    margin-left: calc(-50vw + 50%);
+    margin-right: calc(-50vw + 50%);
+    margin-top: -20px;
   }
 
   .toc-bar {

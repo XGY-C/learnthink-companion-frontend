@@ -3,6 +3,8 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
 import { usePlanStore } from '@/stores/plan'
+import { useResourceStore } from '@/stores/resource'
+import { usePushStore } from '@/stores/push'
 import { usePullToRefresh } from '@/composables/usePullToRefresh'
 import { apiFetch } from '@/utils/api'
 import { getConfidenceConfig, CONFIDENCE_CONFIG } from '@/constants'
@@ -11,17 +13,22 @@ import * as echarts from 'echarts/core'
 import { RadarChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
+import { ElMessage } from 'element-plus'
 import {
-  Timer, WarningFilled, Document, Medal, Right, Aim,
-  TrendCharts, Reading, User, MagicStick
+  Timer, WarningFilled, Document, Medal, Right,
+  TrendCharts, Reading, User, MagicStick, RefreshRight,
+  ChatDotRound, Monitor, Grid, EditPen
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import BottomSheet from '@/components/mobile/BottomSheet.vue'
+import KnowledgeGraphDialog from '@/components/KnowledgeGraphDialog.vue'
 import DashboardIcon from '@/components/icons/DashboardIcon.vue'
 
 const router = useRouter()
 const profile = useProfileStore()
 const planStore = usePlanStore()
+const resourceStore = useResourceStore()
+const pushStore = usePushStore()
 const userStore = useUserStore()
 
 const pullContainer = ref<HTMLElement | null>(null)
@@ -29,6 +36,11 @@ const { pullState, pullDistance } = usePullToRefresh(pullContainer, async () => 
   fetchTextbook()
   fetchStats()
   profile.refreshProfile()
+  planStore.fetchPlan(activeCourseId.value || 'default')
+  if (activeCourseId.value) {
+    resourceStore.fetchPacks(activeCourseId.value)
+    pushStore.fetchRecommendations(activeCourseId.value)
+  }
 })
 
 echarts.use([RadarChart, CanvasRenderer])
@@ -39,21 +51,48 @@ const greeting = hour < 12 ? '☀️ 早上好' : hour < 18 ? '☀️ 下午好'
 const userName = computed(() => userStore.userInfo?.displayName ?? '同学')
 const courseName = computed(() => profile.activeCourse?.name ?? '')
 
+const COURSE_PILL_LIMIT = 4
+const showCourseSheet = ref(false)
+const visibleCourses = computed(() => {
+  const courses = profile.courses
+  if (courses.length <= COURSE_PILL_LIMIT) return courses
+  const activeIdx = courses.findIndex(c => c.id === activeCourseId.value)
+  if (activeIdx < COURSE_PILL_LIMIT - 1) {
+    return courses.slice(0, COURSE_PILL_LIMIT - 1)
+  }
+  const result = courses.filter((_, i) => i < COURSE_PILL_LIMIT - 1 || i === activeIdx)
+  return result.slice(0, COURSE_PILL_LIMIT - 1).concat(courses[activeIdx])
+})
+const hiddenCount = computed(() => profile.courses.length - visibleCourses.value.length)
+
+function switchCourse(course: { id: string; name: string; emoji?: string }) {
+  if (course.id === activeCourseId.value) return
+  profile.switchCourse(course)
+  fetchTextbook()
+  fetchStats()
+  planStore.fetchPlan(course.id)
+  resourceStore.fetchPacks(course.id)
+  pushStore.fetchRecommendations(course.id)
+}
+
 // ===== 学习统计数据 =====
 const todayMinutes = ref<number | null>(null)
 const weeklyHours = ref<number[]>([])
 const recentActivities = ref<{ type: string; label: string; time: string }[]>([])
+const statsLoading = ref(false)
 
 async function fetchStats() {
   if (!activeCourseId.value) return
+  statsLoading.value = true
   try {
     const res = await apiFetch<any>(`/user/me/stats?courseId=${encodeURIComponent(activeCourseId.value)}`)
     if (res.data) {
       todayMinutes.value = res.data.todayMinutes ?? null
-      weeklyHours.value = res.data.weeklyHours ?? []
+      weeklyHours.value = (res.data.weeklyActivity ?? []).map((e: { hours: number }) => e.hours)
       recentActivities.value = res.data.recentActivities ?? []
     }
-  } catch { /* stats API 可能尚未就绪 */ }
+  } catch { /* stats API may not be ready */ }
+  finally { statsLoading.value = false }
 }
 
 const hasStats = computed(() => todayMinutes.value !== null)
@@ -71,9 +110,19 @@ const profileCoreInfo = computed(() => {
 })
 
 const masteryRatio = computed(() => {
+  const dp = profile.displayProfile
+  if (dp?.core?.strong && dp?.core?.weak) {
+    const total = dp.core.strong.length + dp.core.weak.length
+    if (total === 0) return 0
+    return Math.round((dp.core.strong.length / total) * 100)
+  }
   if (profile.dimensions.length === 0) return 0
   const avg = profile.dimensions.reduce((s, d) => s + d.value, 0) / profile.dimensions.length
   return Math.round(avg)
+})
+
+const errorPatterns = computed(() => {
+  return profile.displayProfile?.knowledge?.error_pattern ?? []
 })
 
 // ===== 教材信息 =====
@@ -81,6 +130,7 @@ const activeCourseId = computed(() => profile.activeCourseId)
 const textbook = ref<CourseTextbook | null>(null)
 const textbookLoading = ref(false)
 const showTocSheet = ref(false)
+const showKgDialog = ref(false)
 
 function parseToc(tocJson: string): ChapterNode[] {
   try { return JSON.parse(tocJson) } catch { return [] }
@@ -117,11 +167,10 @@ const interestTags = computed(() => profile.tags.interest)
 const metrics = computed(() => [
   { label: '今日学习', value: todayMinutes.value ?? '--', unit: todayMinutes.value !== null ? '分钟' : '', icon: Timer, color: 'var(--lt-brand)', bg: 'rgba(43,111,255,0.08)' },
   { label: '薄弱项', value: weakTags.value.length, unit: '个需加强', icon: WarningFilled, color: 'var(--lt-danger)', bg: 'rgba(255,59,48,0.08)' },
-  { label: '资源包', value: recentPacks.value.length, unit: '个', icon: Document, color: 'var(--lt-success)', bg: 'rgba(52,199,89,0.08)' },
-  { label: '路径进度', value: pathProgress.value, unit: '%', icon: Medal, color: 'var(--lt-warning)', bg: 'rgba(255,159,10,0.08)' },
+  { label: '资源包', value: resourceStore.packs.length, unit: '个', icon: Document, color: 'var(--lt-success)', bg: 'rgba(52,199,89,0.08)' },
+  { label: '路径进度', value: planStore.overallProgress, unit: '%', icon: Medal, color: 'var(--lt-warning)', bg: 'rgba(255,159,10,0.08)' },
 ])
 
-const pathProgress = computed(() => planStore.overallProgress)
 
 const radarIndicators = computed(() =>
   profile.dimensions.map(d => ({ name: d.name, max: 100 }))
@@ -132,6 +181,13 @@ const chartColors = computed(() => {
   return {
     brand: style.getPropertyValue('--lt-brand').trim() || '#2B6FFF',
     textSecondary: style.getPropertyValue('--lt-text-secondary').trim() || '#64748b',
+    splitBg: [
+      style.getPropertyValue('--lt-chart-split-bg-0').trim() || '#F5F7FA',
+      style.getPropertyValue('--lt-chart-split-bg-1').trim() || '#EEF1F5',
+      style.getPropertyValue('--lt-chart-split-bg-2').trim() || '#E8ECF0',
+      style.getPropertyValue('--lt-chart-split-bg-3').trim() || '#DEE3E8',
+    ],
+    grid: style.getPropertyValue('--lt-chart-grid').trim() || '#E8ECF0',
   }
 })
 
@@ -141,9 +197,9 @@ const radarOption = computed(() => ({
     radius: '50%',
     center: ['50%', '50%'],
     axisName: { color: chartColors.value.textSecondary, fontSize: 9 },
-    splitArea: { areaStyle: { color: ['#f8fafc', '#f1f5f9', '#e2e8f0', '#cbd5e1'] } },
-    axisLine: { lineStyle: { color: '#e2e8f0' } },
-    splitLine: { lineStyle: { color: '#e2e8f0' } },
+    splitArea: { areaStyle: { color: chartColors.value.splitBg } },
+    axisLine: { lineStyle: { color: chartColors.value.grid } },
+    splitLine: { lineStyle: { color: chartColors.value.grid } },
   },
   series: [{
     name: '当前画像',
@@ -155,16 +211,60 @@ const radarOption = computed(() => ({
 const profileVersion = computed(() => profile.profileVersion)
 const profileUpdatedAt = computed(() => profile.updatedAt)
 
-// ===== 下一步推荐 =====
-const nextRecommendation = computed(() => ({
-  title: 'A* 搜索算法详解',
-  knowledgePoint: 'A* 搜索算法',
-  reason: ['针对薄弱点：架构设计', '偏好：代码实操优先', '节奏：15分钟/天'],
-  estimatedMinutes: 15,
-  sourcesCount: 6,
-  qualityScore: 88,
-  confidence: 'high' as const,
-}))
+// ===== 下一步推荐 (dynamic from pushStore) =====
+const nextRecommendation = computed(() => {
+  const apiRec = pushStore.mainRecommendation
+  if (apiRec) {
+    return {
+      title: `攻克「${apiRec.knowledgePoint || apiRec.title}」`,
+      knowledgePoint: apiRec.knowledgePoint || apiRec.title,
+      reason: apiRec.reasons?.map((r: any) => r.label).filter(Boolean) || ['基于学习画像推荐'],
+      reasonDetails: apiRec.reasons?.map((r: any) => r.detail).filter(Boolean) || [],
+      estimatedMinutes: apiRec.estimatedMinutes || 15,
+      resourcePackId: apiRec.packId,
+      confidence: apiRec.confidence as 'high' | 'medium' | 'low',
+      sourcesCount: 0,
+      qualityScore: 0,
+    }
+  }
+
+  const currentAct = planStore.currentActivity
+  const currentMod = planStore.currentModule
+
+  if (currentAct && currentMod) {
+    const reasons: string[] = []
+    if (currentMod.title) reasons.push(`当前模块：${currentMod.title}`)
+    if (weakTags.value.length > 0) reasons.push(`薄弱项：${weakTags.value.slice(0, 2).join('、')}`)
+    if (profilePreference.value) reasons.push(`偏好：${profilePreference.value}`)
+    return {
+      title: currentAct.title || '推荐学习活动',
+      knowledgePoint: currentMod.title || '推荐知识点',
+      reason: reasons.length > 0 ? reasons : ['基于你的学习画像推荐'],
+      reasonDetails: [],
+      estimatedMinutes: currentAct.estimatedMinutes || 15,
+      resourcePackId: currentAct.resource?.resourcePackId || '',
+      confidence: 'high' as const,
+      sourcesCount: 0,
+      qualityScore: 0,
+    }
+  }
+
+  if (weakTags.value.length > 0) {
+    return {
+      title: `攻克「${weakTags.value[0]}」`,
+      knowledgePoint: weakTags.value[0],
+      reason: ['薄弱项练习', '个性化推荐'],
+      reasonDetails: [],
+      estimatedMinutes: profilePace.value,
+      resourcePackId: '',
+      confidence: 'medium' as const,
+      sourcesCount: 0,
+      qualityScore: 0,
+    }
+  }
+
+  return null
+})
 
 // ===== 最近资源包 =====
 interface RecentPack {
@@ -172,11 +272,18 @@ interface RecentPack {
   resourceCount: number; avgQuality: number; avgConfidence: 'high' | 'medium' | 'low'; isActive: boolean
 }
 
-const recentPacks = ref<RecentPack[]>([
-  { id: 'RPK-003', title: 'A* 搜索算法学习包', knowledgePoint: 'A* 搜索算法', createdAt: '2026-05-05 14:30', resourceCount: 5, avgQuality: 92, avgConfidence: 'high', isActive: true },
-  { id: 'RPK-002', title: 'Vue3 响应式原理学习包', knowledgePoint: 'Vue3 响应式', createdAt: '2026-05-04 10:15', resourceCount: 4, avgQuality: 85, avgConfidence: 'high', isActive: false },
-  { id: 'RPK-001', title: 'JavaScript 闭包与作用域', knowledgePoint: 'JS 闭包', createdAt: '2026-05-03 09:00', resourceCount: 6, avgQuality: 78, avgConfidence: 'medium', isActive: false },
-])
+const recentPacks = computed<RecentPack[]>(() =>
+  resourceStore.packs.slice(0, 10).map(p => ({
+    id: p.id,
+    title: p.title,
+    knowledgePoint: p.knowledgePoint,
+    createdAt: p.createdAt,
+    resourceCount: p.resourceCount,
+    avgQuality: p.avgQuality,
+    avgConfidence: p.avgConfidence as 'high' | 'medium' | 'low',
+    isActive: p.isActive,
+  }))
+)
 
 // ===== 空状态引导 =====
 const emptyGuideSteps = [
@@ -185,9 +292,56 @@ const emptyGuideSteps = [
   { icon: '📈', title: '学习路径', desc: '获取动态调整的学习规划与练习反馈', action: '去路径', route: '/path' },
 ]
 
+// ===== 交互方法 =====
+const goToChat = () => router.push('/chat')
+const goToStudio = (topic?: string) => {
+  if (topic) router.push({ name: 'studio', query: { topic } })
+  else router.push('/studio')
+}
+const goToPath = () => router.push('/path')
+const openPack = (pack: RecentPack) => router.push({ path: '/library', query: { packId: pack.id } })
+
+const formatPackTime = (dateStr: string): string => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return dateStr
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const hour = String(d.getHours()).padStart(2, '0')
+  const minute = String(d.getMinutes()).padStart(2, '0')
+  return `${month}-${day} ${hour}:${minute}`
+}
+
+const isRefreshing = ref(false)
+
+const refreshMetrics = async () => {
+  isRefreshing.value = true
+  try {
+    await Promise.allSettled([
+      planStore.fetchPlan('default'),
+      activeCourseId.value ? resourceStore.fetchPacks(activeCourseId.value) : Promise.resolve(),
+      fetchTextbook(),
+      fetchStats(),
+    ])
+    ElMessage.success('已刷新仪表盘数据')
+  } catch {
+    ElMessage.warning('部分数据刷新失败')
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
 onMounted(() => {
+  if (activeCourseId.value) {
+    profile.refreshProfile(activeCourseId.value)
+  }
   fetchTextbook()
   fetchStats()
+  planStore.fetchPlan(activeCourseId.value || 'default')
+  if (activeCourseId.value) {
+    resourceStore.fetchPacks(activeCourseId.value)
+    pushStore.fetchRecommendations(activeCourseId.value)
+  }
 })
 </script>
 
@@ -206,6 +360,7 @@ onMounted(() => {
         <span>下拉刷新</span>
       </template>
     </div>
+
     <!-- 欢迎行 -->
     <div class="m-dash-header">
       <div>
@@ -215,10 +370,59 @@ onMounted(() => {
         </h1>
         <p class="m-dash-subtitle">{{ courseName }}<template v-if="todayMinutes !== null"> · 今日学习 {{ todayMinutes }} 分钟</template></p>
       </div>
-      <button class="m-dash-report-btn" @click="router.push('/report')">
-        完整报告 <el-icon :size="14"><Right /></el-icon>
+      <div class="m-dash-header-actions">
+        <button class="m-dash-icon-btn" :disabled="isRefreshing" @click="refreshMetrics">
+          <el-icon :size="18" :class="{ 'm-spin': isRefreshing }"><RefreshRight /></el-icon>
+        </button>
+        <button class="m-dash-report-btn" @click="router.push('/report')">
+          完整报告 <el-icon :size="14"><Right /></el-icon>
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== 课程横向选择 Pill ===== -->
+    <div v-if="profile.courses.length >= 1" class="m-course-pills">
+      <button
+        v-for="c in visibleCourses"
+        :key="c.id"
+        class="m-course-pill"
+        :class="{ 'is-active': c.id === activeCourseId }"
+        @click="switchCourse(c)"
+      >
+        <span class="m-course-pill-emoji">{{ c.emoji || '📚' }}</span>
+        <span class="m-course-pill-name">{{ c.shortName || c.name }}</span>
+      </button>
+      <button
+        v-if="hiddenCount > 0"
+        class="m-course-pill m-course-more"
+        @click="showCourseSheet = true"
+      >
+        <span>全部 {{ profile.courses.length }}</span>
+        <el-icon :size="12"><Right /></el-icon>
       </button>
     </div>
+
+    <!-- ===== 课程切换 BottomSheet ===== -->
+    <BottomSheet v-model="showCourseSheet" height="medium" title="选择课程" :show-close="true">
+      <div class="m-course-list">
+        <button
+          v-for="c in profile.courses"
+          :key="c.id"
+          class="m-course-item"
+          :class="{ 'is-active': c.id === activeCourseId }"
+          @click="switchCourse(c); showCourseSheet = false"
+        >
+          <span class="m-course-item-emoji">{{ c.emoji || '📚' }}</span>
+          <div class="m-course-item-info">
+            <div class="m-course-item-name">{{ c.name }}</div>
+            <div v-if="c.teacher" class="m-course-item-teacher">{{ c.teacher }}</div>
+          </div>
+          <span v-if="c.id === activeCourseId" class="m-course-item-check">
+            <el-icon :size="16"><Right /></el-icon>
+          </span>
+        </button>
+      </div>
+    </BottomSheet>
 
     <!-- ===== 空状态 ===== -->
     <template v-if="!hasProfile">
@@ -234,7 +438,7 @@ onMounted(() => {
             <span class="m-step-action">{{ step.action }} →</span>
           </div>
         </div>
-        <button class="m-dash-primary-btn" @click="router.push('/chat')">
+        <button class="m-dash-primary-btn" @click="goToChat">
           开始对话建画像 <el-icon :size="16" class="ml-1"><Right /></el-icon>
         </button>
       </div>
@@ -249,6 +453,7 @@ onMounted(() => {
           class="m-metric-card"
           :style="{ '--metric-color': metric.color }"
           @click="router.push(['/chat','/chat','/studio','/path'][idx])"
+         
         >
           <div class="m-metric-icon" :style="{ color: metric.color, backgroundColor: metric.bg }">
             <el-icon :size="20"><component :is="metric.icon" /></el-icon>
@@ -260,8 +465,176 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 5. 学习动态 -->
+      <!-- 2. 下一步推荐 -->
       <div class="m-recommend-card">
+        <div class="m-section-header">
+          <span class="m-section-label">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--lt-brand)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+              <circle cx="12" cy="12" r="10" style="stroke: var(--lt-brand); opacity: 0.5;"/>
+              <g>
+                <animateTransform attributeName="transform" type="rotate" values="-20 12 12;20 12 12;-20 12 12" dur="2.8s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1;0.4 0 0.2 1"/>
+                <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" style="fill: var(--lt-brand); stroke: none;"/>
+              </g>
+            </svg>
+            下一步学习推荐
+          </span>
+          <button class="m-section-link" @click="goToPath">查看完整路径 →</button>
+        </div>
+
+        <div v-if="!nextRecommendation" class="m-recommend-empty">
+          <p>暂无推荐数据，快去对话建立学习画像吧</p>
+          <button class="m-dash-primary-btn m-btn-sm" @click="goToChat">去对话</button>
+        </div>
+        <template v-else>
+          <h3 class="m-recommend-title">{{ nextRecommendation.title }}</h3>
+          <p class="m-recommend-kp">知识点：{{ nextRecommendation.knowledgePoint }}</p>
+
+          <div class="m-recommend-meta">
+            <span v-if="nextRecommendation.sourcesCount" class="m-reco-stat">
+              <el-icon :size="12"><Document /></el-icon> 来源 {{ nextRecommendation.sourcesCount }}
+            </span>
+            <span v-if="nextRecommendation.qualityScore" class="m-reco-stat">
+              <el-icon :size="12"><TrendCharts /></el-icon> 质量 {{ nextRecommendation.qualityScore }}/100
+            </span>
+            <span class="m-reco-stat">
+              <el-icon :size="12"><Timer /></el-icon> 预计 {{ nextRecommendation.estimatedMinutes }} 分钟
+            </span>
+            <span
+              class="m-reco-tag"
+              :class="{ success: nextRecommendation.confidence === 'high', warning: nextRecommendation.confidence === 'medium', danger: nextRecommendation.confidence === 'low' }"
+            >
+              {{ CONFIDENCE_CONFIG[nextRecommendation.confidence].label }}置信度
+            </span>
+          </div>
+
+          <div class="m-recommend-reasons">
+            <span v-for="(reason, ridx) in nextRecommendation.reason" :key="ridx" class="m-reason-tag">
+              {{ reason }}
+            </span>
+          </div>
+
+          <div class="m-recommend-actions">
+            <button class="m-dash-primary-btn m-btn-block" @click="nextRecommendation.knowledgePoint ? goToStudio(nextRecommendation.knowledgePoint) : goToStudio()">
+              去生成资源包 <el-icon :size="14" class="ml-1"><MagicStick /></el-icon>
+            </button>
+            <button class="m-dash-secondary-btn" @click="goToPath">查看路径位置</button>
+          </div>
+        </template>
+
+        <!-- 次要推荐 -->
+        <div v-if="pushStore.secondaryRecommendations.length > 0" class="m-secondary-list">
+          <p class="m-secondary-title">你可能也需要：</p>
+          <div
+            v-for="item in pushStore.secondaryRecommendations"
+            :key="item.packId"
+            class="m-secondary-item"
+            @click="router.push(`/library?packId=${item.packId}`)"
+           
+          >
+            <div class="m-secondary-left">
+              <span class="m-secondary-icon">{{ item.resourceCount > 1 ? '🧩' : '📄' }}</span>
+              <span class="m-secondary-name">{{ item.title }}</span>
+              <span v-if="item.weaknessMatch > 0.5" class="m-secondary-badge danger">薄弱项</span>
+              <span v-else-if="item.pathMatch > 0.5" class="m-secondary-badge primary">路径匹配</span>
+            </div>
+            <span class="m-secondary-time">{{ item.estimatedMinutes }}min</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. 学习画像 -->
+      <div class="m-profile-card">
+        <div class="m-section-header">
+          <span class="m-section-label">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--lt-ai)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" style="opacity: 0.5;"/>
+              <circle cx="12" cy="7" r="4">
+                <animate attributeName="opacity" values="0.4;1;0.4" dur="2s" repeatCount="indefinite"/>
+              </circle>
+            </svg>
+            学习画像
+          </span>
+          <button class="m-section-link" @click="goToChat">详细画像 →</button>
+        </div>
+
+        <!-- L1: 核心信息 -->
+        <div v-if="profileCoreInfo" class="m-core-info">
+          <div class="m-core-header">
+            <span class="m-core-dot" style="background: var(--lt-brand);"></span>
+            核心信息
+          </div>
+          <div class="m-core-row">
+            <span class="m-core-major">{{ profileCoreInfo.major }}</span>
+            <span class="m-core-divider"></span>
+            <span>{{ profileCoreInfo.grade }}</span>
+          </div>
+          <p v-if="profileCoreInfo.goal" class="m-core-goal">🎯 {{ profileCoreInfo.goal }}</p>
+          <div class="m-mastery-bar">
+            <div class="m-mastery-label">
+              <span>掌握比</span>
+              <span class="m-mastery-pct">{{ masteryRatio }}%</span>
+            </div>
+            <div class="m-mastery-track">
+              <div class="m-mastery-fill" :style="{ width: masteryRatio + '%' }"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- L2: 雷达图 -->
+        <div class="m-radar-wrap">
+          <div class="m-radar-label">画像全貌</div>
+          <div class="m-radar-chart">
+            <v-chart class="w-full h-full" :option="radarOption" autoresize />
+          </div>
+        </div>
+
+        <!-- L3: 标签云 -->
+        <div class="m-tags-section">
+          <div v-if="weakTags.length > 0" class="m-tag-group">
+            <span class="m-tag-group-label">薄弱项</span>
+            <div class="m-tag-row">
+              <span v-for="tag in weakTags" :key="tag" class="m-tag danger">{{ tag }}</span>
+            </div>
+          </div>
+          <div v-if="strongTags.length > 0" class="m-tag-group">
+            <span class="m-tag-group-label">掌握项</span>
+            <div class="m-tag-row">
+              <span v-for="tag in strongTags" :key="tag" class="m-tag success">{{ tag }}</span>
+            </div>
+          </div>
+          <div v-if="interestTags.length > 0" class="m-tag-group">
+            <span class="m-tag-group-label">兴趣</span>
+            <div class="m-tag-row">
+              <span v-for="tag in interestTags" :key="tag" class="m-tag primary">{{ tag }}</span>
+            </div>
+          </div>
+          <div v-if="errorPatterns.length > 0" class="m-tag-group">
+            <span class="m-tag-group-label">错误模式</span>
+            <div class="m-tag-row">
+              <span v-for="pattern in errorPatterns" :key="pattern" class="m-tag warning">{{ pattern }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- L4: 学习风格 + 版本 -->
+        <div class="m-profile-meta">
+          <div class="m-meta-row">
+            <span class="m-meta-label">学习节奏</span>
+            <span class="m-meta-value">{{ profilePace }} 分钟/天</span>
+          </div>
+          <div class="m-meta-row">
+            <span class="m-meta-label">内容偏好</span>
+            <span class="m-meta-value m-meta-pref">{{ profilePreference }}</span>
+          </div>
+          <div class="m-meta-row">
+            <span class="m-meta-label">画像版本</span>
+            <span class="m-meta-version">{{ profileVersion }} · {{ profileUpdatedAt }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. 学习动态 -->
+      <div class="m-section-card">
         <div class="m-section-header">
           <span class="m-section-label">
             <el-icon :size="16"><TrendCharts /></el-icon> 学习动态
@@ -285,7 +658,7 @@ onMounted(() => {
           <div v-if="recentActivities.length > 0" class="space-y-1.5">
             <p class="text-xs font-medium" style="color: var(--lt-text-secondary);">最近活动</p>
             <div v-for="(act, i) in recentActivities.slice(0, 3)" :key="i" class="flex items-center gap-2 text-xs py-1.5 px-2 rounded-md" style="background-color: var(--lt-bg-page);">
-              <span>{{ act.type === 'chat' ? '💬' : act.type === 'practice' ? '📝' : '📖' }}</span>
+              <span>{{ { chat: '💬', lecture: '📖', resource: '📝', plan: '🗺', practice: '✏️', reading: '🎓' }[act.type] ?? '📄' }}</span>
               <span class="flex-1 truncate" style="color: var(--lt-text-secondary);">{{ act.label }}</span>
               <span style="color: var(--lt-text-placeholder);">{{ act.time }}</span>
             </div>
@@ -294,29 +667,16 @@ onMounted(() => {
         <p v-else class="text-xs text-center py-6" style="color: var(--lt-text-auxiliary);">完成对话和练习后，学习动态将在此展示</p>
       </div>
 
-      <!-- 6. 教材信息 -->
-      <div v-if="textbook" class="m-textbook-card" @click="showTocSheet = true">
-        <div class="m-textbook-header">
-          <span class="m-textbook-badge">
-            <el-icon :size="14"><Reading /></el-icon> 教材信息
-          </span>
-          <span class="m-textbook-toc-link">查看目录 →</span>
-        </div>
-        <h3 class="m-textbook-title">《{{ textbook.title }}》</h3>
-        <p v-if="textbook.author" class="m-textbook-author">作者：{{ textbook.author }}</p>
-        <p v-if="textbook.introduction" class="m-textbook-intro line-clamp-2">{{ textbook.introduction }}</p>
-      </div>
-
-      <!-- 7. 最近资源包 -->
+      <!-- 5. 最近资源包 -->
       <div class="m-packs-card">
         <div class="m-section-header">
           <span class="m-section-label">
-            <el-icon :size="16"><Document /></el-icon> 最近资源包
+            <el-icon :size="16"><Document /></el-icon> 最近生成的资源包
           </span>
-          <button class="m-section-link" @click="router.push('/library')">查看全部 →</button>
+          <button class="m-section-link" @click="goToStudio()">查看全部 →</button>
         </div>
-        <div class="m-pack-list">
-          <div v-for="pack in recentPacks" :key="pack.id" class="m-pack-item" @click="router.push({ path: '/library', query: { packId: pack.id } })">
+        <div v-if="recentPacks.length > 0" class="m-pack-list">
+          <div v-for="pack in recentPacks" :key="pack.id" class="m-pack-item" @click="openPack(pack)">
             <div class="m-pack-top">
               <span class="m-pack-name">{{ pack.title }}</span>
               <span v-if="pack.isActive" class="m-pack-active">当前</span>
@@ -325,12 +685,89 @@ onMounted(() => {
             <div class="m-pack-meta">
               <span>{{ pack.resourceCount }} 类资源</span>
               <span>质量 {{ pack.avgQuality }}/100</span>
-              <span>{{ pack.createdAt }}</span>
+              <span>{{ formatPackTime(pack.createdAt) }}</span>
             </div>
           </div>
         </div>
+        <p v-else class="text-xs text-center py-6" style="color: var(--lt-text-auxiliary);">暂无资源包数据</p>
+      </div>
+
+      <!-- 6. 教材信息 -->
+      <div v-if="textbookLoading" class="m-section-card">
+        <div class="space-y-2 animate-pulse">
+          <div class="h-5 w-3/4 rounded" style="background-color: var(--lt-bg-page);" />
+          <div class="h-3 w-1/2 rounded" style="background-color: var(--lt-bg-page);" />
+          <div class="h-3 w-full rounded" style="background-color: var(--lt-bg-page);" />
+        </div>
+      </div>
+      <div v-else-if="textbook" class="m-textbook-card" @click="showTocSheet = true">
+        <div class="m-textbook-header">
+          <span class="m-textbook-badge">
+            <el-icon :size="14"><Reading /></el-icon> 教材信息
+          </span>
+          <div class="flex items-center gap-2">
+            <button class="m-textbook-kg-btn" @click.stop="showKgDialog = true" title="查看知识图谱">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="10" cy="5" r="2.5" />
+                <circle cx="3" cy="19" r="2" />
+                <circle cx="21" cy="19" r="2" />
+                <path d="M10 7.5 4.5 17" />
+                <path d="M10 7.5 17 17" />
+                <path d="M5 17 18.5 17" />
+              </svg>
+            </button>
+            <span class="m-textbook-toc-link" @click.stop="showTocSheet = true">查看目录 →</span>
+          </div>
+        </div>
+        <h3 class="m-textbook-title">《{{ textbook.title }}》</h3>
+        <p v-if="textbook.author" class="m-textbook-author">作者：{{ textbook.author }}</p>
+        <p v-if="textbook.introduction" class="m-textbook-intro line-clamp-2">{{ textbook.introduction }}</p>
+      </div>
+      <div v-else class="m-section-card text-center py-3">
+        <p class="text-sm" style="color: var(--lt-text-placeholder);">暂无教材信息</p>
       </div>
     </template>
+
+    <!-- ===== 更多功能 ===== -->
+    <div class="m-more-section">
+      <div class="m-section-header">
+        <span class="m-section-label">
+          <el-icon :size="16"><Grid /></el-icon> 更多功能
+        </span>
+      </div>
+      <div class="m-more-list">
+        <button class="m-more-item" @click="router.push('/practice')">
+          <div class="m-more-icon" style="color: var(--lt-brand); background: rgba(43,111,255,0.08);">
+            <el-icon :size="22"><EditPen /></el-icon>
+          </div>
+          <div class="m-more-body">
+            <p class="m-more-title">练习中心</p>
+            <p class="m-more-desc">刷题练习 · AI 组卷 · 错题重做</p>
+          </div>
+          <el-icon :size="14" class="m-more-arrow"><Right /></el-icon>
+        </button>
+        <button class="m-more-item" @click="router.push('/forum')">
+          <div class="m-more-icon" style="color: var(--lt-orange); background: rgba(255,140,66,0.08);">
+            <el-icon :size="22"><ChatDotRound /></el-icon>
+          </div>
+          <div class="m-more-body">
+            <p class="m-more-title">学习论坛</p>
+            <p class="m-more-desc">交流讨论 · 互助答疑</p>
+          </div>
+          <el-icon :size="14" class="m-more-arrow"><Right /></el-icon>
+        </button>
+        <button class="m-more-item" @click="router.push('/code')">
+          <div class="m-more-icon" style="color: var(--lt-ai); background: rgba(124,92,252,0.08);">
+            <el-icon :size="22"><Monitor /></el-icon>
+          </div>
+          <div class="m-more-body">
+            <p class="m-more-title">代码学习</p>
+            <p class="m-more-desc">在线编程 · 实战练习</p>
+          </div>
+          <el-icon :size="14" class="m-more-arrow"><Right /></el-icon>
+        </button>
+      </div>
+    </div>
 
     <!-- 教材目录 BottomSheet -->
     <BottomSheet v-model="showTocSheet" height="large" :title="`教材信息 —《${textbook?.title}》`">
@@ -356,6 +793,9 @@ onMounted(() => {
         <p v-if="!textbook.introduction && tocNodes.length === 0" class="toc-empty">暂无教材信息</p>
       </template>
     </BottomSheet>
+
+    <!-- 知识图谱弹窗 -->
+    <KnowledgeGraphDialog v-model="showKgDialog" :course-id="activeCourseId || ''" />
   </div>
 </template>
 
@@ -367,11 +807,75 @@ onMounted(() => {
   min-height: 100%;
 }
 
+/* 全局触摸优化：消除点击延迟和高亮闪烁 */
+.m-dashboard button,
+.m-dashboard .m-metric-card,
+.m-dashboard .m-empty-step,
+.m-dashboard .m-secondary-item,
+.m-dashboard .m-pack-item,
+.m-dashboard .m-textbook-card,
+.m-dashboard .m-more-item,
+.m-dashboard .m-course-pill {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ===== Course Pills ===== */
+.m-course-pills {
+  display: flex; gap: 8px; padding: 0 0 14px; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  margin-bottom: 2px;
+}
+.m-course-pills::-webkit-scrollbar { display: none; }
+.m-course-pill {
+  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+  padding: 6px 14px; min-height: 44px; border-radius: 22px; border: 0.5px solid var(--lt-border);
+  background: var(--lt-bg-card); color: var(--lt-text-secondary);
+  font-size: 13px; cursor: pointer; touch-action: manipulation;
+  transition: all 0.15s; white-space: nowrap;
+}
+.m-course-pill:active { transform: scale(0.96); }
+.m-course-pill.is-active {
+  background: var(--lt-brand); color: #fff; border-color: var(--lt-brand);
+  font-weight: 500; box-shadow: 0 2px 8px rgba(43,111,255,0.2);
+}
+.m-course-pill-emoji { font-size: 14px; line-height: 1; }
+.m-course-more { color: var(--lt-brand); border-color: var(--lt-brand-lighter); font-size: 12px; }
+
+/* ===== Course BottomSheet ===== */
+.m-course-list { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+.m-course-item {
+  display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+  border-radius: 12px; border: 0.5px solid var(--lt-border);
+  background: var(--lt-bg-card); cursor: pointer; touch-action: manipulation;
+  transition: all 0.15s; width: 100%; text-align: left;
+}
+.m-course-item:active { background: var(--lt-bg-page); }
+.m-course-item.is-active {
+  border-color: var(--lt-brand); background: var(--lt-brand-lightest);
+}
+.m-course-item-emoji { font-size: 24px; flex-shrink: 0; }
+.m-course-item-info { flex: 1; min-width: 0; }
+.m-course-item-name {
+  font-size: 15px; font-weight: 500; color: var(--lt-text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.m-course-item-teacher { font-size: 12px; color: var(--lt-text-auxiliary); margin-top: 2px; }
+.m-course-item-check { color: var(--lt-brand); flex-shrink: 0; }
+
 /* ===== Header ===== */
 .m-dash-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
 .m-dash-title { font-size: 20px; font-weight: 700; color: var(--lt-text-primary); display: flex; align-items: center; gap: 6px; margin: 0; }
 .m-dash-subtitle { font-size: 12px; color: var(--lt-text-auxiliary); margin: 4px 0 0; }
-.m-dash-report-btn { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--lt-brand); background: none; border: none; cursor: pointer; padding: 6px 0; touch-action: manipulation; flex-shrink: 0; }
+.m-dash-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.m-dash-icon-btn {
+  width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+  border: 0.5px solid var(--lt-border); border-radius: 50%; background: var(--lt-bg-card);
+  color: var(--lt-text-secondary); cursor: pointer; touch-action: manipulation;
+}
+.m-dash-icon-btn:active { background: var(--lt-bg-page); }
+.m-dash-report-btn { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--lt-brand); background: none; border: none; cursor: pointer; padding: 6px 0; min-height: 44px; touch-action: manipulation; flex-shrink: 0; }
+.m-spin { animation: pull-spin 0.8s linear infinite; }
 
 /* ===== Metrics (2-col) ===== */
 .m-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
@@ -390,13 +894,26 @@ onMounted(() => {
 /* ===== Common ===== */
 .m-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .m-section-label { font-size: 15px; font-weight: 600; color: var(--lt-text-primary); display: flex; align-items: center; gap: 6px; }
-.m-section-link { font-size: 12px; color: var(--lt-brand); background: none; border: none; cursor: pointer; touch-action: manipulation; }
+.m-section-link { font-size: 12px; color: var(--lt-brand); background: none; border: none; cursor: pointer; touch-action: manipulation; white-space: nowrap; }
+.m-section-card {
+  background: var(--lt-bg-card); border: 0.5px solid var(--lt-border); border-radius: 12px;
+  padding: 14px; margin-bottom: 16px;
+}
 .m-dash-primary-btn {
-  display: inline-flex; align-items: center; gap: 4px; padding: 10px 20px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 10px 20px; min-height: 44px;
   border: none; border-radius: 10px; background: var(--lt-brand); color: #fff;
   font-size: 14px; font-weight: 500; cursor: pointer; touch-action: manipulation; transition: background 0.1s;
 }
 .m-dash-primary-btn:active { background: var(--lt-brand-dark); }
+.m-btn-sm { padding: 6px 16px; font-size: 13px; }
+.m-btn-block { width: 100%; }
+.m-dash-secondary-btn {
+  display: flex; align-items: center; justify-content: center; width: 100%; padding: 10px 20px; min-height: 44px;
+  border: 0.5px solid var(--lt-border); border-radius: 10px; background: var(--lt-bg-card);
+  color: var(--lt-text-secondary); font-size: 14px; font-weight: 500;
+  cursor: pointer; touch-action: manipulation; text-align: center;
+}
+.m-dash-secondary-btn:active { background: var(--lt-bg-page); }
 
 /* ===== Textbook card ===== */
 .m-textbook-card {
@@ -407,6 +924,8 @@ onMounted(() => {
 .m-textbook-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .m-textbook-badge { font-size: 12px; font-weight: 500; color: var(--lt-brand); display: flex; align-items: center; gap: 4px; }
 .m-textbook-toc-link { font-size: 12px; color: var(--lt-brand); }
+.m-textbook-kg-btn { color: var(--lt-ai); display: flex; align-items: center; padding: 2px; border-radius: 4px; transition: background 0.15s; }
+.m-textbook-kg-btn:active { background: rgba(124,92,252,0.08); }
 .m-textbook-title { font-size: 15px; font-weight: 600; color: var(--lt-text-primary); margin: 0 0 4px; }
 .m-textbook-author { font-size: 12px; color: var(--lt-text-auxiliary); margin: 0 0 4px; }
 .m-textbook-intro { font-size: 13px; color: var(--lt-text-secondary); margin: 0; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -416,43 +935,71 @@ onMounted(() => {
   background: var(--lt-bg-card); border: 0.5px solid var(--lt-border); border-radius: 12px;
   padding: 14px; margin-bottom: 16px;
 }
+.m-recommend-empty { text-align: center; padding: 16px 0; }
+.m-recommend-empty p { font-size: 13px; color: var(--lt-text-auxiliary); margin: 0 0 12px; }
 .m-recommend-title { font-size: 17px; font-weight: 700; color: var(--lt-text-primary); margin: 0 0 4px; }
 .m-recommend-kp { font-size: 12px; color: var(--lt-text-auxiliary); margin: 0 0 10px; }
-.m-recommend-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.m-recommend-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; align-items: center; }
 .m-reco-tag { font-size: 10px; padding: 2px 8px; border-radius: 8px; font-weight: 500; }
 .m-reco-tag.success { background: rgba(52,199,89,0.1); color: var(--lt-success); }
 .m-reco-tag.warning { background: rgba(255,159,10,0.1); color: var(--lt-warning); }
 .m-reco-tag.danger { background: rgba(255,59,48,0.1); color: var(--lt-danger); }
-.m-reco-stat { font-size: 11px; color: var(--lt-text-auxiliary); padding: 2px 6px; background: var(--lt-bg-page); border-radius: 6px; }
+.m-reco-stat { font-size: 11px; color: var(--lt-text-auxiliary); padding: 2px 6px; background: var(--lt-bg-page); border-radius: 6px; display: inline-flex; align-items: center; gap: 2px; }
 .m-recommend-reasons { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 .m-reason-tag { font-size: 11px; padding: 4px 10px; border-radius: 12px; background: var(--lt-brand-lightest); color: var(--lt-text-secondary); border: 0.5px solid var(--lt-brand-lighter); }
-.m-recommend-actions { margin-bottom: 14px; }
-.m-recommend-progress { }
-.m-progress-label { font-size: 11px; color: var(--lt-text-auxiliary); display: block; margin-bottom: 6px; }
-.m-progress-track { height: 6px; background: var(--lt-bg-page); border-radius: 3px; overflow: hidden; }
-.m-progress-fill { height: 100%; background: var(--lt-brand); border-radius: 3px; transition: width 0.3s; }
+.m-recommend-actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+
+/* ===== Secondary recommendations ===== */
+.m-secondary-list { border-top: 0.5px solid var(--lt-border); padding-top: 12px; margin-top: 4px; }
+.m-secondary-title { font-size: 12px; color: var(--lt-text-auxiliary); margin: 0 0 8px; font-weight: 500; }
+.m-secondary-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 8px; border-radius: 8px; cursor: pointer; touch-action: manipulation;
+}
+.m-secondary-item:active { background: var(--lt-bg-page); }
+.m-secondary-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.m-secondary-icon { font-size: 14px; flex-shrink: 0; }
+.m-secondary-name { font-size: 13px; color: var(--lt-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-secondary-badge { font-size: 10px; padding: 1px 6px; border-radius: 6px; font-weight: 500; flex-shrink: 0; }
+.m-secondary-badge.danger { background: rgba(255,59,48,0.08); color: var(--lt-danger); }
+.m-secondary-badge.primary { background: rgba(43,111,255,0.08); color: var(--lt-brand); }
+.m-secondary-time { font-size: 11px; color: var(--lt-text-auxiliary); flex-shrink: 0; margin-left: 8px; }
 
 /* ===== Profile card ===== */
 .m-profile-card {
   background: var(--lt-bg-card); border: 0.5px solid var(--lt-border); border-radius: 12px;
   padding: 14px; margin-bottom: 16px;
 }
-.m-radar-wrap { height: 200px; margin-bottom: 12px; background: var(--lt-bg-page); border-radius: 8px; padding: 4px; }
-.m-radar-chart { width: 100%; height: 100%; }
-
+.m-core-info { margin-bottom: 12px; }
+.m-core-header { font-size: 11px; font-weight: 600; color: var(--lt-brand); display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.m-core-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.m-core-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--lt-text-primary); margin-bottom: 6px; }
+.m-core-divider { width: 1px; height: 12px; background: var(--lt-border); flex-shrink: 0; }
+.m-core-goal { font-size: 12px; color: var(--lt-text-secondary); margin: 0 0 8px; line-height: 1.4; }
+.m-mastery-bar { margin-top: 4px; }
+.m-mastery-label { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; }
+.m-mastery-label span:first-child { color: var(--lt-text-auxiliary); }
+.m-mastery-pct { color: var(--lt-ai); font-weight: 600; }
+.m-mastery-track { height: 6px; background: var(--lt-bg-page); border-radius: 3px; overflow: hidden; }
+.m-mastery-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--lt-brand), var(--lt-ai)); transition: width 0.7s ease-out; }
+.m-radar-wrap { margin-bottom: 12px; }
+.m-radar-label { font-size: 11px; color: var(--lt-text-auxiliary); display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.m-radar-label::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--lt-text-auxiliary); display: inline-block; }
+.m-radar-chart { height: 180px; background: var(--lt-bg-page); border-radius: 8px; padding: 4px; }
 .m-tags-section { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
 .m-tag-group { display: flex; align-items: flex-start; gap: 8px; }
-.m-tag-group-label { font-size: 11px; color: var(--lt-text-secondary); flex-shrink: 0; width: 40px; display: flex; align-items: center; gap: 2px; padding-top: 2px; }
+.m-tag-group-label { font-size: 11px; color: var(--lt-text-secondary); flex-shrink: 0; width: 44px; display: flex; align-items: center; gap: 2px; padding-top: 2px; }
 .m-tag-row { display: flex; flex-wrap: wrap; gap: 4px; }
 .m-tag { font-size: 10px; padding: 2px 8px; border-radius: 8px; font-weight: 500; }
 .m-tag.danger { background: rgba(255,59,48,0.08); color: var(--lt-danger); }
 .m-tag.success { background: rgba(52,199,89,0.08); color: var(--lt-success); }
 .m-tag.primary { background: rgba(43,111,255,0.08); color: var(--lt-brand); }
-
+.m-tag.warning { background: rgba(255,140,66,0.08); color: #EA580C; }
 .m-profile-meta { background: var(--lt-bg-page); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 .m-meta-row { display: flex; justify-content: space-between; align-items: center; }
 .m-meta-label { font-size: 12px; color: var(--lt-text-auxiliary); }
 .m-meta-value { font-size: 12px; font-weight: 500; color: var(--lt-text-primary); }
+.m-meta-pref { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .m-meta-version { font-size: 10px; padding: 2px 8px; background: var(--lt-bg-card); border-radius: 6px; color: var(--lt-text-secondary); }
 
 /* ===== Packs card ===== */
@@ -467,13 +1014,13 @@ onMounted(() => {
 }
 .m-pack-item:active { background: var(--lt-brand-lightest); }
 .m-pack-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-.m-pack-name { font-size: 14px; font-weight: 600; color: var(--lt-text-primary); flex: 1; }
-.m-pack-active { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(52,199,89,0.12); color: var(--lt-success); font-weight: 500; }
-.m-pack-conf { font-size: 10px; padding: 1px 6px; border-radius: 6px; font-weight: 500; }
+.m-pack-name { font-size: 14px; font-weight: 600; color: var(--lt-text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-pack-active { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(52,199,89,0.12); color: var(--lt-success); font-weight: 500; flex-shrink: 0; }
+.m-pack-conf { font-size: 10px; padding: 1px 6px; border-radius: 6px; font-weight: 500; flex-shrink: 0; }
 .m-pack-conf.high { background: rgba(52,199,89,0.1); color: var(--lt-success); }
 .m-pack-conf.medium { background: rgba(255,159,10,0.1); color: var(--lt-warning); }
 .m-pack-conf.low { background: rgba(255,59,48,0.1); color: var(--lt-danger); }
-.m-pack-meta { display: flex; gap: 10px; font-size: 11px; color: var(--lt-text-auxiliary); }
+.m-pack-meta { display: flex; gap: 10px; font-size: 11px; color: var(--lt-text-auxiliary); flex-wrap: wrap; }
 
 /* ===== Empty state ===== */
 .m-empty-hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 40px 12px; }
@@ -517,4 +1064,63 @@ onMounted(() => {
   border-radius: 50%; animation: pull-spin 0.6s linear infinite;
 }
 @keyframes pull-spin { to { transform: rotate(360deg); } }
+
+/* ===== 更多功能 ===== */
+.m-more-section {
+  margin-top: var(--mobile-section-gap, 20px);
+}
+.m-more-list {
+  background: var(--lt-bg-card);
+  border: 1px solid var(--lt-border);
+  border-radius: var(--lt-radius-lg, 12px);
+  overflow: hidden;
+}
+.m-more-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px var(--mobile-card-padding, 12px);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  text-align: left;
+  transition: background-color 0.1s ease-out;
+}
+.m-more-item:not(:last-child) {
+  border-bottom: 1px solid var(--lt-border);
+}
+.m-more-item:active {
+  background: var(--mobile-active-bg, rgba(43, 111, 255, 0.06));
+}
+.m-more-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.m-more-body {
+  flex: 1;
+  min-width: 0;
+}
+.m-more-title {
+  font-size: var(--mobile-font-body, 15px);
+  font-weight: 600;
+  color: var(--lt-text-primary);
+  margin: 0;
+}
+.m-more-desc {
+  font-size: var(--mobile-font-caption, 13px);
+  color: var(--lt-text-auxiliary);
+  margin: 2px 0 0;
+}
+.m-more-arrow {
+  color: var(--lt-text-placeholder);
+  flex-shrink: 0;
+}
 </style>

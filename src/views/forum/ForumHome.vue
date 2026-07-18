@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useForumStore } from '@/stores/forum'
 import { useProfileStore } from '@/stores/profile'
 import PostCard from '@/components/forum/PostCard.vue'
-import { Search, Plus } from '@element-plus/icons-vue'
+import { Search, Plus, User } from '@element-plus/icons-vue'
 import ForumIcon from '@/components/icons/ForumIcon.vue'
 
 const router = useRouter()
@@ -49,10 +49,20 @@ function goCreatePost() {
   router.push('/forum/create')
 }
 
-watch(() => profileStore.activeCourseId, () => {
-  if (store.activeCourse !== 'all') {
-    store.activeCourse = 'all'
+function handleMineToggle() {
+  store.activeMine = !store.activeMine
+  store.currentPage = 1
+  store.fetchPosts()
+}
+
+watch(() => profileStore.activeCourseId, (newId) => {
+  const target = newId || 'all'
+  if (store.activeCourse === target) {
+    store.fetchPosts()
+    return
   }
+  store.activeCourse = target
+  store.currentPage = 1
   store.fetchPosts()
 })
 
@@ -60,8 +70,11 @@ onMounted(async () => {
   if (profileStore.courses.length === 0) {
     profileStore.fetchMyCourses()
   }
+  if (profileStore.activeCourseId) {
+    store.activeCourse = profileStore.activeCourseId
+  }
   await store.fetchTags()
-  store.fetchPosts()
+  store.fetchPosts({ silent: true })
 })
 </script>
 
@@ -112,6 +125,16 @@ onMounted(async () => {
               <el-option label="全部标签" value="all" />
               <el-option v-for="t in store.tags" :key="t.id" :label="t.name" :value="t.id" />
             </el-select>
+          </div>
+          <div class="filter-mine-group">
+            <button
+              class="mine-btn"
+              :class="{ active: store.activeMine }"
+              @click="handleMineToggle"
+            >
+              <el-icon :size="14"><User /></el-icon>
+              我的发布
+            </button>
           </div>
           <div class="sort-group">
             <button
@@ -293,6 +316,40 @@ onMounted(async () => {
   color: var(--lt-brand);
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+/* ===== Mine Toggle Button ===== */
+.filter-mine-group {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+}
+.mine-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 14px;
+  border-radius: var(--lt-radius-full);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--lt-border);
+  cursor: pointer;
+  background: var(--lt-bg-card);
+  color: var(--lt-text-secondary);
+  transition: all var(--lt-transition-base);
+  white-space: nowrap;
+}
+.mine-btn:hover {
+  color: var(--lt-brand);
+  border-color: var(--lt-brand-lighter);
+  background: var(--lt-brand-lightest);
+}
+.mine-btn.active {
+  background: var(--lt-brand);
+  color: #fff;
+  border-color: var(--lt-brand);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(43, 111, 255, 0.25);
 }
 .search-input {
   flex: 0 1 320px;

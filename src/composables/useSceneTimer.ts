@@ -8,13 +8,15 @@ import { ref, watch, onBeforeUnmount } from 'vue'
 export function useSceneTimer(
   isPlaying: () => boolean,
   speed: () => number,
-  totalDuration: number,
+  totalDuration: number | (() => number),
   onComplete: () => void,
 ) {
   const virtualTime = ref(0)
   let rafId: number | null = null
   let lastTickReal = 0
   let _completed = false
+
+  const getDuration = typeof totalDuration === 'function' ? totalDuration : () => totalDuration
 
   function tick() {
     if (isPlaying()) {
@@ -25,10 +27,14 @@ export function useSceneTimer(
       if (delta < 500) {
         virtualTime.value += delta * speed()
       }
-      if (virtualTime.value >= totalDuration) {
+      if (virtualTime.value >= getDuration()) {
         stopTicking()
         _completed = true
-        onComplete()
+        try {
+          onComplete()
+        } catch (e) {
+          console.error('onComplete callback error:', e)
+        }
         return
       }
     } else {
@@ -47,6 +53,14 @@ export function useSceneTimer(
     if (rafId) { cancelAnimationFrame(rafId); rafId = null }
   }
 
+  /** 重置计时器状态，允许重新播放 */
+  function reset() {
+    stopTicking()
+    _completed = false
+    virtualTime.value = 0
+    lastTickReal = performance.now()
+  }
+
   watch(() => isPlaying(), (playing) => {
     if (playing) startTicking()
     else stopTicking()
@@ -54,5 +68,5 @@ export function useSceneTimer(
 
   onBeforeUnmount(() => stopTicking())
 
-  return { virtualTime, stopTicking }
+  return { virtualTime, stopTicking, reset }
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import type { PlaybackSpeed, SceneStep } from '@/types/scene'
 import { useSceneTimer } from '@/composables/useSceneTimer'
 
@@ -48,6 +48,14 @@ const showFormula2 = computed(() => formulaThreshold >= 0 && virtualTime.value >
 
 // Formula popover
 const showFormulaDetail = ref(false)
+const popoverRef = ref<HTMLElement>()
+
+watch(showFormulaDetail, async (val) => {
+  if (val) {
+    await nextTick()
+    popoverRef.value?.focus()
+  }
+})
 
 function toggleFormulaDetail() {
   showFormulaDetail.value = !showFormulaDetail.value
@@ -89,7 +97,15 @@ async function copyFormulaSource() {
     <!-- Formula detail popover -->
     <Teleport to="body">
       <div v-if="showFormulaDetail" class="formula-overlay" @click="closeFormulaDetail">
-        <div class="formula-popover" @click.stop>
+        <div class="formula-popover"
+          role="dialog"
+          aria-modal="true"
+          aria-label="LaTeX 源码"
+          tabindex="-1"
+          ref="popoverRef"
+          @click.stop
+          @keydown.escape="closeFormulaDetail"
+        >
           <div class="formula-popover-header">
             <span>LaTeX 源码</span>
             <button class="formula-popover-close" @click="closeFormulaDetail">
@@ -109,7 +125,7 @@ async function copyFormulaSource() {
 </template>
 
 <style scoped>
-.text-scene { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #0f0f13; overflow-y: auto; padding: 60px 80px; }
+.text-scene { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 70% 15%, rgba(43, 111, 255, 0.08), transparent 55%), radial-gradient(ellipse at 20% 85%, rgba(255, 140, 66, 0.05), transparent 55%), radial-gradient(ellipse at 50% 50%, #14141f 0%, #0d0d12 65%, #08080c 100%); overflow-y: auto; padding: 60px 80px; }
 .text-content { max-width: 70ch; width: 100%; }
 .scene-heading { font-size: 22px; font-weight: 600; color: #fff; margin: 0 0 24px; opacity: 0; transform: translateY(12px); transition: all 0.5s cubic-bezier(0.2,0,0,1); }
 .scene-heading.visible { opacity: 1; transform: translateY(0); }

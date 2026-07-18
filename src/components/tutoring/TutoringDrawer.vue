@@ -16,16 +16,21 @@ import DirectAnswerInline from './DirectAnswerInline.vue'
 import ThoughtChainTimeline from '@/components/ThoughtChainTimeline.vue'
 import SmartVisualRenderer from '@/components/smart/SmartVisualRenderer.vue'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
+import QuestionRefCard from '@/components/learn/QuestionRefCard.vue'
 import type { TutoringMode } from '@/types/tutoring'
+import type { QuestionRef } from '@/types'
 
 const props = defineProps<{
   visible: boolean
   initialQuestion?: string
+  questionRef?: QuestionRef | null
   courseId?: string
+  quotedText?: string
 }>()
 
 const emit = defineEmits<{
   close: []
+  dismissQuestionRef: []
 }>()
 
 // ── Three separate pipelines ──
@@ -102,24 +107,44 @@ watch(() => props.visible, (val) => {
 
 // ── Dispatch by mode ──
 async function handleSend(question: string, mode: TutoringMode, isVideo: boolean) {
-  globalQuestion.value = question
+  const fullQuestion = props.questionRef ? buildQuestionPrompt(question) : question
+  globalQuestion.value = fullQuestion
   activeMode.value = mode
 
   if (mode === 'smart' || isVideo) {
     smart.reset()
-    await smart.start(question, props.courseId || '')
+    await smart.start(fullQuestion, props.courseId || '')
     return
   }
 
   if (mode === 'direct') {
     directAnswerStore.reset()
-    await directStart(question, props.courseId || '', 'direct')
+    await directStart(fullQuestion, props.courseId || '', 'direct')
     return
   }
 
   // guided (and any other mode) -> tutoring pipeline
   tutoringStore.reset()
-  await startTutoring({ question, mode, courseId: props.courseId || null })
+  await startTutoring({ question: fullQuestion, mode, courseId: props.courseId || null })
+}
+
+function buildQuestionPrompt(userQuestion: string): string {
+  const q = props.questionRef
+  if (!q) return userQuestion
+  const lines = [
+    `[题目引用上下文]`,
+    `题目类型：${q.typeLabel} | 难度：${q.difficultyLabel || '未知'}`,
+    `题目内容：${q.content}`,
+  ]
+  if (q.options?.length) {
+    lines.push(`选项：${q.options.map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`).join('；')}`)
+  }
+  if (q.userAnswer) {
+    lines.push(`我的答案：${q.userAnswer}`)
+  }
+  lines.push(``)
+  lines.push(`我的问题：${userQuestion}`)
+  return lines.join('\n')
 }
 
 async function handleClarify(response: {
@@ -299,6 +324,20 @@ const guidedActive = computed(() =>
                 </el-button>
                 <el-button size="small" @click="activeMode = null; tutoringStore.reset(); smart.reset(); directAnswerStore.reset()">返回</el-button>
               </div>
+            </div>
+          </div>
+
+          <div v-if="questionRef" class="drawer-question-ref">
+            <QuestionRefCard :question-ref="questionRef" @dismiss="emit('dismissQuestionRef')" />
+          </div>
+
+          <div v-if="quotedText" class="drawer-quoted-text">
+            <div class="quoted-header">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 17h3l2-4V7H5v6h3l-2 4zm8 0h3l2-4V7h-6v6h3l-2 4z"/></svg>
+              <span>已引用片段</span>
+            </div>
+            <div class="quoted-body">
+              <pre class="quoted-code">{{ quotedText }}</pre>
             </div>
           </div>
 
@@ -510,6 +549,55 @@ const guidedActive = computed(() =>
   flex-direction: column;
   gap: 10px;
   background: var(--lt-bg-card);
+}
+
+.drawer-question-ref {
+  padding: 0 20px 8px;
+  flex-shrink: 0;
+}
+
+.drawer-quoted-text {
+  margin: 0 20px 4px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(124, 92, 252, 0.04), rgba(43, 111, 255, 0.04));
+  border: 1px solid rgba(124, 92, 252, 0.15);
+  border-radius: var(--lt-radius-lg);
+  flex-shrink: 0;
+  animation: quote-in 0.2s ease;
+}
+@keyframes quote-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.quoted-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lt-ai);
+  margin-bottom: 8px;
+}
+.quoted-header svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.quoted-body {
+  max-height: 120px;
+  overflow-y: auto;
+}
+.quoted-code {
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--lt-bg-page);
+  border: 1px solid var(--lt-border);
+  border-radius: var(--lt-radius-md);
+  font-family: var(--lt-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--lt-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 /* 过渡动画 */

@@ -53,9 +53,11 @@ const props = withDefaults(defineProps<{
   content: string
   showToc?: boolean
   tocCollapsible?: boolean
+  themed?: boolean
 }>(), {
   showToc: true,
-  tocCollapsible: false
+  tocCollapsible: false,
+  themed: false
 })
 
 const emit = defineEmits<{
@@ -215,9 +217,16 @@ const fixConcatHeadings = (text: string): string => {
   return text.replace(/([^\n#])(#{1,6}\s)/g, '$1\n\n$2')
 }
 
+// 修复 ## 后缺空格的标题（如 "##表现概述" -> "## 表现概述"）
+// CommonMark 要求 # 与标题文本之间至少有一个空格，否则不识别为标题，
+// LLM 输出常忽略此规则，导致标题被当成普通段落渲染。
+const fixMissingHeadingSpace = (text: string): string => {
+  return text.replace(/(^|\n)(#{1,6})([^\s#])/g, '$1$2 $3')
+}
+
 // ===== Markdown 转 HTML =====
 const mdToHtml = (text: string): string => {
-  const fixed = fixConcatHeadings(text)
+  const fixed = fixMissingHeadingSpace(fixConcatHeadings(text))
 
   // Protect raw <svg> blocks from two pipeline hazards:
   //
@@ -236,10 +245,16 @@ const mdToHtml = (text: string): string => {
   //
   // Fix: extract SVGs, strip internal blank lines, protect from processMath,
   // then restore as a single unbroken HTML block for markdown-it.
+  //
+  // Regex note: use /\n\s*\n/g instead of /\n[ \t]*\n/g -- the latter only
+  // collapses a SINGLE blank line, leaving extra blank lines when LLM emits
+  // two or more consecutive blank lines (e.g. `</defs>\n\n\n<!-- ... -->`).
+  // \s* greedily matches any mix of whitespace (including newlines), so it
+  // collapses any run of blank lines into a single newline.
   const htmlBlocks: string[] = []
   const protectedText = fixed.replace(/<svg\b[\s\S]*?<\/svg>/gi, (m) => {
     const idx = htmlBlocks.length
-    htmlBlocks.push(m.replace(/\n[ \t]*\n/g, '\n'))
+    htmlBlocks.push(m.replace(/\n\s*\n/g, '\n'))
     return `\n\n%%HTMLBLOCK_${idx}%%\n\n`
   })
 
@@ -307,9 +322,66 @@ function stripControlBlock(text: string): string {
 }
 
 // ===== 消毒 HTML + 链接卡片 =====
+// 主题化分节：将 h2 分隔的段落包裹进带语义配色与图标的 <section>
+// 仅在 props.themed 为 true 时启用（如练习评估报告）
+const THEME_ICONS: Record<string, string> = {
+  overview: '<svg viewBox="0 0 16 16" fill="none"><path d="M2 14.5h12M4 14V7m4 7V4m4 10V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  diagnosis: '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="1" fill="currentColor"/></svg>',
+  errors: '<svg viewBox="0 0 16 16" fill="none"><path d="M8 2.5 1.5 13.5h13L8 2.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.5v3M8 11.6v.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  suggestions: '<svg viewBox="0 0 16 16" fill="none"><path d="M8 2a3.8 3.8 0 0 0-2.4 6.8c.3.2.4.5.4.9v.3h4v-.3c0-.4.1-.7.4-.9A3.8 3.8 0 0 0 8 2zM6 11.5h4M6.5 13.5h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+}
+
+function themeForKey(key: string): string {
+  if (/表现|概述|总体|本次|成绩|结果/.test(key)) return 'overview'
+  if (/掌握|诊断/.test(key)) return 'diagnosis'
+  if (/错题|错误|分析|失分|薄弱/.test(key)) return 'errors'
+  if (/改进|建议|提升|复习|策略|方向|下一步|计划/.test(key)) return 'suggestions'
+  return 'default'
+}
+
+function wrapThemedSections(html: string): string {
+  // 以 <h2 为锚点拆分，每段含一个 h2 + 其后至下一个 h2 前的内容
+  const parts = html.split(/(?=<h2\b)/i)
+  if (parts.length <= 1) return html // 没有 h2，原样返回
+
+  let result = ''
+  for (const part of parts) {
+    const trimmed = part.trim()
+    if (!trimmed) continue
+
+    const h2Match = trimmed.match(/<h2\b[^>]*\bid="([^"]*)"[^>]*>([\s\S]*?)<\/h2>/i)
+    if (h2Match) {
+      const id = h2Match[1]
+      const h2Inner = h2Match[2]
+      const theme = themeForKey(id)
+      const icon = THEME_ICONS[theme] || ''
+      const body = trimmed.slice(h2Match[0].length)
+      result += `<section class="md-themed" data-theme="${theme}">`
+      result += `<div class="md-themed__head"><span class="md-themed__icon">${icon}</span><h2 id="${id}">${h2Inner}</h2></div>`
+      if (body.trim()) {
+        result += `<div class="md-themed__body">${body}</div>`
+      }
+      result += `</section>`
+    } else {
+      result += `<div class="md-themed__intro">${trimmed}</div>`
+    }
+  }
+  return result || html
+}
+
 const sanitizedHtml = computed(() => {
   const rawHtml = mdToHtml(stripControlBlock(props.content))
-  const sanitized = DOMPurify.sanitize(rawHtml, {
+  // 将 SVG 块抽离，单独用 XML 模式清洗后再插回
+  // HTML5 解析器会把 <rect>/<text>/<g> 等 SVG 元素放入 HTML 命名空间，
+  // DOMPurify 的 _checkValidNamespace() 会将其移除。
+  // 用 PARSER_MEDIA_TYPE 可保留 SVG 命名空间，但不能全局使用（会污染 HTML 元素）。
+  const svgBlocks: string[] = []
+  const htmlWithoutSvg = rawHtml.replace(/<svg\b[\s\S]*?<\/svg>/gi, (m) => {
+    const idx = svgBlocks.length
+    svgBlocks.push(m)
+    return `%%SVGBLOCK_${idx}%%`
+  })
+  const sanitizedHtml = DOMPurify.sanitize(htmlWithoutSvg, {
     ADD_ATTR: ['id', 'target', 'rel', 'data-code', 'type', 'checked', 'disabled',
       'd', 'cx', 'cy', 'r', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
       'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width',
@@ -335,17 +407,38 @@ const sanitizedHtml = computed(() => {
       'blockquote', 'img', 'sup', 'sub', 'del',
       'input',
       'svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon',
-      'ellipse', 'text', 'tspan', 'g', 'defs', 'use',
+      'ellipse', 'text', 'tspan', 'g', 'defs', 'use', 'style',
       'linearGradient', 'radialGradient', 'stop',
       'clipPath', 'mask', 'marker', 'pattern',
       'image', 'foreignObject', 'filter',
       'feGaussianBlur', 'feOffset', 'feMerge', 'feMergeNode',
       'feColorMatrix', 'feBlend', 'feComposite', 'feFlood',
       'feDropShadow', 'animate', 'animateTransform', 'set',
+      'section',
     ]
   })
-  // 在消毒后处理链接卡片（卡片 HTML 由可信代码生成，动态内容已转义）
-  return processLinkCards(sanitized)
+
+  const sanitizedSvgs = svgBlocks.map((svg) => {
+    // SVG 由后端 LLM 管道生成，跳过 DOMPurify（其 HTML 解析器会
+    // 将 SVG 子元素放入 HTML 命名空间并移除），仅做基本安全清洗：
+    // 移除 <script> 标签和 on* 事件处理器
+    return svg
+      .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+      .replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '')
+      .replace(/\son\w+\s*=\s*[^\s>]*/gi, '')
+  })
+
+  // 将清洗后的 SVG 插回 HTML
+  let result = sanitizedHtml
+  sanitizedSvgs.forEach((svg, i) => {
+    result = result.replace(`%%SVGBLOCK_${i}%%`, svg)
+  })
+
+  let processed = processLinkCards(result)
+  if (props.themed) {
+    processed = wrapThemedSections(processed)
+  }
+  return processed
 })
 
 // ===== Mermaid 图表渲染 =====
@@ -357,8 +450,10 @@ const renderMermaidBlocks = () => {
     if (!wrapper || wrapper.getAttribute('data-mermaid-rendered')) return
     wrapper.setAttribute('data-mermaid-rendered', 'true')
 
-    const code = block.textContent || ''
+    let code = block.textContent || ''
     if (!code.trim()) return
+
+    code = code.replace(/<br\s*\/?>/gi, '\n')
 
     const id = `mermaid-svg-${++mermaidCounter}`
     try {
@@ -368,7 +463,7 @@ const renderMermaidBlocks = () => {
       container.innerHTML = svg
       wrapper.replaceWith(container)
     } catch (e) {
-      // 渲染失败，保留原始代码块供用户查看
+      console.error('Mermaid render failed:', e)
       wrapper.removeAttribute('data-mermaid-rendered')
     }
   })
@@ -871,5 +966,124 @@ onUnmounted(() => {
 :root[data-theme="dark"] .markdown-content :deep(.hljs-type),
 :root[data-theme="dark"] .markdown-content :deep(.hljs-class .hljs-title) {
   color: #ffa657 !important;
+}
+
+/* ==================== 主题化分节（themed 模式） ==================== */
+/* 仅在 props.themed=true 时，后处理生成的 .md-themed 结构生效 */
+.markdown-content :deep(.md-themed) {
+  margin: 0 0 14px;
+  border: 1px solid var(--lt-border);
+  border-radius: var(--lt-radius-lg);
+  overflow: hidden;
+  background: var(--lt-bg-card);
+}
+.markdown-content :deep(.md-themed:last-child) {
+  margin-bottom: 0;
+}
+
+/* 主题配色变量 */
+.markdown-content :deep(.md-themed[data-theme="overview"]) {
+  --themed-accent: var(--lt-brand);
+  --themed-bg: var(--lt-brand-lightest);
+  --themed-border: var(--lt-brand-lighter);
+}
+.markdown-content :deep(.md-themed[data-theme="diagnosis"]) {
+  --themed-accent: var(--lt-success);
+  --themed-bg: var(--lt-success-bg);
+  --themed-border: rgba(52, 199, 89, 0.3);
+}
+.markdown-content :deep(.md-themed[data-theme="errors"]) {
+  --themed-accent: var(--lt-danger);
+  --themed-bg: var(--lt-danger-bg);
+  --themed-border: rgba(255, 59, 48, 0.3);
+}
+.markdown-content :deep(.md-themed[data-theme="suggestions"]) {
+  --themed-accent: var(--lt-ai);
+  --themed-bg: var(--lt-ai-light-9);
+  --themed-border: var(--lt-ai-light-5);
+}
+.markdown-content :deep(.md-themed[data-theme="default"]) {
+  --themed-accent: var(--lt-text-secondary);
+  --themed-bg: var(--lt-bg-page);
+  --themed-border: var(--lt-border);
+}
+
+/* 标题栏 */
+.markdown-content :deep(.md-themed__head) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  background: var(--themed-bg);
+  border-left: 4px solid var(--themed-accent);
+}
+
+/* 图标徽章 */
+.markdown-content :deep(.md-themed__icon) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--themed-accent);
+  color: #fff;
+  flex-shrink: 0;
+}
+.markdown-content :deep(.md-themed__icon svg) {
+  width: 15px;
+  height: 15px;
+}
+
+/* 覆盖默认 h2 样式（去掉下边框、大字号、大外边距） */
+.markdown-content :deep(.md-themed__head h2) {
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--themed-accent);
+  line-height: 1.4;
+}
+
+/* 正文区 */
+.markdown-content :deep(.md-themed__body) {
+  padding: 14px 18px 16px;
+}
+.markdown-content :deep(.md-themed__body > :first-child) {
+  margin-top: 0;
+}
+.markdown-content :deep(.md-themed__body > :last-child) {
+  margin-bottom: 0;
+}
+
+/* 正文中列表更紧凑 */
+.markdown-content :deep(.md-themed__body ul),
+.markdown-content :deep(.md-themed__body ol) {
+  margin: 6px 0;
+}
+.markdown-content :deep(.md-themed__body li) {
+  margin: 3px 0;
+}
+
+/* 正文中 strong 标签用主题色高亮 */
+.markdown-content :deep(.md-themed__body strong) {
+  color: var(--themed-accent);
+}
+
+/* intro（h2 之前的零散内容） */
+.markdown-content :deep(.md-themed__intro) {
+  margin-bottom: 14px;
+}
+.markdown-content :deep(.md-themed__intro:last-child) {
+  margin-bottom: 0;
+}
+
+/* 暗色模式：图标徽章保持鲜明 */
+html[data-theme="dark"] .markdown-content :deep(.md-themed) {
+  border-color: var(--lt-border);
+}
+html[data-theme="dark"] .markdown-content :deep(.md-themed__head h2) {
+  color: var(--themed-accent);
 }
 </style>

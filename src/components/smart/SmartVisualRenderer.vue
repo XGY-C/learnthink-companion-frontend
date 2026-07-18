@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import DOMPurify from 'dompurify'
 import type { VisualRenderType } from '@/types/smart'
 import VisualPlaceholder from './VisualPlaceholder.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
+import { injectKatex } from '@/utils/htmlExport'
 
 const props = defineProps<{
   renderType: VisualRenderType
@@ -15,6 +17,7 @@ const props = defineProps<{
 const chartCanvas = ref<HTMLCanvasElement | null>(null)
 const mermaidContainer = ref<HTMLDivElement | null>(null)
 let chartInstance: any = null
+let mermaidCounter = 0
 
 // ========== 全屏放大 ==========
 const isExpanded = ref(false)
@@ -43,19 +46,34 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   document.body.style.overflow = ''
+  // 修复：销毁 Chart.js 实例
+  if (chartInstance) {
+    chartInstance.destroy()
+    chartInstance = null
+  }
 })
 
-watch(() => props.code, () => {
-  if (props.status !== 'pending') {
+watch([() => props.code, () => props.status], ([newCode, newStatus]) => {
+  if (newStatus !== 'pending' && newCode) {
     renderContent()
   }
 })
 
-watch(() => props.status, async (newStatus) => {
-  if (newStatus !== 'pending') {
-    await nextTick()
-    renderContent()
-  }
+// SVG XSS 净化
+const sanitizedSvg = computed(() => {
+  if (props.renderType !== 'svg' || !props.code) return ''
+  return DOMPurify.sanitize(props.code, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    ADD_TAGS: ['foreignObject'],
+    FORBID_TAGS: ['script'],
+    FORBID_ATTR: ['onload', 'onclick', 'onerror', 'onmouseover'],
+  })
+})
+
+// HTML 渲染时注入 KaTeX 资源（后端提示词承诺"宿主已注入"，前端在此兑现）
+const htmlWithKatex = computed(() => {
+  if (props.renderType !== 'html' || !props.code) return props.code
+  return injectKatex(props.code)
 })
 
 async function renderContent() {
@@ -106,8 +124,9 @@ async function renderMermaid() {
     const mermaidModule = await import('mermaid')
     const mermaid = mermaidModule.default
     mermaid.initialize({ startOnLoad: false, theme: 'default' })
-    const id = `mermaid-${Date.now()}`
-    const { svg } = await mermaid.render(id, props.code)
+    const code = (props.code || '').replace(/<br\s*\/?>/gi, '<br/>')
+    const id = `mermaid-${Date.now()}-${++mermaidCounter}`
+    const { svg } = await mermaid.render(id, code)
     mermaidContainer.value.innerHTML = svg
   } catch (e) {
     console.error('Mermaid render failed:', e)
@@ -115,6 +134,15 @@ async function renderMermaid() {
       mermaidContainer.value.textContent = '图表渲染失败: ' + (e as Error).message
     }
   }
+}
+
+function detectMimeType(base64: string): string {
+  const sig = base64.substring(0, 6)
+  if (sig.startsWith('/9j/')) return 'image/jpeg'
+  if (sig.startsWith('iVBOR')) return 'image/png'
+  if (sig.startsWith('R0lGOD')) return 'image/gif'
+  if (sig.startsWith('UklGR')) return 'image/webp'
+  return 'image/png'
 }
 </script>
 
@@ -125,7 +153,7 @@ async function renderMermaid() {
 
     <template v-else>
       <!-- SVG：内联渲染，继承主题 -->
-      <div v-if="renderType === 'svg'" class="lt-svg-root svg-container" v-html="code"></div>
+      <div v-if="renderType === 'svg'" class="lt-svg-root svg-container" v-html="sanitizedSvg"></div>
 
       <!-- Chart.js：canvas 渲染 -->
       <div v-else-if="renderType === 'chartjs'" class="chart-container">
@@ -138,7 +166,7 @@ async function renderMermaid() {
       <!-- HTML：iframe 沙箱渲染 -->
       <div v-else-if="renderType === 'html'" class="html-wrapper">
         <iframe
-          :srcdoc="code"
+          :srcdoc="htmlWithKatex"
           sandbox="allow-scripts"
           class="html-iframe"
         ></iframe>
@@ -153,7 +181,7 @@ async function renderMermaid() {
 
       <!-- Image：图片渲染 -->
       <div v-else-if="renderType === 'image'" class="image-container">
-        <img :src="`data:image/png;base64,${code}`" alt="AI 生成图片" />
+        <img :src="`data:${detectMimeType(code)};base64,${code}`" alt="AI 生成图片" />
       </div>
 
       <!-- 思维导图：markmap 渲染 JSON 树形数据 -->
@@ -178,7 +206,7 @@ async function renderMermaid() {
               <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
           </button>
-          <iframe :srcdoc="code" sandbox="allow-scripts" class="expand-iframe"></iframe>
+          <iframe :srcdoc="htmlWithKatex" sandbox="allow-scripts" class="expand-iframe"></iframe>
         </div>
       </div>
     </Transition>

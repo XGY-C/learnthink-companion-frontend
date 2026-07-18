@@ -28,7 +28,7 @@ const { virtualTime } = useSceneTimer(
   () => emit('complete'),
 )
 
-const showDecor = computed(() => virtualTime.value >= 0)
+const showDecor = computed(() => virtualTime.value >= 50)
 
 // Typewriter: reveal characters from 15% to 45% of duration
 const typewriterStart = resolvedDuration * 0.15
@@ -76,7 +76,7 @@ const showTags = computed(() => tags.length && virtualTime.value >= resolvedDura
 </template>
 
 <style scoped>
-.title-scene { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative; background: linear-gradient(135deg,#0f0f13 0%,#1a1a2e 50%,#16213e 100%); overflow: hidden; }
+.title-scene { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative; background: linear-gradient(135deg,#0d0d12 0%,#1a1a2e 50%,#16213e 100%); overflow: hidden; }
 .title-bg { position: absolute; inset: 0; }
 .floating-shape { position: absolute; border-radius: 50%; opacity: 0.08; }
 .shape-1 { width: 300px; height: 300px; background: var(--lt-brand); top: -50px; left: -50px; animation: float-1 20s linear infinite; }

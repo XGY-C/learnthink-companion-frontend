@@ -23,36 +23,39 @@
           @select="activeFileIndex = $event"
         />
 
-        <CodeEditorPanel
-          ref="editorRef"
-          :content="activeFileContent"
-          :language="parsed.language"
-          :filename="activeFile?.filename ?? ''"
-          :read-only="mode === 'read'"
-          :highlighted-lines="highlightedLines"
-          @update:content="onCodeChange"
-          @selection-change="onSelectionChange"
-        />
+        <div class="clv-editor-wrapper">
+          <CodeEditorPanel
+            ref="editorRef"
+            :content="activeFileContent"
+            :language="parsed.language"
+            :filename="activeFile?.filename ?? ''"
+            :read-only="mode === 'read'"
+            :highlighted-lines="highlightedLines"
+            :gutter-markers="editorGutterMarkers"
+            @gutter-click="onGutterClick"
+            @update:content="onCodeChange"
+            @selection-change="onSelectionChange"
+          />
 
-        <SelectionFloatingMenu
-          :visible="selectionMenu.visible"
-          :x="selectionMenu.x"
-          :y="selectionMenu.y"
-          @explain="onSelectionExplain"
-          @find-similar="onSelectionFindSimilar"
-          @ask="onSelectionAsk"
-        />
+          <SelectionFloatingMenu
+            :visible="selectionMenu.visible"
+            :x="selectionMenu.x"
+            :y="selectionMenu.y"
+            @smart-explain="onSelectionSmartExplain"
+            @ask-ai="onSelectionAskAi"
+          />
 
-        <CodeToolbar
-          :mode="mode"
-          :run-state="runState"
-          :can-run="canRun"
-          :active-filename="activeFile?.filename ?? ''"
-          @run="handleRun"
-          @reset="handleReset"
-          @copy="handleCopy"
-          @download="handleDownload"
-        />
+          <CodeToolbar
+            :mode="mode"
+            :run-state="runState"
+            :can-run="canRun"
+            :active-filename="activeFile?.filename ?? ''"
+            @run="handleRun"
+            @reset="handleReset"
+            @copy="handleCopy"
+            @download="handleDownload"
+          />
+        </div>
 
         <CodeOutput
           v-if="runState !== 'idle'"
@@ -70,21 +73,30 @@
         @click-step="onStepClick"
       />
     </div>
+
+    <TutoringDrawer
+      :visible="showTutoringDrawer"
+      :initial-question="tutoringInitQuestion"
+      :quoted-text="tutoringQuotedText"
+      @close="handleTutoringClose"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, reactive } from 'vue'
+import { ref, computed, onMounted, nextTick, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import CodeHeader from './CodeHeader.vue'
 import CodeDescription from './CodeDescription.vue'
 import CodeFileTabs from './CodeFileTabs.vue'
 import CodeEditorPanel from './CodeEditorPanel.vue'
+import type { GutterMarkerDef } from './CodeEditorPanel.vue'
 import CodeToolbar from './CodeToolbar.vue'
 import CodeOutput from './CodeOutput.vue'
 import CodeStepList from './CodeStepList.vue'
 import SelectionFloatingMenu from './SelectionFloatingMenu.vue'
+import TutoringDrawer from '@/components/tutoring/TutoringDrawer.vue'
 import { runCode } from '@/utils/codeRunner'
 import type { CodeRunResult } from '@/types'
 
@@ -131,10 +143,16 @@ const runState = ref<'idle' | 'running' | 'success' | 'error' | 'timeout'>('idle
 const runResult = ref<CodeRunResult | null>(null)
 const editedFiles = ref<Map<string, string>>(new Map())
 const highlightedLines = ref<number[]>([])
+const currentStepIndex = ref<number | null>(null)
+const breakpoints = reactive(new Set<string>())
 const editorRef = ref<InstanceType<typeof CodeEditorPanel> | null>(null)
 
 const selectionMenu = reactive({ visible: false, x: 0, y: 0, text: '' })
 let selectionTimer: ReturnType<typeof setTimeout> | null = null
+
+const showTutoringDrawer = ref(false)
+const tutoringQuotedText = ref('')
+const tutoringInitQuestion = ref('')
 
 const activeFile = computed(() => parsed.value?.files[activeFileIndex.value])
 const activeFileContent = computed(() =>
@@ -154,10 +172,29 @@ function parseCodeContent(raw: string): CodeContent | null {
   }
 }
 
+function applyContent(raw: string) {
+  const next = parseCodeContent(raw)
+  parsed.value = next
+  isLegacy.value = next === null
+  if (next) {
+    activeFileIndex.value = 0
+    editedFiles.value = new Map()
+    next.files.forEach(f => editedFiles.value.set(f.filename, f.content))
+    runState.value = 'idle'
+    runResult.value = null
+    highlightedLines.value = []
+    currentStepIndex.value = null
+    breakpoints.clear()
+  }
+}
+
 onMounted(() => {
-  parsed.value = parseCodeContent(props.content)
-  isLegacy.value = parsed.value === null
-  parsed.value?.files.forEach(f => editedFiles.value.set(f.filename, f.content))
+  applyContent(props.content)
+})
+
+// Re-parse when content changes after mount (e.g. async detail loading in preview dialogs)
+watch(() => props.content, (raw) => {
+  applyContent(raw)
 })
 
 function onCodeChange(value: string) {
@@ -268,6 +305,8 @@ function onStepHover(refs: CodeLineRef[]) {
 }
 
 function onStepClick(step: CodeStep) {
+  const stepIdx = parsed.value?.steps.indexOf(step) ?? -1
+  currentStepIndex.value = stepIdx >= 0 ? stepIdx : null
   if (step.references.length === 0) return
   const targetRef = step.references[0]
   const targetFile = targetRef.filename
@@ -285,7 +324,6 @@ function onStepClick(step: CodeStep) {
     editorRef.value?.scrollToLine(targetRef.startLine)
   }
 
-  const activeFilename = activeFile.value?.filename
   const lines: number[] = []
   for (const ref of step.references) {
     if (ref.filename === targetFile) {
@@ -293,6 +331,39 @@ function onStepClick(step: CodeStep) {
     }
   }
   highlightedLines.value = lines
+}
+
+const editorGutterMarkers = computed<GutterMarkerDef[]>(() => {
+  const markers: GutterMarkerDef[] = []
+  const activeFilename = activeFile.value?.filename
+  if (currentStepIndex.value !== null && parsed.value) {
+    const step = parsed.value.steps[currentStepIndex.value]
+    if (step) {
+      for (const ref of step.references) {
+        if (ref.filename === activeFilename) {
+          for (let l = ref.startLine; l <= ref.endLine; l++) {
+            markers.push({ line: l, type: 'step-range', symbol: '┃' })
+          }
+        }
+      }
+    }
+  }
+  const prefix = (activeFilename ?? '') + ':'
+  for (const key of breakpoints) {
+    if (prefix && key.startsWith(prefix)) {
+      const line = Number(key.slice(prefix.length))
+      if (!Number.isNaN(line)) markers.push({ line, type: 'breakpoint', symbol: '◆' })
+    }
+  }
+  return markers
+})
+
+function onGutterClick(line: number) {
+  const filename = activeFile.value?.filename
+  if (!filename) return
+  const key = `${filename}:${line}`
+  if (breakpoints.has(key)) breakpoints.delete(key)
+  else breakpoints.add(key)
 }
 
 function onSelectionChange(info: { text: string; from: number; to: number; x: number; y: number } | null) {
@@ -306,17 +377,24 @@ function onSelectionChange(info: { text: string; from: number; to: number; x: nu
   }, 200)
 }
 
-function onSelectionExplain() {
+function onSelectionSmartExplain() {
+  const code = selectionMenu.text
   selectionMenu.visible = false
-  ElMessage.info('解释功能：' + (selectionMenu.text.slice(0, 30) + '...'))
+  tutoringQuotedText.value = ''
+  tutoringInitQuestion.value = `请解释以下代码：\n\`\`\`\n${code}\n\`\`\``
+  showTutoringDrawer.value = true
 }
-function onSelectionFindSimilar() {
+function onSelectionAskAi() {
   selectionMenu.visible = false
-  ElMessage.info('找相似模式功能开发中')
+  tutoringQuotedText.value = selectionMenu.text
+  tutoringInitQuestion.value = ''
+  showTutoringDrawer.value = true
 }
-function onSelectionAsk() {
-  selectionMenu.visible = false
-  ElMessage.info('提问功能开发中')
+
+function handleTutoringClose() {
+  showTutoringDrawer.value = false
+  tutoringQuotedText.value = ''
+  tutoringInitQuestion.value = ''
 }
 </script>
 
@@ -339,8 +417,16 @@ function onSelectionAsk() {
   min-width: 0;
 }
 
+.clv-editor-wrapper {
+  position: relative;
+}
+.clv-editor-wrapper:hover :deep(.code-toolbar) {
+  opacity: 1;
+}
+
 .clv-steps-pane {
   flex-shrink: 0;
+  overflow-y: auto;
 }
 
 @media (min-width: 1200px) {
@@ -359,9 +445,8 @@ function onSelectionAsk() {
     width: 380px;
     position: sticky;
     top: var(--lt-space-loose);
-    max-height: calc(100vh - 120px);
+    max-height: calc(100vh - var(--lt-space-loose) * 2);
     overflow-y: auto;
-    overflow-x: hidden;
     padding-left: var(--lt-space-loose);
     border-left: 1px solid var(--lt-border);
   }

@@ -367,21 +367,21 @@ function formatDateLabel(dateStr: string): string {
 .stat-unit { font-size: 10px; color: var(--lt-text-auxiliary); margin-top: 1px; }
 
 /* 热力图 */
-.heatmap-wrap { min-width: 520px; }
-.month-labels-row { display: flex; gap: 4px; margin-bottom: 4px; }
+.heatmap-wrap { min-width: 0; }
+.month-labels-row { display: flex; gap: 4px; margin-bottom: 4px; justify-content: center; }
 .weekday-spacer { width: 16px; flex-shrink: 0; }
-.heatmap-grid-area { flex: 1; }
-.month-labels { display: grid; grid-auto-flow: column; grid-auto-columns: 14px; gap: 3px; }
+.heatmap-grid-area { flex: 0 1 auto; }
+.month-labels { display: grid; grid-auto-flow: column; grid-auto-columns: 20px; gap: 3px; }
 .month-label { font-size: 9px; color: var(--lt-text-auxiliary); white-space: nowrap; }
 
-.heatmap-body { display: flex; gap: 4px; }
+.heatmap-body { display: flex; gap: 4px; justify-content: center; }
 .weekday-labels { width: 16px; flex-shrink: 0; display: flex; flex-direction: column; gap: 3px; }
-.weekday-label { height: 14px; font-size: 8px; line-height: 14px; color: var(--lt-text-placeholder); text-align: right; }
+.weekday-label { flex: 1; min-height: 0; font-size: 8px; color: var(--lt-text-placeholder); text-align: right; display: flex; align-items: center; justify-content: flex-end; }
 
 .heatmap-weeks { display: flex; gap: 3px; }
 .heatmap-week { display: flex; flex-direction: column; gap: 3px; }
 .heatmap-cell {
-  width: 14px; height: 14px;
+  width: 20px; height: 20px;
   border-radius: 3px;
   cursor: pointer;
   transition: transform 0.1s, box-shadow 0.1s;

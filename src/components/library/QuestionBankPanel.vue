@@ -17,13 +17,28 @@
         <div v-if="kpAccuracy.length === 0" class="qb-sidebar__empty">暂无数据</div>
         <div v-for="kp in kpAccuracy" :key="kp.kpId" class="qb-sidebar__kp-row" @click="$emit('filter-kp', kp.kpId)">
           <span class="qb-sidebar__kp-name">{{ kp.kpName || kp.kpId.slice(0, 8) }}</span>
-          <span class="qb-sidebar__kp-rate" :class="rateClass(kp.accuracyRate)">{{ (kp.accuracyRate * 100).toFixed(0) }}%</span>
+            <span class="qb-sidebar__kp-rate" :class="kp.totalAttempts > 0 ? rateClass(kp.accuracyRate) : ''">{{ kp.totalAttempts > 0 ? (kp.accuracyRate * 100).toFixed(0) + '%' : '-' }}</span>
         </div>
       </div>
 
       <div class="qb-sidebar__action">
-        <el-button type="primary" round size="small" class="w-full" disabled>
-          开始练习
+        <el-button
+          type="primary"
+          round
+          size="small"
+          class="w-full"
+          @click="onStartPracticeClick"
+        >
+          {{ hasSelection ? `开始练习（${selectedIds.size} 题）` : '开始练习' }}
+        </el-button>
+        <el-button
+          v-if="hasSelection"
+          text
+          size="small"
+          class="w-full mt-2"
+          @click="clearSelection"
+        >
+          清空选择
         </el-button>
       </div>
     </div>
@@ -32,6 +47,18 @@
     <div class="qb-main flex-1 flex flex-col overflow-hidden">
       <!-- Toolbar -->
       <div class="qb-toolbar">
+        <div class="qb-toolbar__select">
+          <el-checkbox
+            :model-value="questions.length > 0 && selectedIds.size === questions.length"
+            :indeterminate="selectedIds.size > 0 && selectedIds.size < questions.length"
+            @change="toggleSelectAll"
+          >
+            全选
+          </el-checkbox>
+          <span v-if="hasSelection" class="qb-toolbar__selected-count">
+            已选 {{ selectedIds.size }} 题
+          </span>
+        </div>
         <div class="qb-toolbar__filters">
           <el-select v-model="typeFilter" placeholder="全部题型" clearable size="small" class="w-28" @change="onFilterChange">
             <el-option v-for="(label, key) in QUESTION_TYPE_LABEL" :key="key" :label="label" :value="key" />
@@ -68,8 +95,15 @@
             v-for="q in questions"
             :key="q.id"
             class="qb-card"
+            :class="{ 'qb-card--selected': selectedIds.has(q.id) }"
             @click="$emit('select', q.id)"
           >
+            <el-checkbox
+              :model-value="selectedIds.has(q.id)"
+              class="qb-card__checkbox"
+              @click.stop
+              @change="toggleSelect(q.id)"
+            />
             <div class="qb-card__left">
               <span class="qb-type-tag" :class="`qb-type-tag--${q.questionType}`">
                 {{ QUESTION_TYPE_LABEL[q.questionType] || q.questionType }}
@@ -198,6 +232,7 @@ const emit = defineEmits<{
   (e: 'show-wrong'): void
   (e: 'filter-kp', kpId: string): void
   (e: 'close-detail'): void
+  (e: 'start-practice', questionIds?: string[]): void
 }>()
 
 const QUESTION_TYPE_LABEL: Record<string, string> = {
@@ -215,6 +250,42 @@ const difficultyFilter = ref<number | undefined>(undefined)
 const sortOrder = ref('newest')
 const currentPage = ref(1)
 const size = 50
+
+// Selection
+const selectedIds = ref<Set<string>>(new Set())
+const hasSelection = computed(() => selectedIds.value.size > 0)
+
+function toggleSelect(id: string) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+function toggleSelectAll() {
+  if (selectedIds.value.size === props.questions.length) {
+    selectedIds.value = new Set()
+  } else {
+    selectedIds.value = new Set(props.questions.map(q => q.id))
+  }
+}
+
+function clearSelection() {
+  selectedIds.value = new Set()
+}
+
+function onStartPracticeClick() {
+  if (hasSelection.value) {
+    emit('start-practice', Array.from(selectedIds.value))
+  } else {
+    emit('start-practice')
+  }
+}
+
+// 题目列表变化时清空选中（筛选/翻页/刷新）
+watch(() => props.questions, () => {
+  selectedIds.value = new Set()
+})
 
 function onFilterChange() {
   currentPage.value = 1
@@ -369,6 +440,12 @@ defineExpose({ openDetail })
   flex-shrink: 0;
 }
 .qb-toolbar__filters { display: flex; gap: 8px; }
+.qb-toolbar__select { display: flex; align-items: center; gap: 12px; }
+.qb-toolbar__selected-count {
+  font-size: 12px;
+  color: var(--lt-brand);
+  font-weight: 600;
+}
 
 /* List */
 .qb-loading { display: flex; flex-direction: column; gap: 12px; }
@@ -403,6 +480,14 @@ defineExpose({ openDetail })
 .qb-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
   border-color: var(--lt-brand-light);
+}
+.qb-card--selected {
+  background: var(--lt-brand-lightest);
+  border-color: var(--lt-brand);
+}
+.qb-card__checkbox {
+  flex-shrink: 0;
+  margin-right: 4px;
 }
 .qb-card__left {
   display: flex;

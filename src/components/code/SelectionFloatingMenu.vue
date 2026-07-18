@@ -2,29 +2,23 @@
   <Teleport to="body">
     <div
       v-if="visible"
-      ref="menuRef"
       class="selection-floating-menu"
       :style="{ left: x + 'px', top: y + 'px' }"
     >
-      <button class="float-btn" title="解释这段代码" @click="$emit('explain')">
-        <el-icon><ChatDotRound /></el-icon>
-        <span>解释这段代码</span>
+      <button class="float-btn" title="直接用智能模式解释这段代码" @click="$emit('smart-explain')">
+        <el-icon><MagicStick /></el-icon>
+        <span>智能解释</span>
       </button>
-      <button class="float-btn" title="找相似模式" @click="$emit('find-similar')">
-        <el-icon><Search /></el-icon>
-        <span>找相似模式</span>
-      </button>
-      <button class="float-btn" title="有啥问题吗？" @click="$emit('ask')">
-        <el-icon><QuestionFilled /></el-icon>
-        <span>有啥问题吗？</span>
+      <button class="float-btn float-btn-ask" title="引用选中文本提问" @click="$emit('ask-ai')">
+        <el-icon><ChatLineSquare /></el-icon>
+        <span>问 AI</span>
       </button>
     </div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ChatDotRound, Search, QuestionFilled } from '@element-plus/icons-vue'
+import { MagicStick, ChatLineSquare } from '@element-plus/icons-vue'
 
 defineProps<{
   visible: boolean
@@ -33,12 +27,9 @@ defineProps<{
 }>()
 
 defineEmits<{
-  explain: []
-  'find-similar': []
-  ask: []
+  'smart-explain': []
+  'ask-ai': []
 }>()
-
-const menuRef = ref<HTMLElement | null>(null)
 </script>
 
 <style scoped>
@@ -46,8 +37,8 @@ const menuRef = ref<HTMLElement | null>(null)
   position: fixed;
   z-index: 2000;
   display: flex;
-  gap: 2px;
-  padding: 4px 6px;
+  gap: 4px;
+  padding: 5px 8px;
   background: var(--lt-bg-card);
   border: 1px solid var(--lt-border);
   border-radius: var(--lt-radius-full);
@@ -62,22 +53,40 @@ const menuRef = ref<HTMLElement | null>(null)
 .float-btn {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
+  gap: 5px;
+  padding: 6px 14px;
   border: none;
   background: transparent;
-  border-radius: var(--lt-radius-md);
+  border-radius: var(--lt-radius-full);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--lt-text-secondary);
   white-space: nowrap;
-  transition: background 0.15s;
+  transition: all 0.15s;
 }
 .float-btn:hover {
   background: var(--lt-brand-lightest);
   color: var(--lt-brand);
 }
 .float-btn .el-icon {
-  font-size: 14px;
+  font-size: 15px;
+}
+.float-btn-ask {
+  position: relative;
+  background: linear-gradient(135deg, rgba(124, 92, 252, 0.06), rgba(43, 111, 255, 0.06));
+}
+.float-btn-ask::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--lt-border);
+}
+.float-btn-ask:hover {
+  background: linear-gradient(135deg, rgba(124, 92, 252, 0.12), rgba(43, 111, 255, 0.12));
+  color: var(--lt-ai);
 }
 </style>

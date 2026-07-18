@@ -6,7 +6,7 @@ import { useTutoringStore } from '@/stores/tutoring'
 import { useTutoringSSE } from '@/composables/useTutoringSSE'
 import { useDirectAnswerStore } from '@/stores/directAnswer'
 import { useDirectAnswerInlineSSE } from '@/composables/useDirectAnswerInlineSSE'
-import { apiFetch, ensureValidToken } from '@/utils/api'
+import { apiFetch, ensureValidToken, getToken } from '@/utils/api'
 import { useSSE } from '@/composables/useSSE'
 import { ElMessageBox } from 'element-plus'
 import type { ThinkingStep, ThinkingRecord, ThinkingPhase, SearchSource } from '@/types'
@@ -277,6 +277,7 @@ function cleanupPendingVisualBlocks(
 export function useChatSSE() {
   const profile = useProfileStore()
   let streamAbortController: AbortController | null = null
+  let lastStreamActivity = 0
 
   // ===== Session State =====
   const sessions = ref<ChatSession[]>([])
@@ -323,6 +324,7 @@ export function useChatSSE() {
   const tutoringSSE = useTutoringSSE()
   const activeTutoringMsgIdx = ref(-1)
   const tutoringSessionId = ref('')  // 辅导所属的 chat session ID
+  const lectureSessionId = ref('')   // 视频讲解所属的 chat session ID
   const tutoringQuestion = ref('')
   const tutoringRound = ref(1)
   const currentTutoringSubMode = ref<string>('smart') // 当前辅导子模式，用于快照持久化
@@ -471,7 +473,7 @@ export function useChatSSE() {
 
   // ===== Session CRUD =====
 
-  function createSession() {
+  async function createSession() {
     const currentType = chatMode.value === 'chat' ? undefined : chatMode.value
     // 重置会话级状态，避免新会话渲染旧会话残留（顶部栏闪烁）
     generationReady.value = false
@@ -506,15 +508,8 @@ export function useChatSSE() {
         if (prevSess) (prevSess as any)._ended = true
       })
     }
-    const newId = crypto.randomUUID()
-    sessions.value.unshift({
-      id: newId, title: '新会话', messages: [],
-      courseId: profile.activeCourseId,
-      type: currentType,
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    })
-    activeSessionId.value = newId
-    chatId.value = newId
+    // 调后端创建真实会话，避免用 crypto.randomUUID() 产生后端不认识的假 ID
+    await startChat(profile.activeCourseId, true, currentType)
   }
 
   async function loadSessions() {
@@ -541,7 +536,7 @@ export function useChatSSE() {
     } catch (err) { console.error('loadSessions failed:', err) }
   }
 
-  async function startChat(courseId: string, forceNew = false) {
+  async function startChat(courseId: string, forceNew = false, sessionType?: string) {
     try {
       const res = await apiFetch<{
         chatId: string; courseId: string; messages: { role: string; content: string; at: string }[]
@@ -555,13 +550,15 @@ export function useChatSSE() {
         role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
         text: m.content,
       }))
+      const type = sessionType || (chatMode.value === 'chat' ? undefined : chatMode.value) as ChatSession['type']
       const existing = sessions.value.find(s => s.id === chatId.value)
-      if (existing) { existing.messages = msgs }
+      if (existing) { existing.messages = msgs; existing.type = type }
       else {
         const nowIso = new Date().toISOString()
         sessions.value.unshift({
           id: chatId.value, title: msgs.length > 0 ? autoTitle(msgs) : '新会话',
           messages: msgs, courseId, createdAt: nowIso, updatedAt: nowIso,
+          type,
         })
       }
       activeSessionId.value = chatId.value
@@ -749,6 +746,7 @@ export function useChatSSE() {
             }
           }
           const card = taskCards.value[task.taskId]
+          card.taskType = resolvedTaskType
           card.progress = task.percent
           card.message = task.stage || ''
           card.resourceTypes = task.resourceTypes
@@ -765,17 +763,23 @@ export function useChatSSE() {
               role: 'assistant' as const,
               text: `好的！我已经为你启动了「${task.topic}」的资源包生成。`,
               // @ts-ignore - embedded card marker
-              _generationCard: { taskId: task.taskId, topic: task.topic },
+              _generationCard: { taskId: task.taskId, topic: task.topic, taskType: resolvedTaskType },
             }
             // plan_generate 任务的卡片插入延迟到 pendingPlan 处理之后，
             // 届时 _pendingPlan 已挂载到正确消息上，可精确定位插入点
             if (task.taskType === 'plan_generate') continue
-            // resource_generate: 搜索用户确认消息定位插入点
-            const confirmIdx = [...session.messages].reverse().findIndex(
-              m => m.role === 'user' && m.text.includes(task.topic)
+            // resource_generate: 搜索最后一条 resource planOffer 的 AI 消息定位插入点
+            // 优先匹配 topic，确保多任务场景下卡片位置正确；找不到则追加到末尾
+            const reversedMsgs = [...session.messages].reverse()
+            const topicMatchIdx = reversedMsgs.findIndex(
+              (m: any) => m.role === 'assistant' && m._planOffer?.type === 'resource' && m._planOffer.topic === task.topic
             )
-            if (confirmIdx >= 0) {
-              const insertAt = session.messages.length - confirmIdx
+            const anyMatchIdx = reversedMsgs.findIndex(
+              (m: any) => m.role === 'assistant' && m._planOffer?.type === 'resource'
+            )
+            const matchIdx = topicMatchIdx >= 0 ? topicMatchIdx : anyMatchIdx
+            if (matchIdx >= 0) {
+              const insertAt = session.messages.length - matchIdx
               session.messages.splice(insertAt, 0, cardMsg)
             } else {
               session.messages.push(cardMsg)
@@ -1156,7 +1160,7 @@ export function useChatSSE() {
     if (sessions.value.length > 0) {
       await switchSession(sessions.value[0].id)
     } else {
-      createSession()
+      await createSession()
     }
   }
 
@@ -1211,7 +1215,7 @@ export function useChatSSE() {
     streamAbortController = new AbortController()
 
     if (!activeSessionId.value) {
-      createSession()
+      await createSession()
       if (!activeSessionId.value) return
     }
 
@@ -1234,6 +1238,7 @@ export function useChatSSE() {
     }
     targetSession.updatedAt = new Date().toISOString()
     isStreaming.value = true
+    lastStreamActivity = Date.now()
 
     const thinkingSteps = reactive<ThinkingStep[]>([])
     const thinking: ThinkingRecord = { steps: thinkingSteps, expanded: true }
@@ -1242,7 +1247,7 @@ export function useChatSSE() {
     targetSession.messages.push({ role: 'assistant', text: '', isStreaming: true, thinking })
 
     await ensureValidToken()
-    const token = localStorage.getItem('token') || ''
+    const token = getToken()
 
     try {
       const response = await fetch(`/api/chat/${activeSessionId.value}/send/stream`, {
@@ -1286,7 +1291,10 @@ export function useChatSSE() {
         throw new Error('HTTP ' + response.status)
       }
 
-      const reader = response.body!.getReader()
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('响应体不可读，请检查网络连接')
+      }
       const decoder = new TextDecoder()
       let buffer = ''
       let profileReadyVal = false, profileVersionIdVal: string | null = null
@@ -1300,6 +1308,7 @@ export function useChatSSE() {
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
+        lastStreamActivity = Date.now()
         const blocks = buffer.split('\n\n')
         buffer = blocks.pop() || ''
 
@@ -1343,15 +1352,13 @@ export function useChatSSE() {
                 confidenceLevel: parsed.confidenceLevel || undefined,
                 agentName: parsed.agentName || undefined,
                 agentRole: parsed.agentRole || undefined,
+                sources: parsed.sources && parsed.sources.length > 0 ? parsed.sources : undefined,
               }
               if (!thinkingSteps.some(s => s.label === meta.label)) {
                 thinkingSteps.push(step)
               }
               if (parsed.phase === 'REFLECT') {
-                targetSession.messages[msgIndex].thinking = {
-                  steps: [...thinkingSteps],
-                  expanded: false,
-                }
+                // keep original reactive thinkingSteps — don't replace with snapshot
               }
             } catch { /* ignore */ }
           } else if (eventType === 'done') {
@@ -1382,10 +1389,6 @@ export function useChatSSE() {
               const msg = targetSession.messages[msgIndex]
               if (msg && msg.thinking) {
                 thinkingSteps.forEach(s => s.done = true)
-                targetSession.messages[msgIndex].thinking = {
-                  steps: [...thinkingSteps],
-                  expanded: false,
-                }
               }
             }
           } else if (eventType === 'chunk' || !eventType) {
@@ -1414,7 +1417,6 @@ export function useChatSSE() {
       const finalThinking = targetSession.messages[msgIndex].thinking
       if (finalThinking) {
         finalThinking.steps.forEach(s => s.done = true)
-        finalThinking.expanded = false
       }
       targetSession.messages[msgIndex].isStreaming = false
 
@@ -1510,7 +1512,7 @@ export function useChatSSE() {
     streamAbortController = new AbortController()
 
     if (!activeSessionId.value) {
-      createSession()
+      await createSession()
       if (!activeSessionId.value) return
     }
 
@@ -1520,6 +1522,7 @@ export function useChatSSE() {
     }
 
     const targetSession = activeSession.value!
+    lectureSessionId.value = targetSession.id
     const videoStore = useVideoLectureStore()
 
     targetSession.messages.push({ role: 'user', text: content })
@@ -1528,6 +1531,7 @@ export function useChatSSE() {
     }
     targetSession.updatedAt = new Date().toISOString()
     isStreaming.value = true
+    lastStreamActivity = Date.now()
 
     // Start the video lecture loading phase
     videoStore.startLoading(content)
@@ -1537,7 +1541,7 @@ export function useChatSSE() {
     targetSession.messages.push({ role: 'assistant', text: '', isStreaming: true })
 
     await ensureValidToken()
-    const token = localStorage.getItem('token') || ''
+    const token = getToken()
 
     let lastSceneReceived = false
 
@@ -1568,15 +1572,20 @@ export function useChatSSE() {
         throw new Error('HTTP ' + response.status)
       }
 
-      const reader = response.body!.getReader()
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('响应体不可读，请检查网络连接')
+      }
       const decoder = new TextDecoder()
       let buffer = ''
+      let shouldExit = false
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
+        lastStreamActivity = Date.now()
         const blocks = buffer.split('\n\n')
         buffer = blocks.pop() || ''
 
@@ -1596,9 +1605,13 @@ export function useChatSSE() {
 
           if (eventType === 'error') {
             const errorMsg = dataStr || '回答失败，请稍后重试。'
-            targetSession.messages[msgIndex].text = errorMsg
-            targetSession.messages[msgIndex].isStreaming = false
+            if (targetSession.messages[msgIndex]) {
+              targetSession.messages[msgIndex].text = errorMsg
+              targetSession.messages[msgIndex].isStreaming = false
+            }
             videoStore.reset()
+            shouldExit = true
+            break
           } else if (eventType === 'item') {
             try {
               const parsed: SceneItemEvent = JSON.parse(dataStr)
@@ -1609,20 +1622,26 @@ export function useChatSSE() {
             }
           } else if (eventType === 'done') {
             videoStore.markStreamEnded()
+            shouldExit = true
+            break
           } else if (eventType === 'chunk' || !eventType) {
             // Legacy chunk events — used as fallback text
             if (onStreamChunk) onStreamChunk()
           }
         }
+        if (shouldExit) break
       }
 
-      // 安全网：连接断开但后端没发 done 事件时，确保流标记为结束
-      // 否则播放器会永远卡在 buffering 等待不存在的下一个场景
-      videoStore.markStreamEnded()
+      // 安全网：连接断开但后端没发 done/error 事件时，确保流标记为结束
+      if (!shouldExit) {
+        videoStore.markStreamEnded()
+      }
 
       // If no scenes were received at all, show as text fallback
       if (!lastSceneReceived) {
-        targetSession.messages[msgIndex].text = '抱歉，未能生成视频讲解，请重试。'
+        if (targetSession.messages[msgIndex]) {
+          targetSession.messages[msgIndex].text = '抱歉，未能生成视频讲解，请重试。'
+        }
       }
     } catch (err) {
       // 忽略 abort 错误（组件卸载或新请求取消旧请求时）
@@ -1636,11 +1655,12 @@ export function useChatSSE() {
       console.error('sendLectureMessage failed:', err)
     } finally {
       // Remove the loading placeholder — the video player handles the display
+      const msg = targetSession.messages[msgIndex]
       if (!lastSceneReceived) {
-        targetSession.messages[msgIndex].isStreaming = false
+        if (msg) msg.isStreaming = false
       } else {
         // Remove placeholder message; the video record card will replace it on close
-        targetSession.messages.splice(msgIndex, 1)
+        if (msg) targetSession.messages.splice(msgIndex, 1)
       }
       isStreaming.value = false
     }
@@ -1755,7 +1775,7 @@ export function useChatSSE() {
     currentTutoringSubMode.value = mode || 'smart'
 
     if (!activeSessionId.value) {
-      createSession()
+      await createSession()
       if (!activeSessionId.value) return
     }
 
@@ -2128,7 +2148,7 @@ export function useChatSSE() {
   /** Smart v2：启动智能辅导 */
   async function sendSmartMessage(content: string): Promise<void> {
     if (!activeSessionId.value) {
-      createSession()
+      await createSession()
       if (!activeSessionId.value) return
     }
 
@@ -2299,7 +2319,7 @@ export function useChatSSE() {
   /** 直接模式：走 DirectAnswer 管线，内嵌渲染 */
   async function sendDirectAnswerMessage(content: string): Promise<void> {
     if (!activeSessionId.value) {
-      createSession()
+      await createSession()
       if (!activeSessionId.value) return
     }
     if (!activeSession.value) {
@@ -2479,8 +2499,14 @@ export function useChatSSE() {
     const card = videoStore.lastRecord
     if (!card) return
 
-    const session = activeSession.value
+    const session = sessions.value.find(s => s.id === lectureSessionId.value) || activeSession.value
     if (!session) return
+
+    // 避免重复插入：检查 session 中是否已有同一 lectureId 的记录
+    const alreadyExists = session.messages.some(
+      (m) => (m as any)._videoRecord?.lectureId === card.lectureId
+    )
+    if (alreadyExists) return
 
     // Push video record card message
     session.messages.push({
@@ -2897,16 +2923,37 @@ export function useChatSSE() {
   // ===== SSE reconnection for mobile =====
 
   function setupMobileReconnection() {
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        const session = activeSession.value
-        if (session && session.messages.length > 0) {
-          loadSessionMessages(activeSessionId.value)
+      if (document.visibilityState !== 'visible') return
+      const session = activeSession.value
+      if (!session || session.messages.length === 0) return
+
+      // 正在流式输出时，检查是否卡死（超过30秒无数据视为断连）
+      if (isStreaming.value) {
+        if (Date.now() - lastStreamActivity < 30000) return
+        // 流式卡死：中止旧请求，强制恢复
+        if (streamAbortController) {
+          streamAbortController.abort()
+          streamAbortController = null
         }
+        isStreaming.value = false
       }
+
+      // debounce：避免快速切换前后台触发多次全量重载
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        loadSessionMessages(activeSessionId.value)
+      }, 500)
     }
+
     document.addEventListener('visibilitychange', handleVisibility)
-    return () => document.removeEventListener('visibilitychange', handleVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+    }
   }
 
   // ===== Watch course change =====

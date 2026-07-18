@@ -2,7 +2,6 @@ import { ref, computed, watch, type Ref, type ComputedRef } from 'vue'
 import { useProfileStore } from '@/stores/profile'
 import { apiFetch } from '@/utils/api'
 import type { LearningStats } from '@/types'
-import * as echarts from 'echarts'
 
 function generateMockStats(): LearningStats {
   // 10 周模拟数据：学生选修《数据结构与算法》课程
@@ -31,11 +30,11 @@ function generateMockStats(): LearningStats {
       { version: 1, createdAt: '2026-04-02 10:15', trigger: 'chat', summary: ['初始画像建立', '专业：计算机科学与技术 大二', '学习目标：掌握数据结构与算法基础'] },
       { version: 2, createdAt: '2026-04-10 14:30', trigger: 'chat', summary: ['补充编程经验信息', '薄弱项识别：链表操作、递归思维', '认知风格：偏向视觉型+动手实践'] },
       { version: 3, createdAt: '2026-04-22 09:00', trigger: 'quiz', summary: ['第一次阶段测验成绩录入', '数组与链表：正确率65%', '栈与队列：正确率72%'] },
-      { version: 4, createdAt: '2026-05-06 16:45', trigger: 'chat', summary: ['学习节奏调整为每两天一次', '增加图形化学习资源偏好', '兴趣方向：对算法可视化感兴趣'] },
-      { version: 5, createdAt: '2026-05-18 11:00', trigger: 'quiz', summary: ['第二次阶段测验', '树与二叉树：正确率58%', '薄弱项新增：树的遍历、递归实现'] },
-      { version: 6, createdAt: '2026-05-30 08:20', trigger: 'path_update', summary: ['路径重新规划', '加强二叉树和排序算法模块', '预估学习时长增加8小时'] },
-      { version: 7, createdAt: '2026-06-08 15:10', trigger: 'quiz', summary: ['第三次阶段测验', '排序与查找：正确率70%', '薄弱项减少2个：链表、栈达标'] },
-      { version: 8, createdAt: '2026-06-18 13:30', trigger: 'chat', summary: ['期末复习阶段画像微调', '薄弱项：二叉树遍历、动态规划', '推荐优先级：树→排序→动态规划'] },
+      { version: 4, createdAt: '2026-05-06 16:45', trigger: 'chat', summary: ['学习节奏调整为每两天一次', '链表操作和递归通过练习已基本掌握', '兴趣方向：对算法可视化感兴趣'] },
+      { version: 5, createdAt: '2026-05-18 11:00', trigger: 'quiz', summary: ['第二次阶段测验', '树与二叉树：正确率58%', '薄弱项新增：树的遍历、动态规划入门'] },
+      { version: 6, createdAt: '2026-05-30 08:20', trigger: 'path_update', summary: ['路径重新规划', '加强二叉树和排序算法模块', '递归思维已达标移除薄弱列表'] },
+      { version: 7, createdAt: '2026-06-08 15:10', trigger: 'quiz', summary: ['第三次阶段测验', '排序与查找：正确率70%', '链表已完全掌握，薄弱项减至3个'] },
+      { version: 8, createdAt: '2026-06-18 13:30', trigger: 'chat', summary: ['期末复习阶段画像微调', '当前薄弱项：二叉树遍历、动态规划、图的表示', '推荐优先级：树→排序→动态规划'] },
     ],
   }
 }
@@ -43,6 +42,8 @@ function generateMockStats(): LearningStats {
 const mockTags = {
   weakness: ['二叉树遍历', '动态规划', '图的表示'],
   mastered: ['数组与链表', '栈与队列', '递归思想', '排序算法比较', '时间复杂度分析'],
+  // 已治愈项（用于支撑 prevWeakCount=6 的叙事）
+  healed: ['链表操作', '递归思维', '栈与队列应用'],
 }
 const mockErrorPatterns = ['递归终止条件遗漏', '指针越界访问', '树形结构遍历顺序混淆', '动态规划状态转移方程错误']
 

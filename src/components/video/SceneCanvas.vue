@@ -9,6 +9,7 @@ import DiagramScene from './DiagramScene.vue'
 import ComparisonScene from './ComparisonScene.vue'
 import SummaryScene from './SummaryScene.vue'
 import EndingScene from './EndingScene.vue'
+import HtmlSceneRenderer from './HtmlSceneRenderer.vue'
 
 const props = defineProps<{
   scene: Scene | null
@@ -24,7 +25,8 @@ const sceneKey = ref(0)
 const autoplayBlocked = ref(false)
 const audioBuffering = ref(false)  // TTS 音频缓冲中，暂停动画
 const audioLoadFailed = ref(false) // TTS 音频 URL 失效（404 等）
-let tickTimer: ReturnType<typeof setInterval> | null = null
+let rafId: number | null = null
+let lastTickReal = 0
 let transitionTimer1: ReturnType<typeof setTimeout> | null = null
 let transitionTimer2: ReturnType<typeof setTimeout> | null = null
 
@@ -53,14 +55,15 @@ function loadAndPlayAudio(url: string) {
   audioEl = new Audio(url)
   audioEl.playbackRate = props.speed
 
-  // 音频缓冲时暂停动画，恢复时继续——保持音画同步
-  audioEl.addEventListener('waiting', () => { audioBuffering.value = true })
-  audioEl.addEventListener('stalled', () => { audioBuffering.value = true })
-  audioEl.addEventListener('playing', () => { audioBuffering.value = false })
-  audioEl.addEventListener('canplay', () => { audioBuffering.value = false })
+  // 音频缓冲时暂停动画，恢复时继续--保持音画同步
+  // 使用 on* 属性而非 addEventListener，确保 stopAudio 能正确清除
+  audioEl.onwaiting = () => { audioBuffering.value = true }
+  audioEl.onstalled = () => { audioBuffering.value = true }
+  audioEl.onplaying = () => { audioBuffering.value = false }
+  audioEl.oncanplay = () => { audioBuffering.value = false }
 
   // 音频加载失败（404、URL 过期等）--区别于自动播放被阻止
-  audioEl.addEventListener('error', () => { audioLoadFailed.value = true })
+  audioEl.onerror = () => { audioLoadFailed.value = true }
 
   if (props.isPlaying) {
     audioEl.play().catch(() => { autoplayBlocked.value = true })
@@ -99,18 +102,37 @@ watch(() => props.scene, (newScene) => {
   }
 })
 
+// 当播放器进入 darkening（replay 触发），强制重新挂载场景组件
+watch(() => store.phase, (p) => {
+  if (p === 'darkening') {
+    sceneKey.value++
+  }
+})
+
 // ===== Tick timer for ProgressBar and subtitle =====
 function startTimer() {
   stopTimer()
-  tickTimer = setInterval(() => {
-    if (effectiveIsPlaying.value) {
-      store.currentSceneTime += 50 * props.speed
+  lastTickReal = performance.now()
+  rafId = requestAnimationFrame(tick)
+}
+
+function tick() {
+  if (effectiveIsPlaying.value) {
+    const now = performance.now()
+    const delta = now - lastTickReal
+    lastTickReal = now
+    // 大间隔（标签页不活跃）不推进，与 useSceneTimer 行为一致
+    if (delta < 500) {
+      store.currentSceneTime += delta * props.speed
     }
-  }, 50)
+  } else {
+    lastTickReal = performance.now()
+  }
+  rafId = requestAnimationFrame(tick)
 }
 
 function stopTimer() {
-  if (tickTimer) { clearInterval(tickTimer); tickTimer = null }
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null }
 }
 
 // ===== Subtitle from TTS steps =====
@@ -192,8 +214,16 @@ onBeforeUnmount(() => {
 <template>
   <div class="scene-canvas" @click="retryAudio">
     <div class="scene-wrapper" :class="transitionClass">
+      <HtmlSceneRenderer
+        v-if="scene?.type === 'html'"
+        :key="sceneKey"
+        :scene="scene"
+        :is-playing="effectiveIsPlaying"
+        :speed="speed"
+        @complete="onSceneComplete"
+      />
       <component
-        v-if="scene && sceneComponent"
+        v-else-if="scene && sceneComponent"
         :is="sceneComponent"
         :key="sceneKey"
         :content="scene.content"

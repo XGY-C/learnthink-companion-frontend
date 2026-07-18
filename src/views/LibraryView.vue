@@ -8,9 +8,8 @@
       </div>
       <div class="library-topbar__right">
         <el-input
-          v-if="activeTab !== 'questions'"
           v-model="searchQuery"
-          placeholder="搜索资源..."
+          :placeholder="searchPlaceholder"
           :prefix-icon="Search"
           class="library-topbar__search"
           clearable
@@ -66,7 +65,7 @@
         <div class="library-main flex-1 flex flex-col overflow-hidden">
           <!-- Breadcrumb + Toolbar -->
           <div class="library-toolbar">
-            <el-breadcrumb separator="/">
+            <el-breadcrumb v-if="!searchMode" separator="/">
               <el-breadcrumb-item @click="folderStore.navigateTo(null)">全部资料</el-breadcrumb-item>
               <el-breadcrumb-item
                 v-for="crumb in breadcrumb"
@@ -76,6 +75,9 @@
                 {{ crumb.name }}
               </el-breadcrumb-item>
             </el-breadcrumb>
+            <span v-else class="library-toolbar__search-hint">
+              搜索结果（{{ displayedFiles.length }} 条）
+            </span>
             <div class="library-toolbar__filters">
               <el-select v-model="typeFilter" placeholder="全部类型" clearable size="small" class="w-28">
                 <el-option v-for="(label, key) in typeOptions" :key="key" :label="label" :value="key" />
@@ -96,8 +98,8 @@
           <!-- File Grid -->
           <div class="flex-1 overflow-y-auto p-5">
             <ResourceFileGrid
-              :files="resourceStore.files"
-              :sub-folders="currentSubFolders"
+              :files="displayedFiles"
+              :sub-folders="displayedSubFolders"
               :loading="resourceStore.fileLoading"
               @preview="onPreview"
               @view-notes="onViewNotes"
@@ -106,6 +108,7 @@
               @delete="onDeleteFile"
               @enter-folder="folderStore.navigateTo($event)"
               @learn="onLearn"
+              @add-to-bank="onAddToBank"
             />
           </div>
         </div>
@@ -245,28 +248,51 @@
               <p class="text-xs mt-1" style="color: var(--lt-text-placeholder);">在学习资源时可以随时记录笔记</p>
             </div>
 
+            <div v-else-if="groupedNotes.length === 0" class="text-center py-16">
+              <el-icon :size="48" style="color: var(--lt-text-placeholder);"><Search /></el-icon>
+              <p class="mt-3 text-sm font-medium" style="color: var(--lt-text-secondary);">没有匹配的笔记</p>
+              <p class="text-xs mt-1" style="color: var(--lt-text-placeholder);">试试其他关键词</p>
+            </div>
+
             <div v-else class="note-list">
-              <div v-for="group in groupedNotes" :key="group.key" class="note-group">
-                <div class="note-group-header" @click="toggleNoteGroup(group.key)">
-                  <span class="note-group-arrow" :class="{ collapsed: collapsedNoteGroups.has(group.key) }">▸</span>
-                  <span class="note-group-title">{{ group.key }}</span>
-                  <span class="note-group-count">{{ group.notes.length }}</span>
-                </div>
-                <TransitionGroup
-                  v-if="!collapsedNoteGroups.has(group.key)"
-                  name="note-list-anim"
-                  tag="div"
-                  class="note-group-body"
+              <template v-for="res in groupedNotes" :key="res.key">
+                <!-- 资源头（一级） -->
+                <div
+                  class="note-resource-header"
+                  @click="toggleNoteGroup(resCollapseKey(res.key))"
                 >
-                  <NoteCard
-                    v-for="note in group.notes"
-                    :key="note.id"
-                    :note="note"
-                    @deleted="onNoteDeleted(note.id)"
-                    @edit="onEditNote(note)"
-                  />
-                </TransitionGroup>
-              </div>
+                  <span class="note-group-arrow" :class="{ collapsed: collapsedNoteGroups.has(resCollapseKey(res.key)) }">▸</span>
+                  <span class="note-resource-title">📄 {{ res.title }}</span>
+                  <span class="note-group-count">{{ res.count }}</span>
+                </div>
+                <div
+                  v-if="!collapsedNoteGroups.has(resCollapseKey(res.key))"
+                  class="note-resource-body"
+                >
+                  <div v-for="sec in res.sections" :key="sec.key" class="note-group">
+                    <!-- 章节头（二级） -->
+                    <div class="note-group-header" @click="toggleNoteGroup(secCollapseKey(res.key, sec.key))">
+                      <span class="note-group-arrow" :class="{ collapsed: collapsedNoteGroups.has(secCollapseKey(res.key, sec.key)) }">▸</span>
+                      <span class="note-group-title">{{ sec.title }}</span>
+                      <span class="note-group-count">{{ sec.notes.length }}</span>
+                    </div>
+                    <TransitionGroup
+                      v-if="!collapsedNoteGroups.has(secCollapseKey(res.key, sec.key))"
+                      name="note-list-anim"
+                      tag="div"
+                      class="note-group-body"
+                    >
+                      <NoteCard
+                        v-for="note in sec.notes"
+                        :key="note.id"
+                        :note="note"
+                        @deleted="onNoteDeleted(note.id)"
+                        @edit="onEditNote(note)"
+                      />
+                    </TransitionGroup>
+                  </div>
+                </div>
+              </template>
             </div>
           </div>
         </div>
@@ -276,7 +302,7 @@
       <template v-if="activeTab === 'questions'">
         <QuestionBankPanel
           ref="qbPanelRef"
-          :questions="qbStore.questions"
+          :questions="displayedQuestions"
           :total="qbStore.total"
           :loading="qbStore.loading"
           :kp-accuracy="qbStore.kpAccuracyList"
@@ -287,6 +313,7 @@
           @show-wrong="onQbShowWrong"
           @filter-kp="onQbFilterKp"
           @close-detail="onQbCloseDetail"
+          @start-practice="onStartPractice"
         />
       </template>
     </div>
@@ -381,7 +408,7 @@ import ResourceFileGrid from '@/components/library/ResourceFileGrid.vue'
 import ResourcePreviewDialog from '@/components/library/ResourcePreviewDialog.vue'
 import NoteCard from '@/components/notes/NoteCard.vue'
 import QuestionBankPanel from '@/components/library/QuestionBankPanel.vue'
-import type { ResourceFile, Note, ResourceFolder } from '@/types'
+import type { ResourceFile, Note, ResourceFolder, QuizContent, QBankQuestion } from '@/types'
 
 const router = useRouter()
 const profileStore = useProfileStore()
@@ -394,24 +421,44 @@ const qbStore = useQuestionBankStore()
 // ==================== Tab ====================
 const activeTab = ref<'resources' | 'notes' | 'questions'>('resources')
 
-// ==================== 搜索 ====================
+// ==================== 搜索（上下文感知：按当前 tab 分发） ====================
 const searchQuery = ref('')
 const searchMode = ref(false)
+const resourceSearchResults = ref<ResourceFile[]>([])
+
+const searchPlaceholder = computed(() => {
+  if (activeTab.value === 'notes') return '搜索笔记...'
+  if (activeTab.value === 'questions') return '搜索题目...'
+  return '搜索资源...'
+})
 
 async function doSearch() {
-  if (!searchQuery.value.trim()) return
-  searchMode.value = true
+  const q = searchQuery.value.trim()
+  if (!q) return
   const courseId = profileStore.activeCourseId
   if (!courseId) return
-  const results = await resourceStore.searchFiles(courseId, searchQuery.value.trim())
-  resourceStore.files = results
-  resourceStore.total = results.length
+  searchMode.value = true
+
+  if (activeTab.value === 'resources') {
+    // 资料走后端全文搜索（size 与列表一致，避免静默截断）
+    resourceSearchResults.value = await resourceStore.searchFiles(courseId, q, 1, 100)
+  } else if (activeTab.value === 'notes') {
+    // 笔记客户端过滤已加载数据；书架视图下先进入全部笔记列表
+    if (noteView.value === 'shelf') enterAllNotes()
+  } else if (activeTab.value === 'questions') {
+    // 题库客户端过滤已加载题目；若有知识点筛选则先清除以保证搜索范围
+    if (qbKpFilter.value) {
+      qbKpFilter.value = undefined
+      await loadQuestions()
+    }
+  }
 }
 
 function clearSearch() {
   searchQuery.value = ''
   searchMode.value = false
-  loadFiles()
+  // 资料搜索结果独立存放，需重新加载当前文件夹列表；笔记/题库为客户端过滤，清空即恢复
+  if (activeTab.value === 'resources') loadFiles()
 }
 
 // ==================== 资料筛选 ====================
@@ -436,9 +483,50 @@ const breadcrumb = computed(() => {
   return folderStore.getBreadcrumb(folderStore.currentFolderId)
 })
 
-// 监听筛选变化重新加载
-watch([typeFilter, confidenceFilter, sortOrder, () => folderStore.currentFolderId], () => {
-  if (!searchMode.value) loadFiles()
+// 搜索模式下资料的展示列表：对搜索结果做客户端二次过滤/排序（后端 search 不支持这些参数）
+const displayedFiles = computed<ResourceFile[]>(() => {
+  if (searchMode.value && activeTab.value === 'resources') {
+    let list = resourceSearchResults.value
+    if (typeFilter.value) list = list.filter(f => f.type === typeFilter.value)
+    if (confidenceFilter.value) list = list.filter(f => f.confidence === confidenceFilter.value)
+    const sorted = [...list]
+    if (sortOrder.value === 'title') {
+      sorted.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'zh-CN'))
+    } else if (sortOrder.value === 'quality') {
+      sorted.sort((a, b) => (b.qualityScore || 0) - (a.qualityScore || 0))
+    } else {
+      sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    }
+    return sorted
+  }
+  return resourceStore.files
+})
+
+// 搜索模式下隐藏子文件夹卡片（搜索为全局范围）
+const displayedSubFolders = computed<ResourceFolder[]>(() => {
+  if (searchMode.value && activeTab.value === 'resources') return []
+  return currentSubFolders.value
+})
+
+// 类型/置信度/排序变化：非搜索模式才请求后端（搜索模式下由 displayedFiles 客户端二次过滤）
+watch([typeFilter, confidenceFilter, sortOrder], () => {
+  if (!searchMode.value && activeTab.value === 'resources') loadFiles()
+})
+
+// 文件夹切换：搜索模式下自动退出搜索并进入目标文件夹
+watch(() => folderStore.currentFolderId, () => {
+  if (searchMode.value) {
+    searchQuery.value = ''
+    searchMode.value = false
+  }
+  if (activeTab.value === 'resources') loadFiles()
+})
+
+// 切换 tab 时重置搜索状态，并按需刷新数据
+watch(activeTab, (tab) => {
+  searchQuery.value = ''
+  searchMode.value = false
+  if (tab === 'questions') loadQuestions()
 })
 
 async function loadFiles() {
@@ -470,7 +558,7 @@ function onLearn(file: ResourceFile) {
     ElMessage.warning('该资源未关联资源包，无法进入学习模式')
     return
   }
-  router.push(`/learn/resource/${file.packId}`)
+  router.push(`/learn/resource/${file.packId}?resourceId=${file.id}`)
 }
 
 // ==================== 文件夹操作 ====================
@@ -607,6 +695,19 @@ const qbPanelRef = ref<InstanceType<typeof QuestionBankPanel> | null>(null)
 const wrongQuestionCount = ref(0)
 let qbKpFilter = ref<string | undefined>()
 
+// 题库搜索：客户端过滤已加载题目（与面板自带的后端筛选叠加）
+const displayedQuestions = computed<QBankQuestion[]>(() => {
+  if (searchMode.value && activeTab.value === 'questions' && searchQuery.value.trim()) {
+    const q = searchQuery.value.trim().toLowerCase()
+    return qbStore.questions.filter(item =>
+      (item.title || '').toLowerCase().includes(q) ||
+      (item.explanation || '').toLowerCase().includes(q) ||
+      (item.kpName || '').toLowerCase().includes(q)
+    )
+  }
+  return qbStore.questions
+})
+
 async function loadQuestions() {
   const courseId = profileStore.activeCourseId
   if (!courseId) return
@@ -656,6 +757,99 @@ function onQbFilterKp(kpId: string) {
 
 function onQbCloseDetail() {
   // no-op
+}
+
+function onStartPractice(questionIds?: string[]) {
+  if (questionIds && questionIds.length > 0) {
+    router.push({
+      path: '/practice',
+      query: { questionIds: questionIds.join(',') },
+    })
+  } else {
+    router.push('/practice')
+  }
+}
+
+// ==================== 练习题加入题库 ====================
+const addingToBankId = ref<string | null>(null)
+
+const QUIZ_TYPE_MAP: Record<string, string> = {
+  SINGLE_CHOICE: 'single_choice',
+  MULTIPLE_CHOICE: 'multiple_choice',
+  TRUE_FALSE: 'true_false',
+  FILL_IN_BLANK: 'fill_blank',
+  SHORT_ANSWER: 'short_answer',
+}
+
+function parseQuizOptions(opts: string[] | null): { label: string; content: string }[] | undefined {
+  if (!opts || opts.length === 0) return undefined
+  const labels = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+  return opts.map((o, i) => {
+    const m = o.match(/^\s*([A-Za-z])\s*[.、)]\s*(.*)$/)
+    if (m) return { label: m[1].toUpperCase(), content: m[2] }
+    return { label: labels[i] || String(i + 1), content: o }
+  })
+}
+
+async function onAddToBank(file: ResourceFile) {
+  if (addingToBankId.value) return
+  const courseId = profileStore.activeCourseId
+  if (!courseId) {
+    ElMessage.warning('请先选择课程')
+    return
+  }
+  addingToBankId.value = file.id
+  try {
+    let content = file.content
+    if (!content) {
+      const detail = await resourceStore.fetchFileDetail(file.id)
+      if (!detail || !detail.content) {
+        ElMessage.warning('该练习题资源暂无可加入的题目')
+        return
+      }
+      content = detail.content
+    }
+    let quiz: QuizContent
+    try {
+      quiz = JSON.parse(content) as QuizContent
+    } catch {
+      ElMessage.error('练习题内容解析失败')
+      return
+    }
+    const questions = quiz.questions || []
+    if (questions.length === 0) {
+      ElMessage.warning('该练习题资源暂无可加入的题目')
+      return
+    }
+    const result = await qbStore.batchCreateFromResource({
+      courseId,
+      sourceItemId: file.id,
+      questions: questions.map(q => ({
+        courseId,
+        sourceItemId: file.id,
+        questionType: QUIZ_TYPE_MAP[q.type] || q.type.toLowerCase(),
+        difficulty: q.difficulty,
+        title: q.content,
+        options: parseQuizOptions(q.options),
+        answer: q.answer,
+        explanation: q.analysis,
+        tags: q.knowledgePoint ? [q.knowledgePoint] : undefined,
+      })),
+    })
+    if (!result) {
+      ElMessage.error('加入题库失败，请稍后重试')
+      return
+    }
+    if (result.skippedCount === 0) {
+      ElMessage.success(`已将 ${result.addedCount} 道题目加入题库`)
+    } else     if (result.addedCount === 0) {
+      ElMessage.info(`${result.skippedCount} 道题目已在题库中`)
+    } else {
+      ElMessage.success(`新增 ${result.addedCount} 道，${result.skippedCount} 道已在题库中`)
+    }
+  } finally {
+    addingToBankId.value = null
+  }
 }
 
 // ==================== 删除/重生成资源 ====================
@@ -798,27 +992,84 @@ function notebookNoteCount(notebookId: string): number {
   return noteStore.notes.filter(n => n.notebookId === notebookId).length
 }
 
-// ==================== 笔记分组（匹配学习界面样式） ====================
-const unkeyed = '📄 文档笔记'
+// ==================== 笔记分组（两层：资源 → 章节） ====================
 const collapsedNoteGroups = ref<Set<string>>(new Set())
 
-const groupedNotes = computed(() => {
-  const map = new Map<string, Note[]>()
-  for (const note of noteStore.notes) {
-    const k = note.sectionTitle || unkeyed
-    if (!map.has(k)) map.set(k, [])
-    map.get(k)!.push(note)
+const RESOURCE_LEVEL_KEY = '__resource_level__'
+const RESOURCE_LEVEL_LABEL = '资源整体笔记'
+const UNTITLED_RESOURCE = '未分类资源'
+
+interface SectionGroup { key: string; title: string; notes: Note[] }
+interface ResourceGroup {
+  key: string
+  title: string
+  sections: SectionGroup[]
+  count: number
+  latest: number
+}
+
+const groupedNotes = computed<ResourceGroup[]>(() => {
+  let sourceNotes = noteStore.notes
+  // 笔记搜索：客户端过滤已加载笔记
+  if (searchMode.value && activeTab.value === 'notes' && searchQuery.value.trim()) {
+    const q = searchQuery.value.trim().toLowerCase()
+    sourceNotes = sourceNotes.filter(n =>
+      (n.content || '').toLowerCase().includes(q) ||
+      (n.selectedText || '').toLowerCase().includes(q) ||
+      (n.sectionTitle || '').toLowerCase().includes(q) ||
+      (n.resourceTitle || '').toLowerCase().includes(q)
+    )
   }
-  const ordered: [string, Note[]][] = []
-  for (const [key, group] of [...map.entries()].sort(([a], [b]) =>
-    a === unkeyed ? 1 : b === unkeyed ? -1 : a.localeCompare(b, 'zh-CN')
-  )) {
-    ordered.push([key, group.sort((a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )])
+
+  const resourceMap = new Map<string, ResourceGroup>()
+  for (const note of sourceNotes) {
+    const resKey = note.resourcePackId || `t::${note.resourceTitle || UNTITLED_RESOURCE}`
+    const resTitle = note.resourceTitle || UNTITLED_RESOURCE
+    if (!resourceMap.has(resKey)) {
+      resourceMap.set(resKey, { key: resKey, title: resTitle, sections: [], count: 0, latest: 0 })
+    }
+    const res = resourceMap.get(resKey)!
+    res.count++
+    const t = new Date(note.createdAt).getTime()
+    if (t > res.latest) res.latest = t
+
+    const secKey = note.sectionTitle || RESOURCE_LEVEL_KEY
+    let sec = res.sections.find(s => s.key === secKey)
+    if (!sec) {
+      sec = {
+        key: secKey,
+        title: secKey === RESOURCE_LEVEL_KEY ? RESOURCE_LEVEL_LABEL : secKey,
+        notes: [],
+      }
+      res.sections.push(sec)
+    }
+    sec.notes.push(note)
   }
-  return ordered.map(([key, notes]) => ({ key, notes }))
+
+  // 章节排序：资源级笔记置末，其余按标题排序
+  for (const res of resourceMap.values()) {
+    res.sections.sort((a, b) => {
+      if (a.key === RESOURCE_LEVEL_KEY) return 1
+      if (b.key === RESOURCE_LEVEL_KEY) return -1
+      return a.title.localeCompare(b.title, 'zh-CN')
+    })
+    for (const sec of res.sections) {
+      sec.notes.sort((a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )
+    }
+  }
+
+  // 资源排序：最近笔记时间倒序
+  return [...resourceMap.values()].sort((a, b) => b.latest - a.latest)
 })
+
+function resCollapseKey(resKey: string) {
+  return `res::${resKey}`
+}
+function secCollapseKey(resKey: string, secKey: string) {
+  return `sec::${resKey}::${secKey}`
+}
 
 function toggleNoteGroup(key: string) {
   if (collapsedNoteGroups.value.has(key)) {
@@ -939,6 +1190,11 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.library-toolbar__search-hint {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lt-brand);
 }
 
 /* Note list toolbar */
@@ -1316,22 +1572,39 @@ onMounted(async () => {
   100% { background-position: -200% 0; }
 }
 .note-list { padding: 8px 0; }
+
+/* 资源级分组头（一级） */
+.note-resource-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 11px 16px 9px; cursor: pointer;
+  font-size: 15px; color: var(--lt-text-primary); font-weight: 700;
+  transition: background 0.15s;
+  background: var(--lt-bg-card);
+  border-bottom: 1px solid var(--lt-border);
+}
+.note-resource-header:hover { background: var(--lt-bg-page); }
+.note-resource-title {
+  flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.note-resource-body { padding: 6px 0 10px; }
+
 .note-group-header {
-  display: flex; align-items: center; gap: 4px;
-  padding: 6px 16px; cursor: pointer;
-  font-size: 12px; color: var(--lt-text-secondary); font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px 8px 32px; cursor: pointer;
+  font-size: 14px; color: var(--lt-text-secondary); font-weight: 600;
   transition: background 0.15s;
 }
 .note-group-header:hover { background: var(--lt-bg-page); }
-.note-group-arrow { transition: transform 0.2s; font-size: 10px; }
+.note-group-arrow { transition: transform 0.2s; font-size: 12px; color: var(--lt-text-placeholder); }
 .note-group-arrow.collapsed { transform: rotate(0deg); }
 .note-group-arrow:not(.collapsed) { transform: rotate(90deg); }
 .note-group-title { flex: 1; }
 .note-group-count {
-  font-size: 11px; color: var(--lt-text-placeholder);
-  background: var(--lt-bg-page); padding: 1px 6px; border-radius: 8px;
+  font-size: 12px; color: var(--lt-text-placeholder);
+  background: var(--lt-bg-page); padding: 2px 8px; border-radius: 10px;
 }
-.note-group-body { margin: 0; }
+.note-group-body { margin: 0; padding: 0 0 4px; }
 
 /* Note list animations */
 .note-list-anim-enter-active, .note-list-anim-leave-active {

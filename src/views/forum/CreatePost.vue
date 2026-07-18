@@ -9,6 +9,7 @@ import ForumTagChips from '@/components/forum/ForumTagChips.vue'
 import ResourcePicker from '@/components/forum/ResourcePicker.vue'
 import ResourceCardEmbed from '@/components/forum/ResourceCardEmbed.vue'
 import { ArrowLeft, Plus } from '@element-plus/icons-vue'
+import { isMobile } from '@/utils/device'
 import type { ForumResource } from '@/types/forum'
 
 const router = useRouter()
@@ -27,6 +28,7 @@ const form = reactive({
 
 const submitting = ref(false)
 const showResourcePicker = ref(false)
+const drawerSize = isMobile() ? '100%' : '400px'
 
 onMounted(() => {
   store.fetchTags()
@@ -119,7 +121,7 @@ async function handleSubmit() {
               <div v-if="form.resourceItemIds.length > 0" class="grid gap-3 mt-3" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));">
                 <ResourceCardEmbed
                   v-for="resourceId in form.resourceItemIds" :key="resourceId"
-                  :resource="{ id: resourceId, resourceItemId: resourceId, title: '已选资源', type: 'document', summary: '' }"
+                  :resource="{ id: resourceId, resourceItemId: resourceId, packId: '', title: '已选资源', type: 'document', summary: '' }"
                 />
               </div>
             </div>
@@ -141,7 +143,7 @@ async function handleSubmit() {
     <el-drawer
       v-model="showResourcePicker"
       title="选择关联资源"
-      size="400px"
+      :size="drawerSize"
       :with-header="false"
     >
       <ResourcePicker
@@ -158,5 +160,39 @@ async function handleSubmit() {
 }
 .form-card {
   background: var(--lt-bg-card);
+}
+
+@media (max-width: 768px) {
+  .create-post-page {
+    padding: 12px 16px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  .form-card {
+    padding: 12px;
+    border-radius: var(--lt-radius-lg);
+  }
+  .form-card :deep(.el-form-item__label) {
+    font-size: 14px;
+    padding-bottom: 4px;
+  }
+  .form-card :deep(.el-input__wrapper),
+  .form-card :deep(.el-textarea__inner) {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .form-card :deep(.el-select .el-input__wrapper) {
+    min-height: 44px;
+  }
+  .form-card :deep(.el-button) {
+    min-height: 44px;
+  }
+  .form-card :deep(.el-form-item:last-child .el-form-item__content) > div {
+    flex-direction: column-reverse !important;
+    gap: 8px !important;
+  }
+  .form-card :deep(.el-form-item:last-child .el-button) {
+    width: 100%;
+    margin-left: 0 !important;
+  }
 }
 </style>

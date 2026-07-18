@@ -10,6 +10,8 @@ const props = defineProps<{
   speed: PlaybackSpeed
   hasPrev: boolean
   hasNext: boolean
+  isFullscreen: boolean
+  interactivePaused?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -46,7 +48,7 @@ function closeSpeedMenu() {
           <polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/>
         </svg>
       </button>
-      <button class="ctrl-btn ctrl-play" @click="emit('toggle-play')" :title="isPlaying ? '暂停 (Space)' : '播放 (Space)'">
+      <button class="ctrl-btn ctrl-play" @click="emit('toggle-play')" :title="interactivePaused ? '继续播放 (Space)' : (isPlaying ? '暂停 (Space)' : '播放 (Space)')">
         <svg v-if="isPlaying" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none">
           <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
         </svg>
@@ -95,8 +97,11 @@ function closeSpeedMenu() {
           </button>
         </div>
       </div>
-      <button class="ctrl-btn" @click="emit('fullscreen')" title="全屏 (F)">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button class="ctrl-btn" @click="emit('fullscreen')" :title="isFullscreen ? '退出全屏 (F)' : '全屏 (F)'">
+        <svg v-if="isFullscreen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+        <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
         </svg>
       </button>
@@ -201,7 +206,7 @@ function closeSpeedMenu() {
 
 .speed-menu {
   position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: 100%;  /* 紧贴按钮顶部，无间隙 */
   left: 50%;
   transform: translateX(-50%);
   background: rgba(30, 30, 40, 0.96);

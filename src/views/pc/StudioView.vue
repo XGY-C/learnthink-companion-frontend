@@ -127,24 +127,38 @@
               </div>
             </div>
             <div class="tc-traces">
-              <div v-for="trace in filteredTraces" :key="trace.traceId" class="trace-card" :style="{ borderLeftColor: AGENT_COLORS[trace.agentName] || '#2B6FFF' }">
+              <div v-for="trace in filteredTraces" :key="trace.traceId"
+                class="trace-card"
+                :class="traceCardClass(trace)"
+                :style="{ borderLeftColor: AGENT_COLORS[trace.agentName] || '#2B6FFF' }">
                 <div class="trace-header">
                   <span class="trace-agent" :style="{ color: AGENT_COLORS[trace.agentName] || 'var(--lt-text-primary)' }">{{ trace.agentName }}</span>
-                  <span class="trace-phase">{{ trace.phase }}</span>
+                  <span v-if="trace.pipelineStage" class="trace-stage-badge">
+                    {{ pipelineStageLabel(trace.pipelineStage) }}
+                  </span>
                   <span class="trace-time">{{ formatTime(trace.timestamp) }}</span>
                   <span v-if="trace.inResponseTo" class="trace-link">← {{ trace.inResponseTo.slice(0, 8) }}</span>
                 </div>
-                <div v-if="stream.showAllThoughts.value && trace.observation" class="trace-bubble trace-obs">
+                <div v-if="trace.context" class="trace-context">{{ trace.context }}</div>
+                <div v-if="trace.observation" class="trace-bubble trace-obs">
                   <span class="bubble-label">观察到</span>
                   <span class="bubble-text">{{ trace.observation }}</span>
                 </div>
-                <div v-if="stream.showAllThoughts.value && trace.thought" class="trace-bubble trace-think">
+                <div v-if="trace.thought" class="trace-bubble trace-think">
                   <span class="bubble-label">思考</span>
-                  <span class="bubble-text">{{ trace.thought }}</span>
+                  <span class="bubble-text"
+                    :class="{ 'trace-collapsed': isLongThought(trace.thought) && !expandedTraces.has(trace.traceId) }">
+                    {{ trace.thought }}
+                  </span>
+                  <button v-if="isLongThought(trace.thought)"
+                    class="trace-expand-btn"
+                    @click="toggleTraceExpand(trace.traceId)">
+                    {{ expandedTraces.has(trace.traceId) ? '收起' : '展开完整推理' }}
+                  </button>
                 </div>
                 <div v-if="trace.decision" class="trace-bubble trace-decision">
                   <span class="bubble-label">决定</span>
-                  <span class="bubble-text">{{ trace.decision }}</span>
+                  <span class="bubble-text">{{ decisionLabel(trace.decision) }}</span>
                 </div>
               </div>
               <div v-if="filteredTraces.length === 0" class="tc-empty">
@@ -189,7 +203,7 @@
               <template v-if="currentPreview.type === 'code'">
                 <el-button size="small" @click="downloadResource(currentPreview)">下载 .py</el-button>
               </template>
-              <el-dropdown v-else-if="currentPreview.type === 'doc' || currentPreview.type === 'reading'" size="small" @command="(cmd: string) => cmd === 'docx' ? downloadResource(currentPreview) : downloadMdResource(currentPreview)">
+              <el-dropdown v-else-if="currentPreview.type === 'doc' || currentPreview.type === 'reading' || currentPreview.type === 'quiz'" size="small" @command="onDownloadPreview">
                 <el-button size="small" type="primary">
                   下载 <el-icon class="ml-1"><ArrowDown /></el-icon>
                 </el-button>
@@ -197,6 +211,17 @@
                   <el-dropdown-menu>
                     <el-dropdown-item command="docx">下载 DOCX</el-dropdown-item>
                     <el-dropdown-item command="md">下载 Markdown</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <el-dropdown v-else-if="currentPreview.type === 'html'" size="small" @command="onHtmlDownloadPreview">
+                <el-button size="small" type="primary">
+                  下载 <el-icon class="ml-1"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="html">下载 HTML</el-dropdown-item>
+                    <el-dropdown-item command="print">打印 / 导出 PDF</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -236,6 +261,9 @@
               <span>视频正在生成或 URL 暂不可用</span>
             </div>
           </div>
+          <div v-else-if="currentPreview.type === 'html'">
+            <HtmlSandboxViewer :content="currentPreview.deepContent || currentPreview.brief || ''" :title="currentPreview.title" />
+          </div>
           <div v-else class="flex-1 min-h-0">
             <MarkdownViewer :content="currentPreview.deepContent || currentPreview.brief || '暂无内容'" :showToc="true" />
           </div>
@@ -268,9 +296,70 @@ import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
 import QuizPreview from '@/components/QuizPreview.vue'
 import CodeLearningViewer from '@/components/code/CodeLearningViewer.vue'
+import HtmlSandboxViewer from '@/components/HtmlSandboxViewer.vue'
+import type { AgentThinkingTrace } from '@/types'
 import { useTaskStream, typeLabel } from '@/composables/useTaskStream'
+
+// ── Trace expand/collapse ──
+const expandedTraces = ref(new Set<string>())
+
+function isLongThought(text: string): boolean {
+  return text.length > 200
+}
+
+function toggleTraceExpand(traceId: string) {
+  if (expandedTraces.value.has(traceId)) {
+    expandedTraces.value.delete(traceId)
+  } else {
+    expandedTraces.value.add(traceId)
+  }
+}
+
+function pipelineStageLabel(stage: string): string {
+  const map: Record<string, string> = {
+    PROFILING: '画像分析',
+    RETRIEVING: '证据检索',
+    PLANNING: '资源规划',
+    GENERATING: '资源生成',
+    REVIEWING: '内容审校',
+    ILLUSTRATING: '配图',
+    PUBLISHING: '发布',
+  }
+  return map[stage] || stage
+}
+
+function decisionLabel(decision: string): string {
+  const map: Record<string, string> = {
+    RETRIEVE: '开始检索额外证据',
+    RETRIEVE_DONE: '检索完成',
+    ITERATION: '进入新一轮迭代',
+    SELF_REVIEW_PASS: '自审通过',
+    SELF_REVISE: '自审不通过，开始修订',
+    FACT_CHECK_ISSUES: '事实核查发现问题',
+    COMPLETE: '生成完成',
+    PUBLISH: '批准发布',
+    RETRY: '打回重做',
+    REJECT_PERMANENT: '永久拒绝',
+    TIMEOUT: '生成超时',
+    MULTI_HOP: '多跳检索',
+    LOW_CONFIDENCE: '证据不足',
+    delegate: '分发到子生成器',
+    plan_created: '规划完成',
+    ERROR: '执行出错',
+  }
+  return map[decision] || decision
+}
+
+function traceCardClass(trace: AgentThinkingTrace): string {
+  if (trace.thought && !trace.observation && !trace.decision) return 'trace-type-think'
+  if (trace.decision && !trace.thought) return 'trace-type-decision'
+  if (trace.decision && trace.thought) return 'trace-type-full'
+  return ''
+}
 import { markdownToDocxBlob, downloadDocx, preprocessLatexForMarkdown } from '@/utils/docxExport'
+import { quizToMarkdown } from '@/utils/quizExport'
 import { extractVideoUrl } from '@/utils/media'
+import { downloadHtml, printHtml } from '@/utils/htmlExport'
 
 const route = useRoute()
 const stream = useTaskStream()
@@ -383,6 +472,47 @@ function downloadMdResource(res: any) {
   a.href = URL.createObjectURL(blob)
   a.download = `${res.title || 'resource'}.md`
   a.click()
+}
+
+function onDownloadPreview(cmd: string) {
+  const res = currentPreview.value
+  if (!res) return
+  if (res.type === 'quiz') {
+    downloadQuizResource(res, cmd)
+  } else if (cmd === 'docx') {
+    downloadResource(res)
+  } else {
+    downloadMdResource(res)
+  }
+}
+
+function onHtmlDownloadPreview(cmd: string) {
+  const res = currentPreview.value
+  if (!res) return
+  const raw = res.deepContent || res.brief || ''
+  if (cmd === 'html') {
+    downloadHtml(raw, res.title || 'resource')
+  } else if (cmd === 'print') {
+    printHtml(raw)
+  }
+}
+
+async function downloadQuizResource(res: any, format: string) {
+  const md = quizToMarkdown(res.deepContent || res.brief || '', res.title)
+  if (!md) {
+    ElMessage.warning('题目内容解析失败，无法导出')
+    return
+  }
+  if (format === 'md') {
+    const blob = new Blob([preprocessLatexForMarkdown(md)], { type: 'text/markdown;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${res.title || 'resource'}.md`
+    a.click()
+  } else {
+    const blob = await markdownToDocxBlob(md, res.title)
+    downloadDocx(blob, res.title || 'resource')
+  }
 }
 
 function previewResource(res: any) {
@@ -548,19 +678,53 @@ onUnmounted(() => {
   margin-bottom: 6px; flex-wrap: wrap;
 }
 .trace-agent { font-weight: 600; font-size: 12px; color: var(--lt-text-primary); }
-.trace-phase {
-  font-size: 10px; padding: 0 6px; border-radius: 4px;
-  background-color: #E8ECF0; color: var(--lt-text-auxiliary);
-  font-weight: 500;
-}
 .trace-time { font-size: 10px; color: var(--lt-text-placeholder); margin-left: auto; }
 .trace-link { font-size: 10px; color: var(--lt-brand); }
+.trace-stage-badge {
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--lt-brand-lightest);
+  color: var(--lt-brand);
+  font-weight: 500;
+}
+.trace-context {
+  font-size: 11px;
+  color: var(--lt-text-auxiliary);
+  background: var(--lt-bg-page);
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-style: italic;
+}
 .trace-bubble { margin-top: 4px; padding: 6px 8px; border-radius: 6px; display: flex; flex-direction: column; gap: 2px; }
 .trace-obs { background-color: rgba(43, 111, 255, 0.08); border-left: 2px solid rgba(43, 111, 255, 0.35); }
-.trace-think { background-color: rgba(180, 83, 9, 0.08); border-left: 2px solid rgba(180, 83, 9, 0.3); }
+.trace-think { background-color: rgba(124, 92, 252, 0.08); border-left: 2px solid rgba(124, 92, 252, 0.35); }
 .trace-decision { background-color: rgba(22, 101, 52, 0.08); border-left: 2px solid rgba(22, 101, 52, 0.35); }
 .bubble-label { font-weight: 600; font-size: 10px; opacity: 0.75; }
 .bubble-text { color: var(--lt-text-secondary); line-height: 1.5; }
+.trace-collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.trace-expand-btn {
+  font-size: 10px;
+  color: var(--lt-brand);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+  margin-top: 2px;
+}
+.trace-expand-btn:hover {
+  text-decoration: underline;
+}
+.trace-type-think {
+  border-left-color: var(--lt-ai) !important;
+  background: rgba(124, 92, 252, 0.03);
+}
 
 /* ── Orbit icon ── */
 .orbit-container {

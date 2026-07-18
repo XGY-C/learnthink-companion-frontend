@@ -264,30 +264,32 @@ const SVG_THEME_CSS = [
   'text.th{font-weight:500}',
   'text.ts{font-size:12px;fill:#6b7280}',
   '.box{fill:#ffffff;stroke:#d1d5db;stroke-width:.5}',
-  '.arr{stroke:#6b7280;stroke-width:1.5;fill:none!important}',
-  '.leader{stroke:#9ca3af;stroke-width:.5;stroke-dasharray:3 3;fill:none!important}',
-  '.c-gray rect,.c-gray circle,.c-gray ellipse,.c-gray polygon,.c-gray path,.c-gray line{fill:#f1efe8;stroke:#5f5e5a}',
+  '.arr{stroke:#6b7280;stroke-width:1.5;fill:none!important;color:#6b7280}',
+  '.leader{stroke:#9ca3af;stroke-width:.5;stroke-dasharray:3 3;fill:none!important;color:#9ca3af}',
+  '.c-gray rect,.c-gray circle,.c-gray ellipse,.c-gray polygon,.c-gray path,.c-gray line{fill:#f1efe8;stroke:#5f5e5a;color:#5f5e5a}',
   '.c-gray text{fill:#2c2c2a}',
-  '.c-blue rect,.c-blue circle,.c-blue ellipse,.c-blue polygon,.c-blue path,.c-blue line{fill:#e6f1fb;stroke:#185fa5}',
+  '.c-blue rect,.c-blue circle,.c-blue ellipse,.c-blue polygon,.c-blue path,.c-blue line{fill:#e6f1fb;stroke:#185fa5;color:#185fa5}',
   '.c-blue text{fill:#0c447c}',
-  '.c-teal rect,.c-teal circle,.c-teal ellipse,.c-teal polygon,.c-teal path,.c-teal line{fill:#e1f5ee;stroke:#0f6e56}',
+  '.c-teal rect,.c-teal circle,.c-teal ellipse,.c-teal polygon,.c-teal path,.c-teal line{fill:#e1f5ee;stroke:#0f6e56;color:#0f6e56}',
   '.c-teal text{fill:#085041}',
-  '.c-coral rect,.c-coral circle,.c-coral ellipse,.c-coral polygon,.c-coral path,.c-coral line{fill:#faece7;stroke:#993c1d}',
+  '.c-coral rect,.c-coral circle,.c-coral ellipse,.c-coral polygon,.c-coral path,.c-coral line{fill:#faece7;stroke:#993c1d;color:#993c1d}',
   '.c-coral text{fill:#712b13}',
-  '.c-pink rect,.c-pink circle,.c-pink ellipse,.c-pink polygon,.c-pink path,.c-pink line{fill:#fbeaf0;stroke:#993556}',
+  '.c-pink rect,.c-pink circle,.c-pink ellipse,.c-pink polygon,.c-pink path,.c-pink line{fill:#fbeaf0;stroke:#993556;color:#993556}',
   '.c-pink text{fill:#72243e}',
-  '.c-purple rect,.c-purple circle,.c-purple ellipse,.c-purple polygon,.c-purple path,.c-purple line{fill:#eeedfe;stroke:#534ab7}',
+  '.c-purple rect,.c-purple circle,.c-purple ellipse,.c-purple polygon,.c-purple path,.c-purple line{fill:#eeedfe;stroke:#534ab7;color:#534ab7}',
   '.c-purple text{fill:#3c3489}',
-  '.c-green rect,.c-green circle,.c-green ellipse,.c-green polygon,.c-green path,.c-green line{fill:#eaf3de;stroke:#3b6d11}',
+  '.c-green rect,.c-green circle,.c-green ellipse,.c-green polygon,.c-green path,.c-green line{fill:#eaf3de;stroke:#3b6d11;color:#3b6d11}',
   '.c-green text{fill:#27500a}',
-  '.c-amber rect,.c-amber circle,.c-amber ellipse,.c-amber polygon,.c-amber path,.c-amber line{fill:#faeeda;stroke:#854f0b}',
+  '.c-amber rect,.c-amber circle,.c-amber ellipse,.c-amber polygon,.c-amber path,.c-amber line{fill:#faeeda;stroke:#854f0b;color:#854f0b}',
   '.c-amber text{fill:#633806}',
-  '.c-red rect,.c-red circle,.c-red ellipse,.c-red polygon,.c-red path,.c-red line{fill:#fcebeb;stroke:#a32d2d}',
+  '.c-red rect,.c-red circle,.c-red ellipse,.c-red polygon,.c-red path,.c-red line{fill:#fcebeb;stroke:#a32d2d;color:#a32d2d}',
   '.c-red text{fill:#791f1f}',
 ].join('')
 
 /** 向 SVG 注入项目主题 CSS，使 Canvas 渲染时正确显示样式 */
 function injectSvgTheme(svg: string): string {
+  // 将 context-stroke（SVG 2 草案，非浏览器渲染器不支持）替换为 currentColor
+  svg = svg.replace(/stroke="context-stroke"/g, 'stroke="currentColor"')
   // 检查 SVG 中是否使用了 c- 色板类且尚未注入样式
   if (/\bc-(gray|blue|teal|coral|pink|purple|green|amber|red)\b/i.test(svg) && !/<style>/i.test(svg)) {
     const m = svg.match(/<svg[\s\S]*?>/i)

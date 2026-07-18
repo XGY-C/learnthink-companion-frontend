@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { User, Lock, Timer, Document, Medal, SwitchButton, DataAnalysis } from '@element-plus/icons-vue'
+import { User, Lock, Timer, Document, Medal, SwitchButton, DataAnalysis, ChatDotSquare } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useProfileStore } from '@/stores/profile'
 import { useAuth } from '@/composables/useAuth'
@@ -10,6 +10,7 @@ import type { LearningStats } from '@/types'
 import ProfileInfoTab from './profile/ProfileInfoTab.vue'
 import SecurityTab from './profile/SecurityTab.vue'
 import LearningProfileTab from './profile/LearningProfileTab.vue'
+import ForumActivityTab from './profile/ForumActivityTab.vue'
 
 const userStore = useUserStore()
 const profileStore = useProfileStore()
@@ -160,11 +161,13 @@ onUnmounted(() => {
           <el-tabs v-model="activeTab" class="profile-tabs-horizontal">
             <el-tab-pane name="info" label="个人信息" />
             <el-tab-pane name="learning_profile" label="学习画像" />
+            <el-tab-pane name="forum_activity" label="我的论坛" />
             <el-tab-pane name="security" label="账号安全" />
           </el-tabs>
           <div class="p-4">
             <ProfileInfoTab v-if="activeTab === 'info'" />
             <LearningProfileTab v-else-if="activeTab === 'learning_profile'" />
+            <ForumActivityTab v-else-if="activeTab === 'forum_activity'" />
             <SecurityTab v-else-if="activeTab === 'security'" />
           </div>
         </template>
@@ -195,6 +198,14 @@ onUnmounted(() => {
                     </span>
                   </template>
                 </el-tab-pane>
+                <el-tab-pane name="forum_activity">
+                  <template #label>
+                    <span class="flex items-center gap-2">
+                      <el-icon :size="16"><ChatDotSquare /></el-icon>
+                      我的论坛
+                    </span>
+                  </template>
+                </el-tab-pane>
                 <el-tab-pane name="security">
                   <template #label>
                     <span class="flex items-center gap-2">
@@ -209,6 +220,7 @@ onUnmounted(() => {
             <div class="flex-1 min-w-0 p-6">
               <ProfileInfoTab v-if="activeTab === 'info'" />
               <LearningProfileTab v-else-if="activeTab === 'learning_profile'" />
+              <ForumActivityTab v-else-if="activeTab === 'forum_activity'" />
               <SecurityTab v-else-if="activeTab === 'security'" />
             </div>
           </div>

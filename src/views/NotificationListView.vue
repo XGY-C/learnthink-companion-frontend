@@ -6,7 +6,7 @@ import { usePushStore } from '@/stores/push'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Bell, Check, Delete, Right, Refresh,
-  Reading, Aim, Promotion, Document as DocIcon, CircleCheck, EditPen, MagicStick, InfoFilled
+  Reading, Aim, Promotion, Document as DocIcon, CircleCheck, EditPen, MagicStick, InfoFilled, Sunny
 } from '@element-plus/icons-vue'
 import type { AppNotification } from '@/types'
 import type { Component } from 'vue'
@@ -28,6 +28,7 @@ const typeConfig: Record<string, { icon: Component; label: string; color: string
   review_flag: { icon: CircleCheck, label: '审核完成', color: 'var(--lt-success)', bg: 'rgba(52,199,89,0.08)' },
   profile_updated: { icon: EditPen, label: '画像更新', color: 'var(--lt-ai)', bg: 'rgba(124,92,252,0.08)' },
   task_done: { icon: MagicStick, label: '任务完成', color: 'var(--lt-warning)', bg: 'rgba(255,159,10,0.08)' },
+  daily_recommendation: { icon: Sunny, label: '每日推荐', color: 'var(--lt-orange)', bg: 'rgba(255,140,66,0.08)' },
 }
 
 function getTypeIcon(type: string): Component {
@@ -119,7 +120,7 @@ function handleClick(notif: AppNotification) {
     handleMarkRead(notif.id)
   }
   if (notif.refType === 'daily') {
-    router.push('/dashboard?focus=recommendations')
+    router.push({ name: 'dashboard', query: { focus: 'recommendations' } })
   } else if (notif.refId) {
     if (notif.refType === 'pack') {
       router.push(`/library?packId=${notif.refId}`)
@@ -363,9 +364,8 @@ onMounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));
-  color: #fff;
-  box-shadow: 0 4px 12px var(--lt-shadow-blue);
+  background: rgba(43, 111, 255, 0.08);
+  color: var(--lt-brand);
 }
 .notif-subtitle {
   font-size: 0.8125rem;
@@ -577,16 +577,17 @@ onMounted(() => {
   }
 }
 
-/* 未读指示条 */
+/* 未读红点 */
 .notif-unread-bar {
   position: absolute;
-  left: 0;
+  left: 6px;
   top: 50%;
   transform: translateY(-50%);
-  width: 3px;
-  height: 60%;
-  border-radius: 0 3px 3px 0;
-  background: var(--lt-brand);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lt-danger, #F56C6C);
+  z-index: 1;
 }
 
 /* 类型图标 */

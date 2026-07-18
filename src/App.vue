@@ -9,7 +9,7 @@ const router = useRouter()
 async function handleNotificationClick(item: NotificationItem) {
   notification.remove(item.id)
   if (item.dailyRefType === 'daily') {
-    router.push('/dashboard?focus=recommendations')
+    router.push({ name: 'dashboard', query: { focus: 'recommendations' } })
   } else if (item.taskId) {
     router.push(`/studio/${item.taskId}`)
   } else if (item.packId) {

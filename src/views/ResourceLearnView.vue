@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
 import { useNoteStore } from '@/stores/note'
@@ -7,10 +7,12 @@ import { useNotebookStore } from '@/stores/notebook'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
 import CodeLearningViewer from '@/components/code/CodeLearningViewer.vue'
+import HtmlSandboxViewer from '@/components/HtmlSandboxViewer.vue'
 import ResourceNavigator from '@/components/ResourceNavigator.vue'
 import StepCompleteZone from '@/components/learn/StepCompleteZone.vue'
 import ActivityCelebration from '@/components/learn/ActivityCelebration.vue'
-import QuizPreview from '@/components/QuizPreview.vue'
+import QuizPlayer from '@/components/learn/QuizPlayer.vue'
+import type { PlayerQuestion, PlayerResult } from '@/types'
 import type { NavItem } from '@/components/ResourceNavigator.vue'
 import { ArrowLeft, Clock, List, EditPen } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -328,6 +330,16 @@ const resourceStepState = ref<Map<number, ResourceStepState>>(new Map())
 const resourceTimeSpent = ref<Map<number, number>>(new Map())
 let currentResourceStartTime: number = 0
 
+// ===== Quiz state =====
+const quizAnswers = ref<Record<string, string>>({})
+const quizCurrentQ = ref(0)
+const quizPhase = ref<'answering' | 'submitting' | 'result' | 'review'>('answering')
+const quizTimerSeconds = ref(0)
+let quizTimerInterval: ReturnType<typeof setInterval> | null = null
+const markedQuestions = ref<Set<number>>(new Set())
+const fullWidth = ref(localStorage.getItem('lt-quiz-fullwidth') === 'true')
+watch(fullWidth, (v) => localStorage.setItem('lt-quiz-fullwidth', String(v)))
+
 // ===== Celebration =====
 const celebrationVisible = ref(false)
 
@@ -432,17 +444,61 @@ const remainingMin = computed(() => {
   return Math.max(0, total - spent)
 })
 
+// ===== PlayerQuestion adapter =====
+
+const playerQuestions = computed<PlayerQuestion[]>(() => {
+  const questions = currentResource.value?.questions || []
+  return questions.map((q: any, i: number) => ({
+    id: String(q.id ?? i),
+    type: q.type || 'SINGLE_CHOICE',
+    content: q.content || q.stem || '',
+    options: q.options || [],
+    answer: q.answer || '',
+    analysis: q.analysis || '',
+    difficulty: q.difficulty || 3,
+    knowledgeTags: q.knowledgePoint ? [q.knowledgePoint] : (q.tags?.knowledge || []),
+    mistakeTags: q.tags?.mistakes || [],
+  }))
+})
+
+function isQuizAnswerCorrect(q: PlayerQuestion, userAnswer: string): boolean {
+  if (!userAnswer || !q.answer) return false
+  const correct = q.answer.trim().toUpperCase()
+  const user = userAnswer.trim().toUpperCase()
+  return correct === user
+}
+
+const playerResult = computed<PlayerResult | null>(() => {
+  const questions = playerQuestions.value
+  if (questions.length === 0) return null
+  if (quizPhase.value !== 'result' && quizPhase.value !== 'review') return null
+  let correctCount = 0
+  const questionResults = questions.map(q => {
+    const userAnswer = quizAnswers.value[q.id] || ''
+    const correct = isQuizAnswerCorrect(q, userAnswer)
+    if (correct) correctCount++
+    return { questionId: q.id, result: (correct ? 'correct' : 'wrong') as 'correct' | 'wrong' | 'partial' }
+  })
+  return {
+    score: correctCount / questions.length,
+    totalCount: questions.length,
+    correctCount,
+    durationSeconds: quizTimerSeconds.value,
+    questionResults,
+  }
+})
+
 // ===== Resource type helpers =====
 const TYPE_ICONS: Record<string, string> = {
   doc: '\uD83D\uDCC4', reading: '\uD83D\uDCD6', mindmap: '\uD83E\uDDE0',
-  video: '\uD83C\uDFAC', code: '\uD83D\uDCBB', quiz: '\uD83D\uDCDD',
+  video: '\uD83C\uDFAC', code: '\uD83D\uDCBB', quiz: '\uD83D\uDCDD', html: '\uD83C\uDF10',
 }
 const TYPE_LABELS: Record<string, string> = {
-  doc: '文档', reading: '阅读', mindmap: '思维导图', video: '视频', code: '代码', quiz: '测验',
+  doc: '文档', reading: '阅读', mindmap: '思维导图', video: '视频', code: '代码', quiz: '测验', html: '交互文档',
 }
 const RESOURCE_ACCENT_COLORS: Record<string, string> = {
   doc: '#2B6FF', reading: '#34C759', mindmap: '#7C5CFC',
-  video: '#FF3B30', code: '#5A5A72', quiz: '#FF8C42',
+  video: '#FF3B30', code: '#5A5A72', quiz: '#FF8C42', html: '#7C5CFC',
 }
 
 function typeIcon(type: string): string { return TYPE_ICONS[type] || '\uD83D\uDCC4' }
@@ -530,6 +586,11 @@ async function goToResource(idx: number) {
     resourceStepState.value.set(idx, 'active')
   }
   currentResourceStartTime = Date.now()
+  if (loadedResources.value[idx]?.type === 'quiz') {
+    if (resourceStepState.value.get(idx) !== 'completed') resetQuizState()
+  } else {
+    stopQuizTimer()
+  }
   nextTick(() => {
     scrollContentToTop()
     transitionGuard.value = false
@@ -566,6 +627,11 @@ async function advanceToNext() {
   resourceStepState.value.set(next, 'active')
   currentResourceStartTime = Date.now()
   contentScrollProgress.value = 0
+  if (loadedResources.value[next]?.type === 'quiz') {
+    if (resourceStepState.value.get(next) !== 'completed') resetQuizState()
+  } else {
+    stopQuizTimer()
+  }
   nextTick(() => {
     scrollContentToTop()
     transitionGuard.value = false
@@ -660,6 +726,71 @@ function onQuizDone() {
   resourceStepState.value.set(activeResIndex.value, 'completing')
 }
 
+// ===== Quiz handlers =====
+function handleSelectAnswer(questionId: string, answer: string) {
+  quizAnswers.value[questionId] = answer
+  const q = playerQuestions.value.find(x => x.id === questionId)
+  if (q && q.type !== 'FILL_IN_BLANK' && q.type !== 'SHORT_ANSWER' && q.type !== 'MULTIPLE_CHOICE') {
+    const nextIdx = quizCurrentQ.value + 1
+    if (nextIdx < playerQuestions.value.length) {
+      setTimeout(() => { quizCurrentQ.value = nextIdx }, 250)
+    }
+  }
+}
+
+function startQuizTimer() {
+  stopQuizTimer()
+  quizTimerSeconds.value = 0
+  quizTimerInterval = setInterval(() => { quizTimerSeconds.value++ }, 1000)
+}
+
+function stopQuizTimer() {
+  if (quizTimerInterval) {
+    clearInterval(quizTimerInterval)
+    quizTimerInterval = null
+  }
+}
+
+function handleQuizSubmit() {
+  quizPhase.value = 'submitting'
+  stopQuizTimer()
+  setTimeout(() => {
+    quizPhase.value = 'result'
+  }, 600)
+}
+
+function handleQuizRetry() {
+  quizAnswers.value = {}
+  quizCurrentQ.value = 0
+  quizPhase.value = 'answering'
+  startQuizTimer()
+}
+
+function handleQuizReview() {
+  quizPhase.value = 'review'
+  quizCurrentQ.value = 0
+}
+
+function handleQuizComplete() {
+  onQuizDone()
+}
+
+function handleToggleMark(index: number) {
+  if (markedQuestions.value.has(index)) {
+    markedQuestions.value.delete(index)
+  } else {
+    markedQuestions.value.add(index)
+  }
+}
+
+function resetQuizState() {
+  quizAnswers.value = {}
+  quizCurrentQ.value = 0
+  quizPhase.value = 'answering'
+  stopQuizTimer()
+  startQuizTimer()
+}
+
 // ===== Step complete callbacks =====
 function onStepContinue() { advanceToNext() }
 function onStepReview() { advanceToNext() }
@@ -679,6 +810,7 @@ function startLearn() {
 
 function clearTimers() {
   if (timer) { clearInterval(timer); timer = null }
+  stopQuizTimer()
 }
 
 function formatTime(seconds: number): string {
@@ -758,14 +890,26 @@ onMounted(async () => {
 
   const restored = restoreState()
   if (!restored) {
-    activeResIndex.value = 0
+    // 支持从资料库指定资源进入：通过 query.resourceId 定位到对应资源
+    const targetResourceId = route.query.resourceId as string | undefined
+    let startIdx = 0
+    if (targetResourceId) {
+      const targetIdx = loadedResources.value.findIndex(r => r.id === targetResourceId)
+      if (targetIdx >= 0) startIdx = targetIdx
+    }
+    activeResIndex.value = startIdx
     for (let i = 0; i < loadedResources.value.length; i++) {
-      resourceStepState.value.set(i, i === 0 ? 'active' : 'pending')
+      resourceStepState.value.set(i, i === startIdx ? 'active' : 'pending')
     }
   }
 
   currentResourceStartTime = Date.now()
   startLearn()
+
+  if (currentResource.value?.type === 'quiz') {
+    const state = resourceStepState.value.get(activeResIndex.value)
+    if (state !== 'completed' && state !== 'completing') resetQuizState()
+  }
 
   if (currentResource.value?.type === 'video' && !currentResource.value?.videoUrl) {
     startVideoPolling()
@@ -780,6 +924,7 @@ onMounted(async () => {
 onUnmounted(() => {
   saveState()
   stopVideoPolling()
+  stopQuizTimer()
   cleanupTocObserver()
   clearTimers()
   window.removeEventListener('resize', onResize)
@@ -804,6 +949,15 @@ onUnmounted(() => {
         </el-button>
         <div class="flex items-center gap-2 text-sm" style="color: var(--lt-text-secondary);">
           <span style="color: var(--lt-text-primary); font-weight: 500;">{{ packTopic }}</span>
+          <template v-if="currentResource">
+            <span>·</span>
+            <span class="topbar-res-title">{{ currentResource.title }}</span>
+            <span
+              class="topbar-res-type"
+              :style="{ color: RESOURCE_ACCENT_COLORS[currentResource.type] || '#2B6FFF' }"
+            >{{ typeIcon(currentResource.type) }} {{ typeLabel(currentResource.type) }}</span>
+            <span v-if="currentResource.estimatedMin" class="topbar-res-duration">· {{ currentResource.estimatedMin }}分钟</span>
+          </template>
         </div>
       </div>
       <div class="flex items-center gap-4">
@@ -862,19 +1016,6 @@ onUnmounted(() => {
             :key="activeResIndex"
             class="resource-step"
           >
-            <!-- Resource Title + Info -->
-            <div v-if="currentResource.type !== 'quiz'" class="resource-immersive-header">
-              <h2 class="resource-immersive-title">{{ currentResource.title }}</h2>
-              <div class="resource-immersive-info">
-                <span class="resource-immersive-type"
-                  :style="{ color: RESOURCE_ACCENT_COLORS[currentResource.type] || '#2B6FFF' }"
-                >{{ typeIcon(currentResource.type) }} {{ typeLabel(currentResource.type) }}</span>
-                <span v-if="currentResource.estimatedMin" class="resource-immersive-duration">· 约{{ currentResource.estimatedMin }}分钟</span>
-                <span class="resource-immersive-duration">· 已学 {{ formatTime(liveResourceTime) }}</span>
-              </div>
-              <div class="resource-immersive-divider"></div>
-            </div>
-
             <!-- Resource Body -->
             <div class="resource-section-body">
               <!-- mindmap -->
@@ -910,17 +1051,33 @@ onUnmounted(() => {
               </div>
 
               <!-- quiz -->
-              <div v-else-if="currentResource.type === 'quiz'">
-                <QuizPreview
-                  :content="currentResource.content"
-                  :quality-score="currentResource.qualityScore"
-                />
-                <div class="quiz-done-hint">
-                  <el-button type="primary" plain @click="onQuizDone">
-                    完成测验
-                  </el-button>
+              <template v-else-if="currentResource.type === 'quiz'">
+                <div v-if="!stepZoneVisible" class="resource-quiz">
+                  <QuizPlayer
+                    v-if="playerQuestions.length > 0"
+                    :questions="playerQuestions"
+                    :answers="quizAnswers"
+                    v-model:currentIndex="quizCurrentQ"
+                    :phase="quizPhase"
+                    :result="playerResult"
+                    :timerSeconds="quizTimerSeconds"
+                    :markedQuestions="markedQuestions"
+                    submitMode="batch"
+                    :showBackground="false"
+                    :showAskAiFeature="false"
+                    :confettiEnabled="false"
+                    :fullWidth="fullWidth"
+                    @update:fullWidth="(v) => fullWidth = v"
+                    @select-answer="handleSelectAnswer"
+                    @submit="handleQuizSubmit"
+                    @retry="handleQuizRetry"
+                    @review="handleQuizReview"
+                    @complete="handleQuizComplete"
+                    @toggle-mark="handleToggleMark"
+                  />
+                  <div v-else class="resource-placeholder">暂无题目</div>
                 </div>
-              </div>
+              </template>
 
               <!-- code -->
               <template v-else-if="currentResource.type === 'code' && currentResource.content">
@@ -931,6 +1088,11 @@ onUnmounted(() => {
                   :sources-count="currentResource.sourcesCount"
                 />
               </template>
+
+              <!-- html 交互文档 -->
+              <div v-else-if="currentResource.type === 'html'" class="resource-html">
+                <HtmlSandboxViewer :content="currentResource.content || ''" :title="currentResource.title" />
+              </div>
 
               <!-- doc / reading with TOC sidebar -->
               <div v-else class="resource-doc-layout" @mouseup="onResourceMouseUp">
@@ -1196,6 +1358,17 @@ onUnmounted(() => {
   min-width: 28px;
 }
 
+.topbar-res-title {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--lt-text-primary);
+}
+.topbar-res-type { font-size: 12px; font-weight: 600; }
+.topbar-res-duration { font-size: 12px; color: var(--lt-text-auxiliary); white-space: nowrap; }
+
 .learn-content {
   flex: 1;
   overflow-y: auto;
@@ -1235,6 +1408,13 @@ onUnmounted(() => {
 
 .resource-step { transition: opacity 0.3s ease; }
 .resource-section-body { padding: 0; }
+.resource-html {
+  width: 100vw;
+  margin-left: calc(-50vw + 50%);
+  margin-right: calc(-50vw + 50%);
+  margin-top: -32px;
+  max-width: none;
+}
 .resource-placeholder {
   text-align: center;
   padding: 40px 20px;
@@ -1242,10 +1422,9 @@ onUnmounted(() => {
   font-size: 14px;
 }
 
-.quiz-done-hint {
-  text-align: center;
-  margin-top: 24px;
-  padding: 16px;
+.resource-quiz {
+  margin: -32px -28px;
+  min-height: calc(100vh - 120px);
 }
 
 .short-content-timer {
@@ -1504,7 +1683,12 @@ onUnmounted(() => {
   .ltp-track { display: none; }
   .learn-content-inner { max-width: 100%; padding: 20px 16px 20px; }
   .resource-immersive-title { font-size: 18px; }
-  .resource-section-body { padding: 0; }
+  .resource-html {
+    width: 100vw;
+    margin-left: calc(-50vw + 50%);
+    margin-right: calc(-50vw + 50%);
+    margin-top: -20px;
+  }
   .toc-bar { padding: 0 16px; margin-top: 6px; }
   .toc-sidebar-immersive {
     position: fixed;
@@ -1516,6 +1700,7 @@ onUnmounted(() => {
   }
   .toc-progress-track { display: none; }
   .resource-doc-content { max-width: 100%; }
+  .resource-quiz { margin: -20px -16px; min-height: calc(100vh - 100px); }
   .step-forward-enter-from { transform: translateX(24px) scale(0.98); }
   .step-forward-leave-to { transform: translateX(-24px) scale(0.98); }
   .step-back-enter-from { transform: translateX(-24px) scale(0.98); }

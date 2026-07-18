@@ -24,38 +24,81 @@ const emit = defineEmits<{ close: [] }>()
 const noteStore = useNoteStore()
 const notebookStore = useNotebookStore()
 
-const unkeyed = '📄 文档笔记'
-interface NoteGroup { key: string; notes: Note[] }
+const RESOURCE_LEVEL_KEY = '__resource_level__'
+const RESOURCE_LEVEL_LABEL = '资源整体笔记'
+const UNTITLED_RESOURCE = '未分类资源'
 
-const groupedNotes = computed<NoteGroup[]>(() => {
-  const map = new Map<string, Note[]>()
+interface SectionGroup { key: string; title: string; notes: Note[] }
+interface ResourceGroup {
+  key: string
+  title: string
+  sections: SectionGroup[]
+  count: number
+  latest: number
+}
+interface GroupedResult { resources: ResourceGroup[]; flat: boolean }
+
+// 单资源视图（带 resourcePackId）降级为单级章节分组，跳过资源层
+const isSingleResource = computed(() => !!props.resourcePackId)
+
+const groupedNotes = computed<GroupedResult>(() => {
+  const resourceMap = new Map<string, ResourceGroup>()
   for (const note of noteStore.notes) {
-    const k = note.sectionTitle || unkeyed
-    if (!map.has(k)) map.set(k, [])
-    map.get(k)!.push(note)
+    const resKey = note.resourcePackId || `t::${note.resourceTitle || UNTITLED_RESOURCE}`
+    const resTitle = note.resourceTitle || UNTITLED_RESOURCE
+    if (!resourceMap.has(resKey)) {
+      resourceMap.set(resKey, { key: resKey, title: resTitle, sections: [], count: 0, latest: 0 })
+    }
+    const res = resourceMap.get(resKey)!
+    res.count++
+    const t = new Date(note.createdAt).getTime()
+    if (t > res.latest) res.latest = t
+
+    const secKey = note.sectionTitle || RESOURCE_LEVEL_KEY
+    let sec = res.sections.find(s => s.key === secKey)
+    if (!sec) {
+      sec = {
+        key: secKey,
+        title: secKey === RESOURCE_LEVEL_KEY ? RESOURCE_LEVEL_LABEL : secKey,
+        notes: [],
+      }
+      res.sections.push(sec)
+    }
+    sec.notes.push(note)
   }
 
-  const ordered = new Map<string, Note[]>()
-  for (const key of props.sectionOrder) {
-    if (map.has(key)) { ordered.set(key, map.get(key)!); map.delete(key) }
+  // 章节排序：sectionOrder 优先，资源级笔记置末
+  for (const res of resourceMap.values()) {
+    res.sections.sort((a, b) => {
+      if (a.key === RESOURCE_LEVEL_KEY) return 1
+      if (b.key === RESOURCE_LEVEL_KEY) return -1
+      const oa = props.sectionOrder.indexOf(a.title)
+      const ob = props.sectionOrder.indexOf(b.title)
+      if (oa !== -1 && ob !== -1) return oa - ob
+      if (oa !== -1) return -1
+      if (ob !== -1) return 1
+      return a.title.localeCompare(b.title, 'zh-CN')
+    })
+    for (const sec of res.sections) {
+      sec.notes.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    }
   }
-  const rest = [...map.entries()].sort(([a], [b]) =>
-    a === unkeyed ? 1 : b === unkeyed ? -1 : a.localeCompare(b, 'zh-CN')
-  )
-  for (const [key, group] of rest) ordered.set(key, group)
 
-  return [...ordered.entries()].map(([key, group]) => ({
-    key,
-    notes: group.sort((a, b) =>
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    ),
-  }))
+  // 资源排序：最近笔记时间倒序
+  const resources = [...resourceMap.values()].sort((a, b) => b.latest - a.latest)
+  return { resources, flat: isSingleResource.value }
 })
 
 const collapsedGroups = ref<Set<string>>(new Set())
 function toggleGroup(key: string) {
   if (collapsedGroups.value.has(key)) collapsedGroups.value.delete(key)
   else collapsedGroups.value.add(key)
+}
+function resCollapseKey(resKey: string) {
+  return `res::${resKey}`
+}
+function secCollapseKey(resKey: string, secKey: string) {
+  return `sec::${resKey}::${secKey}`
 }
 
 function onNoteDeleted(noteId: string) {
@@ -315,28 +358,45 @@ async function confirmCreateNotebook() {
         />
 
         <div v-else ref="noteListRef" class="note-list">
-          <div v-for="group in groupedNotes" :key="group.key" class="note-group">
-            <div class="note-group-header" @click="toggleGroup(group.key)">
-              <span class="note-group-arrow" :class="{ collapsed: collapsedGroups.has(group.key) }">▸</span>
-              <span class="note-group-title">{{ group.key }}</span>
-              <span class="note-group-count">{{ group.notes.length }}</span>
-            </div>
-            <TransitionGroup
-              v-if="!collapsedGroups.has(group.key)"
-              name="note-list"
-              tag="div"
-              class="note-group-body"
+          <template v-for="res in groupedNotes.resources" :key="res.key">
+            <div
+              v-if="!groupedNotes.flat"
+              class="note-resource-header"
+              @click="toggleGroup(resCollapseKey(res.key))"
             >
-              <NoteCard
-                v-for="note in group.notes"
-                :key="note.id"
-                :note="note"
-                @deleted="onNoteDeleted(note.id)"
-                @edit="onNoteEdit(note)"
-                @jump-to-original="handleJumpToOriginal"
-              />
-            </TransitionGroup>
-          </div>
+              <span class="note-group-arrow" :class="{ collapsed: collapsedGroups.has(resCollapseKey(res.key)) }">▸</span>
+              <span class="note-resource-title">📄 {{ res.title }}</span>
+              <span class="note-group-count">{{ res.count }}</span>
+            </div>
+            <div
+              v-if="groupedNotes.flat || !collapsedGroups.has(resCollapseKey(res.key))"
+              class="note-resource-body"
+              :class="{ 'note-resource-body--flat': groupedNotes.flat }"
+            >
+              <div v-for="sec in res.sections" :key="sec.key" class="note-group">
+                <div class="note-group-header" @click="toggleGroup(secCollapseKey(res.key, sec.key))">
+                  <span class="note-group-arrow" :class="{ collapsed: collapsedGroups.has(secCollapseKey(res.key, sec.key)) }">▸</span>
+                  <span class="note-group-title">{{ sec.title }}</span>
+                  <span class="note-group-count">{{ sec.notes.length }}</span>
+                </div>
+                <TransitionGroup
+                  v-if="!collapsedGroups.has(secCollapseKey(res.key, sec.key))"
+                  name="note-list"
+                  tag="div"
+                  class="note-group-body"
+                >
+                  <NoteCard
+                    v-for="note in sec.notes"
+                    :key="note.id"
+                    :note="note"
+                    @deleted="onNoteDeleted(note.id)"
+                    @edit="onNoteEdit(note)"
+                    @jump-to-original="handleJumpToOriginal"
+                  />
+                </TransitionGroup>
+              </div>
+            </div>
+          </template>
         </div>
 
         <div class="note-new-btn" @click="noteStore.showNoteEditor()">
@@ -424,8 +484,8 @@ async function confirmCreateNotebook() {
   z-index: 100;
 }
 .note-sidebar-header {
-  display: flex; align-items: center; gap: 4px;
-  padding: 12px 16px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--lt-border);
   flex-shrink: 0;
 }
@@ -433,14 +493,14 @@ async function confirmCreateNotebook() {
 .notebook-create-btn { flex-shrink: 0; color: var(--lt-brand); }
 .note-sidebar-title {
   display: flex; align-items: center; gap: 6px; flex: 1;
-  font-size: 14px; font-weight: 700; color: var(--lt-text-primary);
+  font-size: 15px; font-weight: 700; color: var(--lt-text-primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .notebook-cover-dot {
   display: inline-block; flex-shrink: 0;
-  width: 12px; height: 12px; border-radius: 3px;
+  width: 14px; height: 14px; border-radius: 4px;
 }
-.note-count { font-size: 12px; color: var(--lt-text-auxiliary); font-weight: 400; }
+.note-count { font-size: 13px; color: var(--lt-text-auxiliary); font-weight: 400; }
 
 /* ===== Notebook grid (书架) ===== */
 .notebook-grid {
@@ -760,32 +820,53 @@ async function confirmCreateNotebook() {
   color: var(--lt-danger); font-size: 13px;
 }
 .note-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+
+/* 资源级分组头（一级） */
+.note-resource-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 11px 12px 9px; cursor: pointer;
+  font-size: 15px; color: var(--lt-text-primary); font-weight: 700;
+  transition: background 0.15s;
+  position: sticky; top: 0; z-index: 2;
+  background: var(--lt-bg-card);
+  border-bottom: 1px solid var(--lt-border);
+}
+.note-resource-header:hover { background: var(--lt-bg-page); }
+.note-resource-title {
+  flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.note-resource-body { padding: 6px 0 10px; }
+.note-resource-body--flat { padding: 0; }
+
+/* 章节级分组头（二级），默认缩进体现层级 */
 .note-group-header {
-  display: flex; align-items: center; gap: 4px;
-  padding: 6px 16px; cursor: pointer;
-  font-size: 12px; color: var(--lt-text-secondary); font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px 8px 24px; cursor: pointer;
+  font-size: 14px; color: var(--lt-text-secondary); font-weight: 600;
   transition: background 0.15s;
 }
+.note-resource-body--flat .note-group-header { padding-left: 16px; }
 .note-group-header:hover { background: var(--lt-bg-page); }
-.note-group-arrow { transition: transform 0.2s; font-size: 10px; }
+.note-group-arrow { transition: transform 0.2s; font-size: 12px; color: var(--lt-text-placeholder); }
 .note-group-arrow.collapsed { transform: rotate(0deg); }
 .note-group-arrow:not(.collapsed) { transform: rotate(90deg); }
 .note-group-title { flex: 1; }
 .note-group-count {
-  font-size: 11px; color: var(--lt-text-placeholder);
-  background: var(--lt-bg-page); padding: 1px 6px; border-radius: 8px;
+  font-size: 12px; color: var(--lt-text-placeholder);
+  background: var(--lt-bg-page); padding: 2px 8px; border-radius: 10px;
 }
-.note-group-body { margin: 0; }
+.note-group-body { margin: 0; padding: 0 0 4px; }
 .note-sidebar-input { flex-shrink: 0; border-top: 1px solid var(--lt-border); }
 .note-sidebar-editor { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .note-new-btn {
   flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 12px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px;
   border-top: 1px solid var(--lt-border);
   cursor: pointer;
   color: var(--lt-text-secondary);
-  font-size: 13px; font-weight: 500;
+  font-size: 14px; font-weight: 500;
   transition: background 0.15s, color 0.15s;
 }
 .note-new-btn:hover {

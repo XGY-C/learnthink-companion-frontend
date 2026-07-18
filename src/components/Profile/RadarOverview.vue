@@ -51,6 +51,11 @@ const radarPoints = computed<RadarPoint[]>(() =>
   })
 )
 
+const axisLabelColor = computed(() => {
+  const s = getComputedStyle(document.documentElement)
+  return s.getPropertyValue('--lt-chart-axis-label').trim() || '#3A3A54'
+})
+
 const radarOption = computed(() => ({
   tooltip: {
     trigger: 'item',
@@ -69,8 +74,8 @@ const radarOption = computed(() => ({
     radius: '60%',
     center: ['50%', '52%'],
     axisName: {
-      color: 'var(--lt-text-secondary, #5A5A72)',
-      fontSize: 10,
+      color: axisLabelColor.value,
+      fontSize: 11,
     },
     splitArea: {
       areaStyle: {

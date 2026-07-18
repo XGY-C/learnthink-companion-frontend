@@ -172,19 +172,38 @@ export function useSmartSSE() {
         try {
           const parsed = JSON.parse(data)
           const steps = thinkingSteps.value
-          for (let i = steps.length - 1; i >= 0; i--) {
-            if (steps[i].label?.startsWith('调用工具')) {
-              steps[i].done = true
-              steps[i].detail = (steps[i].detail || '') + ' -> ' + (parsed.result || '')
-              // web_search：附加结构化来源列表
-              if (parsed.sources && Array.isArray(parsed.sources) && parsed.sources.length > 0) {
-                steps[i].sources = parsed.sources
+
+          // 优先按工具名匹配最后一个未完成的同名工具调用
+          let matched = false
+          if (parsed.tool) {
+            for (let i = steps.length - 1; i >= 0; i--) {
+              if (steps[i].label?.includes(parsed.tool) && !steps[i].done) {
+                steps[i].done = true
+                steps[i].detail = (steps[i].detail || '') + ' -> ' + (parsed.result || '')
+                if (parsed.sources && Array.isArray(parsed.sources) && parsed.sources.length > 0) {
+                  steps[i].sources = parsed.sources
+                }
+                matched = true
+                break
               }
-              break
             }
           }
+
+          // Fallback：取最后一个未完成的工具调用
+          if (!matched) {
+            for (let i = steps.length - 1; i >= 0; i--) {
+              if (steps[i].label?.startsWith('调用工具') && !steps[i].done) {
+                steps[i].done = true
+                steps[i].detail = (steps[i].detail || '') + ' -> ' + (parsed.result || '')
+                if (parsed.sources && Array.isArray(parsed.sources) && parsed.sources.length > 0) {
+                  steps[i].sources = parsed.sources
+                }
+                break
+              }
+            }
+          }
+
           // 工具失败时清理对应的 pending visual 占位块
-          // 后端对返回 error JSON 的工具仍硬编码 success=true，故需同时检测 result 中的 "error:" 前缀
           const resultStr = String(parsed.result || '')
           const failed = parsed.success === false || /^error[:\s]/i.test(resultStr.trim())
           if (failed) {
@@ -280,6 +299,7 @@ export function useSmartSSE() {
   }
 
   async function start(question: string, courseId: string) {
+    cancel()        // 中止已有流
     reset()
     isStreaming.value = true
 
@@ -287,6 +307,8 @@ export function useSmartSSE() {
 
     try {
       await ensureValidToken()
+      isStreaming.value = true  // 旧流 finally 可能在 await 期间清除了此标志
+
       const response = await fetch('/api/smart/start', {
         method: 'POST',
         headers: {
@@ -305,11 +327,15 @@ export function useSmartSSE() {
           retryable: true,
         }
         isStreaming.value = false
+        await response.body?.cancel()   // 释放连接
         return
       }
 
       const reader = response.body?.getReader()
-      if (!reader) return
+      if (!reader) {
+        await response.body?.cancel()   // 释放连接
+        return
+      }
 
       const decoder = new TextDecoder()
       let buffer = ''

@@ -1,4 +1,5 @@
 import { ref, onMounted, onBeforeUnmount, type Ref } from 'vue'
+import { hapticSuccess } from '@/utils/haptics'
 
 export type PullState = 'idle' | 'pulling' | 'refreshing'
 
@@ -44,7 +45,7 @@ export function usePullToRefresh(
     // 弹性阻尼：下拉越远阻力越大
     const damped = Math.min(diff * 0.4, maxPull)
     pullDistance.value = damped
-    pullState.value = damped >= threshold ? 'pulling' : 'pulling'
+    pullState.value = 'pulling'
   }
 
   function onTouchEnd() {
@@ -52,6 +53,7 @@ export function usePullToRefresh(
     pulling = false
 
     if (pullDistance.value >= threshold && pullState.value !== 'refreshing') {
+      hapticSuccess()
       pullState.value = 'refreshing'
       pullDistance.value = threshold
       onRefresh().finally(() => {

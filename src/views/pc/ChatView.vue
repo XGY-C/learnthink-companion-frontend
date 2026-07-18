@@ -5,9 +5,8 @@ import { Plus, Delete, Fold, Expand, MagicStick } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useChatSSE } from '@/composables/useChatSSE'
 import type { ChatMessage, Suggestion } from '@/composables/useChatSSE'
-import { useProfileStore } from '@/stores/profile'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
-import { apiFetch } from '@/utils/api'
+import { createTtsPlayer, type TtsSentenceState } from '@/utils/ttsSentence'
 import ThoughtChainTimeline from '@/components/ThoughtChainTimeline.vue'
 import LottieAnimation from '@/components/LottieAnimation.vue'
 import liveChatbotLottie from '@/assets/lottie/live-chatbot.json'
@@ -28,7 +27,6 @@ import type { TutoringMode } from '@/types/tutoring'
 
 const router = useRouter()
 const chat = useChatSSE()
-const profile = useProfileStore()
 const videoStore = useVideoLectureStore()
 
 /** Mode options for the chat mode toggle — 辅导模式合并了原 tutoring 和 lecture */
@@ -125,11 +123,22 @@ const inputMessage = ref('')
 const messageTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const isUploading = ref(false)
-const ACCEPTED_TYPES = '.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.html,.htm,.pdf,.docx,.pptx,.py,.js,.ts,.tsx,.jsx,.vue,.java,.c,.cpp,.h,.hpp,.cs,.go,.rs,.rb,.php,.swift,.kt,.scala,.sh,.sql,.r,.tex,.bat,.ps1,.jpg,.jpeg,.png,.gif,.bmp,.webp,.svg'
+const ACCEPTED_TYPES = '.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.html,.htm,.pdf,.docx,.pptx,.xlsx,.xls,.py,.js,.ts,.tsx,.jsx,.vue,.java,.c,.cpp,.h,.hpp,.cs,.go,.rs,.rb,.php,.swift,.kt,.scala,.sh,.sql,.r,.tex,.bat,.ps1,.jpg,.jpeg,.png,.gif,.bmp,.webp,.svg'
 
 function handleFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
+  if (input.files.length > 50) {
+    ElMessage.warning('每次最多上传 50 个文件')
+    input.value = ''
+    return
+  }
+  const oversized = Array.from(input.files).filter(f => f.size > 100 * 1024 * 1024)
+  if (oversized.length > 0) {
+    ElMessage.warning(`文件 "${oversized[0].name}" 超过 100MB 限制`)
+    input.value = ''
+    return
+  }
   isUploading.value = true
   const promises = Array.from(input.files).map(file => chat.uploadFile(file))
   Promise.allSettled(promises).finally(() => {
@@ -184,7 +193,7 @@ async function handleSuggestionClick(suggestion: Suggestion, msg: ChatMessage) {
   if (suggestion.sendAs.startsWith('__generate_plan__:')) {
     const topic = suggestion.sendAs.slice('__generate_plan__:'.length)
     msg.suggestions = undefined
-    await chat.confirmPlanGeneration(topic)
+    await chat.confirmPlanGeneration(topic, '')
   } else if (suggestion.sendAs.startsWith('__generate__:')) {
     const topic = suggestion.sendAs.slice('__generate__:'.length)
     msg.suggestions = undefined
@@ -228,7 +237,7 @@ async function regenerateMessage(_msg: ChatMessage, idx: number) {
 async function toggleLike(msg: ChatMessage) {
   const newFeedback = msg.feedback === 'liked' ? null : 'liked'
   msg.feedback = newFeedback
-  msg._feedback = newFeedback
+  msg._feedback = newFeedback ?? undefined
   if (msg.messageId) {
     try {
       await fetch(import.meta.env.VITE_API_BASE + `/chat/messages/${msg.messageId}/feedback`, {
@@ -242,7 +251,7 @@ async function toggleLike(msg: ChatMessage) {
 async function toggleDislike(msg: ChatMessage) {
   const newFeedback = msg.feedback === 'disliked' ? null : 'disliked'
   msg.feedback = newFeedback
-  msg._feedback = newFeedback
+  msg._feedback = newFeedback ?? undefined
   if (msg.messageId) {
     try {
       await fetch(import.meta.env.VITE_API_BASE + `/chat/messages/${msg.messageId}/feedback`, {
@@ -271,79 +280,47 @@ function modeLabel(mode: string): string {
   }
 }
 
-// ===== TTS (Text-to-Speech) =====
+// ===== TTS (Text-to-Speech) — sentence-by-sentence streaming =====
 const audioState = reactive({
   playingMsgIdx: -1,
   loading: false,
-  el: null as HTMLAudioElement | null,
 })
 
+let ttsPlayer: { stop: () => void } | null = null
+
 function stopAudio() {
-  if (audioState.el) {
-    audioState.el.pause()
-    audioState.el = null
-  }
+  ttsPlayer?.stop()
+  ttsPlayer = null
   audioState.playingMsgIdx = -1
   audioState.loading = false
 }
 
 async function toggleAudio(msg: ChatMessage, idx: number) {
-  // Stop if already playing this message
   if (audioState.playingMsgIdx === idx) {
     stopAudio()
     return
   }
+  stopAudio()
 
-  // Stop any previous audio
-  if (audioState.el) {
-    audioState.el.pause()
-    audioState.el = null
-  }
-  audioState.playingMsgIdx = -1
-
-  // Helper: create and play audio, returns true on success
-  async function playAudio(url: string): Promise<boolean> {
-    const el = new Audio(url)
-    audioState.el = el
-    el.onended = () => { audioState.el = null; audioState.playingMsgIdx = -1 }
-    try {
-      await el.play()
-      return true
-    } catch {
-      audioState.el = null
-      ElMessage.error('音频播放被浏览器阻止，请点击页面任意位置后再试')
-      return false
+  const player = createTtsPlayer(msg, (s: TtsSentenceState) => {
+    audioState.loading = s.isLoading
+    if (!s.isPlaying && !s.isLoading) {
+      audioState.playingMsgIdx = -1
     }
-  }
+  })
 
-  // Use cached audio URL if available
-  const cachedUrl = (msg as any)._audioUrl
-  if (cachedUrl) {
-    if (await playAudio(cachedUrl)) {
-      audioState.playingMsgIdx = idx
-    }
-    return
-  }
+  ttsPlayer = player
+  audioState.playingMsgIdx = idx
 
-  // Call backend TTS API
-  audioState.loading = true
   try {
-    const res = await apiFetch<{ audioUrl: string }>('/chat/tts', {
-      method: 'POST',
-      body: { text: msg.text },
-    })
-    if (!res.data?.audioUrl) {
-      throw new Error(res.message || '语音合成服务返回为空，请检查阿里云 TTS 配置')
-    }
-    (msg as any)._audioUrl = res.data.audioUrl
-    if (await playAudio(res.data.audioUrl)) {
-      audioState.playingMsgIdx = idx
-    }
+    await player.start()
   } catch (err) {
     console.error('TTS error:', err)
     ElMessage.error(`语音合成失败: ${err instanceof Error ? err.message : '未知错误'}`)
   } finally {
+    ttsPlayer = null
     audioState.loading = false
+    audioState.playingMsgIdx = -1
   }
 }
 
@@ -583,7 +560,7 @@ watch(
     <div class="session-sidebar-wrapper flex-shrink-0 relative" :style="{ width: isSessionListCollapsed ? '0px' : '260px', transition: 'width 0.25s ease', overflow: 'hidden' }">
       <div class="session-sidebar flex flex-col h-full" style="width: 260px; min-width: 260px; background-color: var(--lt-bg-card); border-right: 1px solid var(--lt-border);">
         <div class="px-3 pt-3 pb-2 flex items-center justify-between">
-          <el-button size="default" class="flex-1" style="border-radius: 10px; border: 1px dashed var(--lt-brand-lighter); color: var(--lt-brand); background-color: rgba(43, 111, 255, 0.04); font-weight: 500;" @click="chat.createSession">
+          <el-button size="default" class="flex-1" style="border-radius: 10px; border: 1px dashed var(--lt-brand-lighter); color: var(--lt-brand); background-color: rgba(43, 111, 255, 0.04); font-weight: 500;" @click="inputMessage = ''; chat.createSession()">
             <el-icon class="mr-1"><Plus /></el-icon>新建会话
           </el-button>
           <button class="flex-shrink-0 ml-2 p-1 rounded-md transition-all cursor-pointer" style="color: var(--lt-text-auxiliary); border: none; background: transparent;" @click="isSessionListCollapsed = true">
@@ -783,7 +760,7 @@ watch(
                 <DirectAnswerInline
                   :store="chat.directAnswerStore"
                   :is-completed="!!msg._directAnswer?.completed"
-                  :snapshot="msg._directAnswer?.snapshot"
+                  :snapshot="msg._directAnswer?.snapshot ?? null"
                 />
               </div>
 
@@ -869,7 +846,7 @@ watch(
                       </div>
                       <div class="offer-plan-content">
                         <div class="offer-plan-type">
-                          <span class="font-medium">{{ {doc: '讲解文档', quiz: '练习题', mindmap: '思维导图', code: '代码实操', reading: '拓展阅读', video: '讲解视频'}[item.type] || item.type }}</span>
+                          <span class="font-medium">{{ {doc: '讲解文档', quiz: '练习题', mindmap: '思维导图', code: '代码实操', reading: '拓展阅读', video: '讲解视频', html: '交互文档'}[item.type] || item.type }}</span>
                           <span class="offer-plan-type-count">×1</span>
                         </div>
                         <div class="offer-plan-focus">{{ item.focus }}</div>
@@ -934,9 +911,9 @@ watch(
                   class="ai-action-btn"
                   :class="{
                     'is-playing': audioState.playingMsgIdx === idx,
-                    'is-loading': audioState.loading && audioState.playingMsgIdx === -1
+                    'is-loading': audioState.loading && audioState.playingMsgIdx === idx
                   }"
-                  :disabled="audioState.loading"
+                  :disabled="audioState.loading && audioState.playingMsgIdx === idx"
                   title="朗读"
                   @click="toggleAudio(msg, idx)"
                 >
@@ -969,6 +946,8 @@ watch(
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                   </span>
                   <span class="ufc-name">{{ f.fileName.length > 25 ? f.fileName.slice(0, 23) + '…' : f.fileName }}</span>
+                  <span v-if="!f.isImage && getFileExt(f.fileName)" class="ufc-ext">{{ getFileExt(f.fileName) }}</span>
+                  <span v-if="f.fileSize" class="ufc-size">{{ formatFileSize(f.fileSize) }}</span>
                 </div>
               </div>
             </div>
@@ -992,6 +971,8 @@ watch(
               <div v-for="(f, fi) in chat.pendingFiles.value" :key="fi" class="file-chip" :class="{ 'is-image': f.isImage }">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 <span class="file-chip-name">{{ f.fileName.length > 20 ? f.fileName.slice(0, 18) + '…' : f.fileName }}</span>
+                <span v-if="!f.isImage && getFileExt(f.fileName)" class="file-chip-ext">{{ getFileExt(f.fileName) }}</span>
+                <span v-if="f.fileSize" class="file-chip-size">{{ formatFileSize(f.fileSize) }}</span>
                 <button class="file-chip-remove" @click="chat.removePendingFile(f.fileUrl)">
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
@@ -1796,6 +1777,8 @@ watch(
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.file-chip-ext { flex-shrink: 0; padding: 0 4px; border-radius: 3px; background: var(--lt-brand-lightest); color: var(--lt-brand); font-size: 10px; font-weight: 600; letter-spacing: 0.3px; }
+.file-chip-size { flex-shrink: 0; color: var(--lt-text-placeholder); font-size: 10px; }
 .file-chip-remove {
   display: inline-flex;
   align-items: center;
@@ -1861,4 +1844,6 @@ watch(
 }
 .ufc-icon { display: flex; flex-shrink: 0; opacity: 0.8; }
 .ufc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ufc-ext { flex-shrink: 0; padding: 0 4px; border-radius: 3px; background: rgba(255,255,255,0.22); color: rgba(255,255,255,0.95); font-size: 10px; font-weight: 600; letter-spacing: 0.3px; }
+.ufc-size { flex-shrink: 0; color: rgba(255,255,255,0.7); font-size: 10px; }
 </style>

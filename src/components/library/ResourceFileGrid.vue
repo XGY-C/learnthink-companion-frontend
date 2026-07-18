@@ -28,6 +28,7 @@
       @regenerate="$emit('regenerate', file)"
       @delete="$emit('delete', file)"
       @learn="$emit('learn', file)"
+      @add-to-bank="$emit('add-to-bank', file)"
     />
 
     <!-- 空状态 -->
@@ -65,6 +66,7 @@ defineEmits<{
   (e: 'delete', file: ResourceFile): void
   (e: 'enter-folder', folderId: string): void
   (e: 'learn', file: ResourceFile): void
+  (e: 'add-to-bank', file: ResourceFile): void
 }>()
 </script>
 

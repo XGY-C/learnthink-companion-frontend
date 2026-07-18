@@ -19,12 +19,21 @@
     </div>
 
     <div class="m-studio-toolbar">
-      <div class="m-search-wrap">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="m-search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input v-model="searchText" class="m-search-input" placeholder="搜索任务..." />
-      </div>
-      <div class="m-filter-tabs">
-        <button v-for="opt in filterOptions" :key="opt.value" class="m-filter-tab" :class="{ active: statusFilter === opt.value }" @click="statusFilter = opt.value">{{ opt.label }}</button>
+      <el-input
+        v-model="searchText"
+        placeholder="搜索任务..."
+        clearable
+        :prefix-icon="Search"
+        class="m-search-el"
+        size="default"
+      />
+      <div class="m-toolbar-row">
+        <el-radio-group v-model="statusFilter" size="small" class="m-filter-group">
+          <el-radio-button value="">全部</el-radio-button>
+          <el-radio-button value="RUNNING">生成中</el-radio-button>
+          <el-radio-button value="SUCCEEDED">已完成</el-radio-button>
+          <el-radio-button value="FAILED">失败</el-radio-button>
+        </el-radio-group>
       </div>
     </div>
 
@@ -38,68 +47,45 @@
     </div>
 
     <!-- Empty state -->
-    <div v-else-if="filteredTasks.length === 0" class="m-studio-empty">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--lt-text-placeholder)" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-      <p class="m-empty-title">{{ searchText || statusFilter ? '没有匹配的任务' : '还没有生成过资源包' }}</p>
-      <p class="m-empty-desc">{{ searchText || statusFilter ? '试试调整筛选条件' : '去对话页让 AI 帮你生成第一份学习资源' }}</p>
-      <button v-if="!searchText && !statusFilter" class="m-empty-action" @click="$router.push('/chat')">前往对话页</button>
-    </div>
+    <EmptyState
+      v-else-if="filteredTasks.length === 0"
+      :icon="!searchText && !statusFilter ? MagicStick : FolderOpened"
+      :title="!searchText && !statusFilter ? '还没有生成过资源包' : '没有匹配的任务'"
+      :description="!searchText && !statusFilter ? '去对话页让 AI 帮你生成第一份学习资源' : '试试调整筛选条件'"
+      :action-text="!searchText && !statusFilter ? '前往对话页' : ''"
+      :action-icon="!searchText && !statusFilter ? ChatLineRound : undefined"
+      size="large"
+      @action="$router.push('/chat')"
+    />
 
-    <!-- Task cards -->
-    <div v-else class="m-studio-cards">
+    <!-- Card view -->
+    <div v-else class="m-studio-grid">
       <div
-        v-for="task in filteredTasks"
+        v-for="(task, index) in filteredTasks"
         :key="task.taskId"
-        class="m-task-card"
-        @click="goToDetail(task.taskId)"
+        class="stagger-fade-in"
+        :style="{ animationDelay: `${index * 60}ms` }"
       >
-        <div class="m-task-top">
-          <span class="m-task-status" :style="{ color: getStatusConfig(task.status).color }">
-            <span class="m-status-dot" :style="{ backgroundColor: getStatusConfig(task.status).color }" />
-            {{ getStatusConfig(task.status).label }}
-          </span>
-          <span class="m-task-time">{{ formatRelativeTime(task.createdAt) }}</span>
-        </div>
-        <h3 class="m-task-topic">{{ task.topic || '未命名' }}</h3>
-        <div class="m-task-meta">
-          <template v-if="task.status === 'RUNNING'">
-            <div class="m-task-progress">
-              <div class="m-progress-bar">
-                <div class="m-progress-fill" :style="{ width: (task.percent ?? 0) + '%' }" />
-              </div>
-              <span>{{ task.percent ?? 0 }}%</span>
-            </div>
-          </template>
-          <template v-else-if="task.status === 'SUCCEEDED'">
-            <span>{{ task.resourceCount }} 项资源 · {{ getCourseName(task.courseId) }}</span>
-          </template>
-          <template v-else-if="task.status === 'FAILED'">
-            <span style="color: var(--lt-danger);">生成失败</span>
-          </template>
-          <template v-else>
-            <span style="color: var(--lt-text-placeholder);">等待中</span>
-          </template>
-        </div>
-        <div v-if="task.status === 'RUNNING' && task.resourceTypes?.length" class="m-task-types">
-          <span v-for="t in task.resourceTypes" :key="t" class="m-task-type-tag">{{ typeLabel(t) }}</span>
-        </div>
-        <div class="m-task-arrow">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
+        <TaskCard
+          :task="task"
+          :course-name="getCourseName(task.courseId)"
+          @click="goToDetail(task.taskId)"
+        />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { usePullToRefresh } from '@/composables/usePullToRefresh'
+import { ChatLineRound, MagicStick, FolderOpened, Search } from '@element-plus/icons-vue'
 import type { TaskSummary } from '@/types'
-import { TASK_STATUS_CONFIG, formatRelativeTime } from '@/constants'
 import { apiFetch } from '@/utils/api'
 import { useProfileStore } from '@/stores/profile'
-import { typeLabel } from '@/composables/useTaskStream'
+import TaskCard from '@/components/TaskCard.vue'
+import EmptyState from '@/components/EmptyState.vue'
+import { usePullToRefresh } from '@/composables/usePullToRefresh'
 
 const router = useRouter()
 const profileStore = useProfileStore()
@@ -114,21 +100,10 @@ const { pullState, pullDistance } = usePullToRefresh(pullContainer, async () => 
   await loadTasks()
 })
 
-const filterOptions = [
-  { label: '全部', value: '' },
-  { label: '生成中', value: 'RUNNING' },
-  { label: '已完成', value: 'SUCCEEDED' },
-  { label: '失败', value: 'FAILED' },
-]
-
 const courseNameMap = ref<Record<string, string>>({})
 
 function getCourseName(courseId: string): string {
   return courseNameMap.value[courseId] || profileStore.courses.find(c => c.id === courseId)?.name || courseId
-}
-
-function getStatusConfig(status: string) {
-  return TASK_STATUS_CONFIG[status] ?? TASK_STATUS_CONFIG.PENDING
 }
 
 const filteredTasks = computed(() => {
@@ -143,24 +118,69 @@ const filteredTasks = computed(() => {
   return result
 })
 
+const hasRunningTasks = computed(() => tasks.value.some(t => t.status === 'RUNNING'))
+
 function goToDetail(taskId: string) {
   router.push(`/studio/${taskId}`)
 }
 
-async function loadTasks() {
-  loading.value = true
+async function loadCourseNames() {
+  const ids = [...new Set(tasks.value.map(t => t.courseId).filter(Boolean))]
+  const map: Record<string, string> = {}
+  for (const id of ids) {
+    const c = profileStore.courses.find(c => c.id === id)
+    if (c) map[id] = c.name
+  }
+  for (const id of ids) {
+    if (!map[id]) {
+      try {
+        const res = await apiFetch<{ id: string; name: string; emoji: string }>(`/courses/${id}`)
+        if (res.data) map[id] = res.data.name
+      } catch { /* ignore */ }
+    }
+  }
+  courseNameMap.value = map
+}
+
+async function loadTasks(silent = false) {
+  if (!silent) loading.value = true
   try {
     const courseId = profileStore.activeCourseId
     const url = courseId ? `/tasks?courseId=${courseId}` : '/tasks'
     const res = await apiFetch<TaskSummary[]>(url)
     if (res.data) {
       tasks.value = res.data
+      if (!silent) loadCourseNames()
     }
   } catch { /* ignore */ }
-  finally { loading.value = false }
+  finally { if (!silent) loading.value = false }
 }
 
-onMounted(() => { loadTasks() })
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function startPolling() {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    if (!hasRunningTasks.value) return
+    await loadTasks(true)
+  }, 5000)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+onMounted(() => {
+  loadTasks()
+  startPolling()
+})
+
+onUnmounted(() => {
+  stopPolling()
+})
 </script>
 
 <style scoped>
@@ -176,27 +196,61 @@ onMounted(() => { loadTasks() })
 
 .m-studio-toolbar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
 
-.m-search-wrap {
-  display: flex; align-items: center; gap: 8px;
-  background: var(--lt-bg-card); border-radius: 10px;
-  padding: 0 12px; border: 0.5px solid var(--lt-border);
+.m-search-el { --el-input-height: 44px; }
+.m-search-el :deep(.el-input__wrapper) {
+  background: var(--lt-bg-card);
+  border-radius: 10px;
+  border: 0.5px solid var(--lt-border);
+  box-shadow: none;
+  padding: 0 12px;
 }
-.m-search-icon { flex-shrink: 0; color: var(--lt-text-placeholder); }
-.m-search-input {
-  flex: 1; border: none; background: transparent;
-  font-size: 15px; color: var(--lt-text-primary);
-  padding: 10px 0; outline: none;
+.m-search-el :deep(.el-input__inner) {
+  font-size: 15px;
+  color: var(--lt-text-primary);
 }
-.m-search-input::placeholder { color: var(--lt-text-placeholder); }
+.m-search-el :deep(.el-input__inner::placeholder) { color: var(--lt-text-placeholder); }
+.m-search-el :deep(.el-input__prefix) { color: var(--lt-text-placeholder); }
+.m-search-el :deep(.el-input__clear) { color: var(--lt-text-placeholder); }
 
-.m-filter-tabs { display: flex; gap: 6px; overflow-x: auto; }
-.m-filter-tab {
-  padding: 6px 14px; border-radius: 16px; border: 0.5px solid var(--lt-border);
-  background: var(--lt-bg-card); font-size: 12px; color: var(--lt-text-secondary);
-  white-space: nowrap; cursor: pointer; touch-action: manipulation;
+.m-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.m-filter-tab.active { border-color: var(--lt-brand); color: var(--lt-brand); background: var(--lt-brand-lightest); font-weight: 500; }
 
+.m-filter-group {
+  flex: 1;
+  overflow-x: auto;
+  display: flex;
+  white-space: nowrap;
+}
+.m-filter-group :deep(.el-radio-button__inner) {
+  padding: 0 14px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  border-color: var(--lt-border);
+  background: var(--lt-bg-card);
+  color: var(--lt-text-secondary);
+  border-radius: 0;
+}
+.m-filter-group :deep(.el-radio-button:first-child .el-radio-button__inner) {
+  border-radius: 16px 0 0 16px;
+  border-right: none;
+}
+.m-filter-group :deep(.el-radio-button:last-child .el-radio-button__inner) {
+  border-radius: 0 16px 16px 0;
+}
+.m-filter-group :deep(.el-radio-button__orig-radio:checked + .el-radio-button__inner) {
+  background: var(--lt-brand);
+  border-color: var(--lt-brand);
+  color: #fff;
+  box-shadow: none;
+}
+
+/* ===== Loading skeleton ===== */
 .m-studio-skeleton { display: flex; flex-direction: column; gap: 12px; }
 .m-skeleton-card {
   background: var(--lt-bg-card); border-radius: 12px; padding: 16px;
@@ -207,45 +261,26 @@ onMounted(() => { loadTasks() })
 .m-sk-bar { height: 6px; width: 100%; background: var(--lt-bg-page); border-radius: 3px; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
-.m-studio-empty { display: flex; flex-direction: column; align-items: center; padding: 60px 24px; text-align: center; }
-.m-empty-title { font-size: 15px; font-weight: 500; color: var(--lt-text-secondary); margin: 12px 0 4px; }
-.m-empty-desc { font-size: 13px; color: var(--lt-text-placeholder); margin: 0 0 16px; }
-.m-empty-action {
-  padding: 10px 24px; border-radius: 20px; border: none;
-  background: var(--lt-brand); color: #fff; font-size: 14px; cursor: pointer; touch-action: manipulation;
+/* ===== Card grid ===== */
+.m-studio-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
 }
 
-.m-studio-cards { display: flex; flex-direction: column; gap: 12px; }
-
-.m-task-card {
-  position: relative; background: var(--lt-bg-card); border-radius: 12px;
-  padding: 16px; border: 0.5px solid var(--lt-border);
-  cursor: pointer; touch-action: manipulation;
-  transition: box-shadow 0.15s;
+/* ===== Stagger fade-in ===== */
+.stagger-fade-in {
+  animation: staggerIn 0.4s ease-out both;
 }
-.m-task-card:active { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-
-.m-task-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.m-task-status { font-size: 11px; font-weight: 500; display: flex; align-items: center; gap: 4px; }
-.m-status-dot { width: 6px; height: 6px; border-radius: 50%; }
-.m-task-time { font-size: 11px; color: var(--lt-text-placeholder); }
-
-.m-task-topic { font-size: 16px; font-weight: 600; color: var(--lt-text-primary); margin: 0 0 8px; }
-
-.m-task-meta { font-size: 13px; color: var(--lt-text-auxiliary); margin-bottom: 8px; }
-.m-task-progress { display: flex; align-items: center; gap: 8px; }
-.m-progress-bar { flex: 1; height: 6px; background: var(--lt-bg-page); border-radius: 3px; overflow: hidden; }
-.m-progress-fill { height: 100%; background: var(--lt-brand); border-radius: 3px; transition: width 0.3s; }
-
-.m-task-types { display: flex; flex-wrap: wrap; gap: 4px; }
-.m-task-type-tag {
-  font-size: 10px; padding: 2px 8px; border-radius: 8px;
-  background: var(--lt-brand-lightest); color: var(--lt-brand);
-}
-
-.m-task-arrow {
-  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-  color: var(--lt-text-placeholder);
+@keyframes staggerIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ===== Pull-to-refresh ===== */

@@ -43,6 +43,7 @@
           <el-dropdown-menu>
             <el-dropdown-item command="learn" :icon="Reading" v-if="file.packId">开始学习</el-dropdown-item>
             <el-dropdown-item command="preview" :icon="View">预览</el-dropdown-item>
+            <el-dropdown-item command="add-to-bank" :icon="Tickets" v-if="file.type === 'quiz'">加入题库</el-dropdown-item>
             <el-dropdown-item command="move" :icon="Rank" divided>移动到...</el-dropdown-item>
             <el-dropdown-item command="regenerate" :icon="Refresh">重新生成</el-dropdown-item>
             <el-dropdown-item command="delete" :icon="Delete" divided>删除</el-dropdown-item>
@@ -57,7 +58,7 @@
 import { computed, markRaw } from 'vue'
 import {
   Document, Reading, DataBoard, EditPen, VideoPlay,
-  MoreFilled, View, Rank, Refresh, Delete,
+  MoreFilled, View, Rank, Refresh, Delete, Tickets,
 } from '@element-plus/icons-vue'
 import { CONFIDENCE_CONFIG } from '@/constants'
 import type { ResourceFile } from '@/types'
@@ -73,6 +74,7 @@ const emit = defineEmits<{
   (e: 'regenerate'): void
   (e: 'delete'): void
   (e: 'learn'): void
+  (e: 'add-to-bank'): void
 }>()
 
 const typeIcon = computed(() => {
@@ -122,6 +124,7 @@ const confidenceLabel = computed(() => {
 function onCommand(cmd: string) {
   if (cmd === 'learn') emit('learn')
   else if (cmd === 'preview') emit('preview')
+  else if (cmd === 'add-to-bank') emit('add-to-bank')
   else if (cmd === 'move') emit('move')
   else if (cmd === 'regenerate') emit('regenerate')
   else if (cmd === 'delete') emit('delete')

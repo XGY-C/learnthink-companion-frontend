@@ -38,6 +38,7 @@ export interface ForumPostDetail extends ForumPost {
 export interface ForumResource {
   id: string
   resourceItemId: string
+  packId: string
   title: string
   type: string
   summary: string
@@ -92,6 +93,7 @@ export interface ForumQueryParams {
   page?: number
   size?: number
   keyword?: string
+  userId?: string
 }
 
 export interface PageResult<T> {
@@ -99,4 +101,37 @@ export interface PageResult<T> {
   total: number
   page: number
   size: number
+}
+
+// ===== My Forum Activity =====
+
+export interface ForumActivityOverview {
+  postCount: number
+  commentCount: number
+  receivedCommentCount: number
+  likeReceivedCount: number
+  postLikeCount?: number
+  commentLikeCount?: number
+}
+
+export interface MyCommentItem {
+  id: string
+  postId: string
+  postTitle: string
+  content: string
+  createdAt: string
+  likeCount: number
+  replyCount: number
+}
+
+export interface ReceivedCommentItem {
+  id: string
+  postId: string
+  postTitle: string
+  content: string
+  commenterUserId: string
+  commenterName: string
+  commenterAvatar: string
+  createdAt: string
+  isReply: boolean
 }

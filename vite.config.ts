@@ -1,24 +1,31 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
+import mkcert from 'vite-plugin-mkcert'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const useHttps = process.env.HTTPS === 'true'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     vue(),
     tailwindcss(),
+    ...(useHttps ? [mkcert()] : []),
   ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    include: ['@antv/g6', '@antv/g-canvas', '@antv/g-lite'],
+  },
   server: {
     host: '0.0.0.0',
+    https: useHttps,
     proxy: {
       '/api': {
         target: 'http://localhost:8080',

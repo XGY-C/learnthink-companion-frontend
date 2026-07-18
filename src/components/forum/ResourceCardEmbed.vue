@@ -1,22 +1,37 @@
 <script setup lang="ts">
 import type { ForumResource } from '@/types/forum'
-import { Document, Reading, List, Monitor } from '@element-plus/icons-vue'
+import { Document, Reading, List, Monitor, Connection, VideoCamera, Share } from '@element-plus/icons-vue'
 
 const props = defineProps<{ resource: ForumResource }>()
+const emit = defineEmits<{
+  (e: 'preview', resource: ForumResource): void
+  (e: 'navigate', resource: ForumResource): void
+}>()
 
 const typeMeta: Record<string, { icon: any; label: string; color: string }> = {
-  document: { icon: Document, label: '文档', color: 'var(--lt-brand)' },
-  exercise: { icon: List, label: '习题', color: 'var(--lt-orange)' },
+  doc: { icon: Document, label: '文档', color: 'var(--lt-brand)' },
+  quiz: { icon: List, label: '习题', color: 'var(--lt-orange)' },
   reading: { icon: Reading, label: '阅读', color: 'var(--lt-ai)' },
   code: { icon: Monitor, label: '代码', color: 'var(--lt-success)' },
-  mindmap: { icon: Document, label: '思维导图', color: 'var(--lt-brand)' },
+  mindmap: { icon: Share, label: '思维导图', color: 'var(--lt-brand)' },
+  video: { icon: VideoCamera, label: '视频', color: 'var(--lt-ai)' },
 }
 
 const meta = typeMeta[props.resource.type] || { icon: Document, label: props.resource.type, color: 'var(--lt-text-secondary)' }
+
+const previewableTypes = ['doc', 'reading', 'code']
+
+function handleClick() {
+  if (previewableTypes.includes(props.resource.type)) {
+    emit('preview', props.resource)
+  } else if (props.resource.packId) {
+    emit('navigate', props.resource)
+  }
+}
 </script>
 
 <template>
-  <div class="resource-embed">
+  <div class="resource-embed" @click="handleClick">
     <div class="flex items-center gap-3">
       <div
         class="resource-icon flex items-center justify-center rounded-lg w-10 h-10 flex-shrink-0"

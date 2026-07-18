@@ -81,7 +81,7 @@ const showConclusion = computed(() =>
 .comparison-scene {
   width: 100%; height: 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: #0f0f13; padding: 40px 60px;
+  background: radial-gradient(ellipse at 70% 15%, rgba(43, 111, 255, 0.08), transparent 55%), radial-gradient(ellipse at 20% 85%, rgba(255, 140, 66, 0.05), transparent 55%), radial-gradient(ellipse at 50% 50%, #14141f 0%, #0d0d12 65%, #08080c 100%); padding: 40px 60px;
 }
 .comp-heading {
   font-size: 20px; font-weight: 600; color: #fff; margin: 0 0 28px;
@@ -132,8 +132,11 @@ const showConclusion = computed(() =>
 }
 .comp-left .comp-bullet { background: rgba(43, 111, 255, 0.5); }
 .comp-right .comp-bullet { background: rgba(255, 140, 66, 0.5); }
-.comp-item.visible .comp-bullet {
-  box-shadow: 0 0 6px currentColor;
+.comp-left .comp-item.visible .comp-bullet {
+  box-shadow: 0 0 6px rgba(43, 111, 255, 0.6);
+}
+.comp-right .comp-item.visible .comp-bullet {
+  box-shadow: 0 0 6px rgba(255, 140, 66, 0.6);
 }
 
 .comp-text { line-height: 1.5; }

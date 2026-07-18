@@ -93,7 +93,7 @@ const CHECK_PATH_LEN = 28
 .summary-scene {
   width: 100%; height: 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: linear-gradient(180deg, #0f0f13 0%, #1a1a2e 100%);
+  background: linear-gradient(180deg, #0d0d12 0%, #1a1a2e 100%);
   padding: 60px;
 }
 
@@ -112,7 +112,7 @@ const CHECK_PATH_LEN = 28
   font-variant-numeric: tabular-nums;
 }
 .progress-count {
-  font-size: 20px; font-weight: 700; color: var(--lt-success, #34C759);
+  font-size: 20px; font-weight: 700; color: var(--lt-success, #22c55e);
   transition: all 0.3s;
 }
 .progress-sep {
@@ -143,9 +143,9 @@ const CHECK_PATH_LEN = 28
   transition: all 0.4s;
 }
 .check-icon.done {
-  background: rgba(52, 199, 89, 0.15);
-  color: var(--lt-success, #34C759);
-  box-shadow: 0 0 10px rgba(52, 199, 89, 0.15);
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--lt-success, #22c55e);
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.15);
 }
 
 .check-path {

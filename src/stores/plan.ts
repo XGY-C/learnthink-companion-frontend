@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import { apiFetch } from '@/utils/api'
 import { useSSE } from '@/composables/useSSE'
 import type { Plan, SubPlan, Activity, ActivitySubmitResponse } from '@/types'
@@ -182,14 +183,18 @@ export const usePlanStore = defineStore('plan', () => {
     if (!plan.value) return
     try {
       const res = await apiFetch<SubPlan>(
-        `/plan/modules/${moduleId}/subplan?planId=${plan.value.planId}`
+        `/plan/modules/${moduleId}/replan?planId=${plan.value.planId}`,
+        { method: 'POST' }
       )
       if (res.data) {
         subPlans.value.set(moduleId, res.data)
         const mod = plan.value.modules.find(m => m.moduleId === moduleId)
         if (mod) mod.subPlan = res.data
+        ElMessage.success('模块已重新规划')
       }
-    } catch { /* ignore */ }
+    } catch {
+      ElMessage.error('重新规划失败，请稍后重试')
+    }
   }
 
   /**
@@ -274,6 +279,15 @@ export const usePlanStore = defineStore('plan', () => {
     return null
   }
 
+  async function updateLockMode(courseId: string, lockMode: string) {
+    if (!plan.value) return
+    await apiFetch('/plan/lock-mode', {
+      method: 'PATCH',
+      body: { courseId, lockMode },
+    })
+    await fetchPlan(courseId)
+  }
+
   return {
     plan, subPlans, status, loading, gapTasks,
     generationStage, generationPercent, generationMessage, generationTaskId,
@@ -281,6 +295,6 @@ export const usePlanStore = defineStore('plan', () => {
     overallProgress, overallMastery, overallWeakTags,
     currentActivity, currentModule,
     fetchPlan, generatePlan, previewPlan, updatePlanDraft, confirmPlan, subscribeToGeneration,
-    refreshModule, regenerateActivity, submitActivity,
+    refreshModule, regenerateActivity, submitActivity, updateLockMode,
   }
 })

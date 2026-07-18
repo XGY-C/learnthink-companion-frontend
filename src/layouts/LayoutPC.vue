@@ -5,7 +5,7 @@ import { useUserStore } from '@/stores/user'
 import { useProfileStore } from '@/stores/profile'
 import { usePushStore } from '@/stores/push'
 import type { CourseInfo } from '@/types'
-import { Search, Fold, Expand, DataBoard, User, Guide, DataAnalysis, ArrowDown, SwitchButton, Bell } from '@element-plus/icons-vue'
+import { Search, Fold, Expand, DataBoard, User, Guide, DataAnalysis, ArrowDown, SwitchButton, Bell, EditPen } from '@element-plus/icons-vue'
 import ForumIcon from '@/components/icons/ForumIcon.vue'
 import LibraryIcon from '@/components/icons/LibraryIcon.vue'
 import LayersIcon from '@/components/icons/LayersIcon.vue'
@@ -41,7 +41,7 @@ async function handleNotificationClick(notif: { id: string; refId?: string; refT
     await pushStore.markAsRead(notif.id)
   }
   if (notif.refType === 'daily') {
-    router.push('/dashboard?focus=recommendations')
+    router.push({ name: 'dashboard', query: { focus: 'recommendations' } })
   } else if (notif.refId) {
     if (notif.refType === 'task') {
       router.push(`/studio/${notif.refId}`)
@@ -138,6 +138,10 @@ onMounted(() => {
           <el-menu-item index="/library">
             <el-icon><LibraryIcon /></el-icon>
             <template #title>资源库</template>
+          </el-menu-item>
+          <el-menu-item index="/practice">
+            <el-icon><EditPen /></el-icon>
+            <template #title>练习中心</template>
           </el-menu-item>
           <el-menu-item index="/forum">
             <el-icon><ForumIcon /></el-icon>
@@ -245,7 +249,11 @@ onMounted(() => {
               class="search-input"
             />
           </div>
-          <el-dropdown trigger="click" @command="handleDropdownCommand">
+          <el-dropdown
+            trigger="click"
+            @command="handleDropdownCommand"
+            :popper-options="{ modifiers: [{ name: 'preventOverflow', options: { padding: 8 } }] }"
+          >
             <el-button
               circle
               class="header-icon-btn !border-0 !bg-transparent hover:!bg-gray-100"
@@ -260,7 +268,7 @@ onMounted(() => {
               </span>
             </el-button>
             <template #dropdown>
-              <el-dropdown-menu class="w-80 max-h-96 overflow-y-auto">
+              <el-dropdown-menu class="w-80">
                 <div class="px-3 py-2 border-b" style="border-color: var(--lt-border);">
                   <div class="flex items-center justify-between">
                     <span class="text-sm font-semibold" style="color: var(--lt-text-primary);">通知中心</span>
@@ -276,22 +284,24 @@ onMounted(() => {
                 <div v-if="pushStore.notifications.length === 0" class="px-3 py-6 text-center text-sm" style="color: var(--lt-text-auxiliary);">
                   暂无推送通知
                 </div>
-                <el-dropdown-item
-                  v-for="notif in pushStore.notifications.slice(0, 5)"
-                  :key="notif.id"
-                  :command="notif.id"
-                  class="!py-2 !px-3"
-                  @click="handleNotificationClick(notif)"
-                >
-                  <div class="flex flex-col gap-0.5">
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-xs" style="color: var(--lt-warning);">{{ notif.type.startsWith('push_') ? '🎯' : '📝' }}</span>
-                      <span class="text-xs font-medium" style="color: var(--lt-text-primary);">{{ notif.title }}</span>
-                      <span v-if="!notif.isRead" class="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+                <div v-else class="notif-scroll max-h-72 overflow-y-auto">
+                  <el-dropdown-item
+                    v-for="notif in pushStore.notifications"
+                    :key="notif.id"
+                    :command="notif.id"
+                    class="!py-2 !px-3"
+                    @click="handleNotificationClick(notif)"
+                  >
+                    <div class="flex flex-col gap-0.5">
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-xs" style="color: var(--lt-warning);">{{ notif.type.startsWith('push_') ? '🎯' : '📝' }}</span>
+                        <span class="text-xs font-medium" style="color: var(--lt-text-primary);">{{ notif.title }}</span>
+                        <span v-if="!notif.isRead" class="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+                      </div>
+                      <span class="text-xs truncate" style="color: var(--lt-text-auxiliary);">{{ notif.message }}</span>
                     </div>
-                    <span class="text-xs truncate" style="color: var(--lt-text-auxiliary);">{{ notif.message }}</span>
-                  </div>
-                </el-dropdown-item>
+                  </el-dropdown-item>
+                </div>
                 <el-dropdown-item command="all" divided class="text-center">
                   <span class="text-xs" style="color: var(--lt-brand);">查看全部通知</span>
                 </el-dropdown-item>
@@ -412,5 +422,32 @@ onMounted(() => {
 :deep(.header-icon-btn:hover) {
   color: var(--lt-brand) !important;
   background: var(--lt-brand-lightest) !important;
+}
+</style>
+
+<style>
+/* 通知下拉框滚动条: 默认隐藏, hover 时显示 */
+.notif-scroll {
+  scrollbar-width: none;
+}
+.notif-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.notif-scroll:hover {
+  scrollbar-width: thin;
+}
+.notif-scroll:hover::-webkit-scrollbar {
+  width: 5px;
+}
+.notif-scroll:hover::-webkit-scrollbar-track {
+  background: transparent;
+}
+.notif-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--lt-border);
+  border-radius: 3px;
+}
+.notif-scroll:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--lt-text-disabled);
 }
 </style>

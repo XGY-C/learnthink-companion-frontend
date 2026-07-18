@@ -7,7 +7,11 @@ import { useProfileStore } from '@/stores/profile'
 import { useUserStore } from '@/stores/user'
 import ForumEditor from '@/components/forum/ForumEditor.vue'
 import ForumTagChips from '@/components/forum/ForumTagChips.vue'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import ResourcePicker from '@/components/forum/ResourcePicker.vue'
+import ResourceCardEmbed from '@/components/forum/ResourceCardEmbed.vue'
+import { ArrowLeft, Plus } from '@element-plus/icons-vue'
+import { isMobile } from '@/utils/device'
+import type { ForumResource } from '@/types/forum'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +32,9 @@ const form = reactive({
 
 const submitting = ref(false)
 const loading = ref(true)
+const showResourcePicker = ref(false)
+const drawerSize = isMobile() ? '100%' : '400px'
+const selectedResources = ref<ForumResource[]>([])
 
 onMounted(async () => {
   await store.fetchTags()
@@ -45,6 +52,7 @@ onMounted(async () => {
       form.tagIds = store.tags.filter(t => (post.tags || []).includes(t.name)).map(t => t.id)
       form.type = post.type
       form.resourceItemIds = post.resources?.map(r => r.resourceItemId) || []
+      selectedResources.value = post.resources || []
       form.files = post.files ? [...post.files] : []
     }
   }
@@ -55,6 +63,12 @@ function handleTagToggle(tagId: string) {
   const idx = form.tagIds.indexOf(tagId)
   if (idx >= 0) form.tagIds.splice(idx, 1)
   else form.tagIds.push(tagId)
+}
+
+function handleResourceSelect(resources: ForumResource[]) {
+  selectedResources.value = resources
+  form.resourceItemIds = resources.map(r => r.resourceItemId)
+  showResourcePicker.value = false
 }
 
 async function handleSubmit() {
@@ -114,6 +128,21 @@ async function handleSubmit() {
               <ForumEditor v-model="form.content" v-model:files="form.files" v-model:resource-item-ids="form.resourceItemIds" />
             </el-form-item>
 
+            <!-- 关联资源 -->
+            <el-form-item label="关联系统资源">
+              <div class="w-full">
+                <el-button size="small" :icon="Plus" @click="showResourcePicker = true">
+                  添加资源
+                </el-button>
+                <div v-if="selectedResources.length > 0" class="grid gap-3 mt-3" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));">
+                  <ResourceCardEmbed
+                    v-for="r in selectedResources" :key="r.resourceItemId"
+                    :resource="r"
+                  />
+                </div>
+              </div>
+            </el-form-item>
+
             <el-form-item class="mt-4 mb-0">
               <div class="flex items-center gap-3 w-full justify-end">
                 <el-button @click="router.push(`/forum/${postId}`)">取消</el-button>
@@ -126,6 +155,19 @@ async function handleSubmit() {
         </div>
       </template>
     </div>
+
+    <!-- 资源选择弹窗 -->
+    <el-drawer
+      v-model="showResourcePicker"
+      title="选择关联资源"
+      :size="drawerSize"
+      :with-header="false"
+    >
+      <ResourcePicker
+        @select="handleResourceSelect"
+        @close="showResourcePicker = false"
+      />
+    </el-drawer>
   </div>
 </template>
 
@@ -140,5 +182,39 @@ export default { components: { Loading } }
 }
 .form-card {
   background: var(--lt-bg-card);
+}
+
+@media (max-width: 768px) {
+  .edit-post-page {
+    padding: 12px 16px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  .form-card {
+    padding: 12px;
+    border-radius: var(--lt-radius-lg);
+  }
+  .form-card :deep(.el-form-item__label) {
+    font-size: 14px;
+    padding-bottom: 4px;
+  }
+  .form-card :deep(.el-input__wrapper),
+  .form-card :deep(.el-textarea__inner) {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .form-card :deep(.el-select .el-input__wrapper) {
+    min-height: 44px;
+  }
+  .form-card :deep(.el-button) {
+    min-height: 44px;
+  }
+  .form-card :deep(.el-form-item:last-child .el-form-item__content) > div {
+    flex-direction: column-reverse !important;
+    gap: 8px !important;
+  }
+  .form-card :deep(.el-form-item:last-child .el-button) {
+    width: 100%;
+    margin-left: 0 !important;
+  }
 }
 </style>

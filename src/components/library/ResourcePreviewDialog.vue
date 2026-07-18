@@ -22,7 +22,10 @@
           </span>
         </div>
         <div class="flex items-center gap-2 ml-auto">
-          <el-dropdown v-if="file.type === 'doc' || file.type === 'reading'" size="small" @command="onDownload">
+          <el-button v-if="file?.packId" type="primary" size="small" @click="onLearn">
+            <el-icon class="mr-1"><Reading /></el-icon>进入学习
+          </el-button>
+          <el-dropdown v-if="file.type === 'doc' || file.type === 'reading' || file.type === 'quiz'" size="small" @command="onDownload">
             <el-button size="small" type="primary">
               <el-icon class="mr-1"><Download /></el-icon>下载 <el-icon class="ml-1"><ArrowDown /></el-icon>
             </el-button>
@@ -30,6 +33,17 @@
               <el-dropdown-menu>
                 <el-dropdown-item command="docx">下载 DOCX</el-dropdown-item>
                 <el-dropdown-item command="md">下载 Markdown</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown v-if="file.type === 'html'" size="small" @command="onHtmlDownload">
+            <el-button size="small" type="primary">
+              <el-icon class="mr-1"><Download /></el-icon>下载 <el-icon class="ml-1"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="html">下载 HTML</el-dropdown-item>
+                <el-dropdown-item command="print">打印 / 导出 PDF</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -84,6 +98,11 @@
           </div>
         </div>
 
+        <!-- 交互文档 -->
+        <div v-else-if="file.type === 'html'">
+          <HtmlSandboxViewer :content="content || ''" :title="file.title" />
+        </div>
+
         <!-- 默认：doc/reading -->
         <div v-else>
           <MarkdownViewer :content="content || '暂无内容'" :showToc="true" />
@@ -128,12 +147,6 @@
       </div>
     </div>
 
-    <template #footer>
-      <el-button v-if="file?.packId" type="primary" @click="onLearn">
-        <el-icon class="mr-1"><Reading /></el-icon>进入学习
-      </el-button>
-      <el-button @click="visible = false">关闭</el-button>
-    </template>
   </el-dialog>
 </template>
 
@@ -145,8 +158,11 @@ import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import QuizPreview from '@/components/QuizPreview.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
 import CodeLearningViewer from '@/components/code/CodeLearningViewer.vue'
+import HtmlSandboxViewer from '@/components/HtmlSandboxViewer.vue'
 import { markdownToDocxBlob, downloadDocx, preprocessLatexForMarkdown } from '@/utils/docxExport'
+import { quizToMarkdown } from '@/utils/quizExport'
 import { extractVideoUrl } from '@/utils/media'
+import { downloadHtml, printHtml } from '@/utils/htmlExport'
 import { useResourceStore } from '@/stores/resource'
 import { CONFIDENCE_CONFIG } from '@/constants'
 import type { ResourceFile } from '@/types'
@@ -206,6 +222,21 @@ watch(() => props.file?.id, async (id) => {
 function onDownload(format: string) {
   if (!props.file) return
   const raw = content.value || ''
+  if (props.file.type === 'quiz') {
+    const md = quizToMarkdown(raw, props.file.title)
+    if (!md) return
+    if (format === 'docx') {
+      markdownToDocxBlob(md, props.file.title).then(blob => downloadDocx(blob, props.file!.title))
+    } else if (format === 'md') {
+      const processed = preprocessLatexForMarkdown(md)
+      const blob = new Blob([processed], { type: 'text/markdown;charset=utf-8' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${props.file.title}.md`
+      a.click()
+    }
+    return
+  }
   if (format === 'docx') {
     markdownToDocxBlob(raw, props.file.title).then(blob => downloadDocx(blob, props.file!.title))
   } else if (format === 'md') {
@@ -223,10 +254,20 @@ function onClose() {
   detailContent.value = ''
 }
 
+function onHtmlDownload(command: string) {
+  if (!props.file) return
+  const raw = content.value || ''
+  if (command === 'html') {
+    downloadHtml(raw, props.file.title)
+  } else if (command === 'print') {
+    printHtml(raw)
+  }
+}
+
 function onLearn() {
   if (!props.file?.packId) return
   visible.value = false
-  router.push(`/learn/resource/${props.file.packId}`)
+  router.push(`/learn/resource/${props.file.packId}?resourceId=${props.file.id}`)
 }
 </script>
 

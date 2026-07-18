@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
 import type { PlaybackSpeed } from '@/types/scene'
 import { useSceneTimer } from '@/composables/useSceneTimer'
 
@@ -18,14 +18,14 @@ let copyTimer: ReturnType<typeof setTimeout> | null = null
 
 async function copyCode() {
   try {
-    await navigator.clipboard.writeText(code)
+    await navigator.clipboard.writeText(rawCode)
     copied.value = true
     if (copyTimer) clearTimeout(copyTimer)
     copyTimer = setTimeout(() => { copied.value = false }, 2000)
   } catch {
     // fallback for older browsers
     const ta = document.createElement('textarea')
-    ta.value = code
+    ta.value = rawCode
     ta.style.position = 'fixed'; ta.style.opacity = '0'
     document.body.appendChild(ta)
     ta.select()
@@ -41,6 +41,10 @@ const heading = props.content?.heading || ''
 const rawCode: string = props.content?.code || ''
 const highlightLines: number[] = props.content?.highlightLines || []
 const output = props.content?.output || ''
+
+onBeforeUnmount(() => {
+  if (copyTimer) clearTimeout(copyTimer)
+})
 
 let codeLines = rawCode.split('\n')
 // 防御性处理：LLM 可能输出 \\n 而非真正的换行符

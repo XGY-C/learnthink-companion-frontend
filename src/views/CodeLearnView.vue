@@ -76,9 +76,8 @@
             :visible="selectionMenu.visible"
             :x="selectionMenu.x"
             :y="selectionMenu.y"
-            @explain="onSelectionExplain"
-            @find-similar="onSelectionFindSimilar"
-            @ask="onSelectionAsk"
+            @smart-explain="onSelectionSmartExplain"
+            @ask-ai="onSelectionAskAi"
           />
 
           <!-- Toolbar -->
@@ -154,6 +153,14 @@
       </div>
     </Teleport>
 
+    <TutoringDrawer
+      :visible="showTutoringDrawer"
+      :initial-question="tutoringInitQuestion"
+      :quoted-text="tutoringQuotedText"
+      @close="handleTutoringClose"
+    />
+    <FloatingFab @click="handleFabClick" />
+
     <!-- 离开提示遮罩 -->
     <Transition name="fade">
       <div v-if="isLearningAway" class="learning-away-overlay">
@@ -168,7 +175,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { CaretRight } from '@element-plus/icons-vue'
@@ -178,6 +185,8 @@ import CodeEditorPanel from '@/components/code/CodeEditorPanel.vue'
 import type { GutterMarkerDef, GuidedBlankDef } from '@/components/code/CodeEditorPanel.vue'
 import CodeOutputEnhanced from '@/components/code/CodeOutputEnhanced.vue'
 import SelectionFloatingMenu from '@/components/code/SelectionFloatingMenu.vue'
+import TutoringDrawer from '@/components/tutoring/TutoringDrawer.vue'
+import FloatingFab from '@/components/tutoring/FloatingFab.vue'
 import VariableHoverCard from '@/components/code/VariableHoverCard.vue'
 import CodeContextPanel from '@/components/code/CodeContextPanel.vue'
 import { runCode } from '@/utils/codeRunner'
@@ -311,6 +320,11 @@ const hoverY = ref(0)
 // Selection menu
 const selectionMenu = reactive({ visible: false, x: 0, y: 0, text: '' })
 let selectionTimer: ReturnType<typeof setTimeout> | null = null
+
+// Tutoring drawer
+const showTutoringDrawer = ref(false)
+const tutoringQuotedText = ref('')
+const tutoringInitQuestion = ref('')
 
 // Tutor
 const tutorMessages = ref<{ role: string; content: string }[]>([
@@ -526,18 +540,32 @@ function onSelectionChange(info: { text: string; from: number; to: number; x: nu
   }, 200)
 }
 
-function onSelectionExplain() {
+function onSelectionSmartExplain() {
+  const code = selectionMenu.text
   selectionMenu.visible = false
-  currentConcept.value = {
-    context: '选区代码',
-    name: '代码分析',
-    description: selectionMenu.text || '选中代码的解释...',
-  }
+  tutoringQuotedText.value = ''
+  tutoringInitQuestion.value = `请解释以下代码：\n\`\`\`\n${code}\n\`\`\``
+  showTutoringDrawer.value = true
 }
-function onSelectionFindSimilar() { selectionMenu.visible = false }
-function onSelectionAsk() {
+function onSelectionAskAi() {
   selectionMenu.visible = false
-  tutorMessages.value.push({ role: 'user', content: selectionMenu.text || '这段代码有什么问题吗？' })
+  tutoringQuotedText.value = selectionMenu.text
+  tutoringInitQuestion.value = ''
+  showTutoringDrawer.value = true
+}
+
+function handleFabClick() {
+  if (!showTutoringDrawer.value) {
+    tutoringQuotedText.value = ''
+    tutoringInitQuestion.value = ''
+  }
+  showTutoringDrawer.value = !showTutoringDrawer.value
+}
+
+function handleTutoringClose() {
+  showTutoringDrawer.value = false
+  tutoringQuotedText.value = ''
+  tutoringInitQuestion.value = ''
 }
 
 // ─── Editor Gutter Click ───
@@ -736,7 +764,7 @@ onUnmounted(() => {
 /* Left: Code Main Area */
 .code-main-area {
   flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px;
-  padding: 12px 0 12px 16px; overflow: hidden; transition: flex 0.3s;
+  padding: 12px 0 12px 16px; overflow-y: auto; transition: flex 0.3s;
 }
 .code-main-area.trajectory-mode { flex: 0 0 60%; }
 .code-main-area.edit-mode { flex: 0 0 75%; }
