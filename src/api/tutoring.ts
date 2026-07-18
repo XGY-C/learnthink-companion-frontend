@@ -5,6 +5,7 @@ import type {
   TutoringSessionSummary,
   TutoringSessionDetail,
   TutoringFeedback,
+  GuidedAnswerRequest,
 } from '@/types/tutoring'
 import type { ApiResult } from '@/utils/api'
 
@@ -37,6 +38,53 @@ export async function regenerateSection(
 ): Promise<Response> {
   await ensureValidToken()
   return fetch(`/api/tutoring/${sessionId}/regenerate-section`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify(request),
+  })
+}
+
+export async function guidedAnswerStream(
+  request: GuidedAnswerRequest
+): Promise<Response> {
+  await ensureValidToken()
+  return fetch('/api/tutoring/guided/answer', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify(request),
+  })
+}
+
+// ========== Smart v2 智能辅导 ==========
+
+export async function startSmartTutoring(
+  request: { question: string; courseId: string; chatId?: string; sessionId?: string }
+): Promise<Response> {
+  await ensureValidToken()
+  return fetch('/api/smart/start', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify(request),
+  })
+}
+
+export async function smartAnswer(
+  request: { sessionId: string; answer: string; chatId?: string }
+): Promise<Response> {
+  await ensureValidToken()
+  return fetch('/api/smart/answer', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

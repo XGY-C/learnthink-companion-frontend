@@ -1,0 +1,139 @@
+/* ============================================================
+ *  SVG 可视化主题 -- 内联渲染的 SVG 预置 class 体系
+ * ============================================================
+ *  移植自 DeepTutor 的 svg-theme.css，适配学思伴行的 CSS 变量。
+ *
+ *  LLM 生成的 SVG 使用以下预置 class 而非硬编码 fill，
+ *  使图表自动跟随明暗模式：
+ *
+ *    文本:        .t (14px), .th (14px/500), .ts (12px 辅助色)
+ *    中性:        .box (容器框), .arr (箭头), .leader (虚线引导线)
+ *    交互:        .node (hover), [data-prompt] (可点击)
+ *    色板:        .c-{gray,blue,teal,coral,pink,purple,green,amber,red}
+ *
+ *  色板通过 CSS 变量 --fill / --stroke / --text 控制形状和文字颜色，
+ *  暗色模式通过 html[data-theme="dark"] 切换。
+ * ============================================================ */
+
+.lt-svg-root svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Chart.js 容器：保持内联图表紧凑 */
+.lt-chart-wrap {
+  max-height: 480px;
+}
+
+/* 全屏覆盖层 */
+.lt-viz-fullscreen svg {
+  max-height: calc(100vh - 140px);
+}
+
+.lt-viz-fullscreen .lt-chart-wrap {
+  max-height: none;
+  max-width: min(100%, calc((100vh - 140px) * 2));
+  margin-inline: auto;
+}
+
+/* 字体：覆盖 SVG 自身和从 .prose 继承的衬线字体 */
+.lt-svg-root,
+.lt-svg-root text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+/* 垂直居中：宿主保证，LLM 不需要自己设 dominant-baseline */
+.lt-svg-root text {
+  dominant-baseline: central;
+}
+
+/* ── 文本角色 ──────────────────────────────────── */
+.lt-svg-root text.t,
+.lt-svg-root text.th {
+  font-size: 14px;
+  fill: var(--lt-text-primary);
+}
+.lt-svg-root text.th {
+  font-weight: 500;
+}
+.lt-svg-root text.ts {
+  font-size: 12px;
+  fill: var(--lt-text-secondary);
+}
+
+/* ── 中性容器与连接线 ──────────────────────────── */
+.lt-svg-root .box {
+  fill: var(--lt-bg-page);
+  stroke: var(--lt-border);
+  stroke-width: 0.5;
+}
+.lt-svg-root .arr {
+  stroke: var(--lt-text-secondary);
+  stroke-width: 1.5;
+  fill: none;
+}
+.lt-svg-root .leader {
+  stroke: var(--lt-text-auxiliary);
+  stroke-width: 0.5;
+  stroke-dasharray: 3 3;
+  fill: none;
+}
+
+/* ── 交互样式 ──────────────────────────────────── */
+.lt-svg-root .node,
+.lt-svg-root [data-prompt] {
+  cursor: pointer;
+}
+.lt-svg-root .node {
+  transition: opacity 0.15s ease;
+}
+.lt-svg-root .node:hover,
+.lt-svg-root [data-prompt]:hover {
+  opacity: 0.82;
+}
+
+/* ── 色板（亮色模式）──────────────────────────── */
+.lt-svg-root .c-gray   { --fill: #f1efe8; --stroke: #5f5e5a; --text: #2c2c2a; }
+.lt-svg-root .c-blue   { --fill: #e6f1fb; --stroke: #185fa5; --text: #0c447c; }
+.lt-svg-root .c-teal   { --fill: #e1f5ee; --stroke: #0f6e56; --text: #085041; }
+.lt-svg-root .c-coral  { --fill: #faece7; --stroke: #993c1d; --text: #712b13; }
+.lt-svg-root .c-pink   { --fill: #fbeaf0; --stroke: #993556; --text: #72243e; }
+.lt-svg-root .c-purple { --fill: #eeedfe; --stroke: #534ab7; --text: #3c3489; }
+.lt-svg-root .c-green  { --fill: #eaf3de; --stroke: #3b6d11; --text: #27500a; }
+.lt-svg-root .c-amber  { --fill: #faeeda; --stroke: #854f0b; --text: #633806; }
+.lt-svg-root .c-red    { --fill: #fcebeb; --stroke: #a32d2d; --text: #791f1f; }
+
+/* ── 色板（暗色模式）──────────────────────────── */
+html[data-theme="dark"] .lt-svg-root .c-gray   { --fill: #444441; --stroke: #b4b2a9; --text: #d3d1c7; }
+html[data-theme="dark"] .lt-svg-root .c-blue   { --fill: #0c447c; --stroke: #85b7eb; --text: #b5d4f4; }
+html[data-theme="dark"] .lt-svg-root .c-teal   { --fill: #085041; --stroke: #5dcaa5; --text: #9fe1cb; }
+html[data-theme="dark"] .lt-svg-root .c-coral  { --fill: #712b13; --stroke: #f0997b; --text: #f5c4b3; }
+html[data-theme="dark"] .lt-svg-root .c-pink   { --fill: #72243e; --stroke: #ed93b1; --text: #f4c0d1; }
+html[data-theme="dark"] .lt-svg-root .c-purple { --fill: #3c3489; --stroke: #afa9ec; --text: #cecbf6; }
+html[data-theme="dark"] .lt-svg-root .c-green  { --fill: #27500a; --stroke: #97c459; --text: #c0dd97; }
+html[data-theme="dark"] .lt-svg-root .c-amber  { --fill: #633806; --stroke: #ef9f27; --text: #fac775; }
+html[data-theme="dark"] .lt-svg-root .c-red    { --fill: #791f1f; --stroke: #f09595; --text: #f7c1c1; }
+
+/* ── 色板应用规则 ──────────────────────────────── */
+/* 形状取 fill+stroke，后代 text 取 ramp text */
+.lt-svg-root
+  :is(.c-gray, .c-blue, .c-teal, .c-coral, .c-pink,
+      .c-purple, .c-green, .c-amber, .c-red)
+  > :is(rect, circle, ellipse, polygon),
+.lt-svg-root
+  :is(rect, circle, ellipse, polygon):is(
+    .c-gray, .c-blue, .c-teal, .c-coral, .c-pink,
+    .c-purple, .c-green, .c-amber, .c-red
+  ) {
+  fill: var(--fill);
+  stroke: var(--stroke);
+}
+
+.lt-svg-root
+  :is(.c-gray, .c-blue, .c-teal, .c-coral, .c-pink,
+      .c-purple, .c-green, .c-amber, .c-red)
+  text {
+  fill: var(--text);
+}

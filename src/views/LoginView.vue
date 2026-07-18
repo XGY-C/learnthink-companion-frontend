@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Lock, Message, Avatar } from '@element-plus/icons-vue'
 import LottieAnimation from '@/components/LottieAnimation.vue'
@@ -22,44 +22,68 @@ const router = useRouter()
 const route = useRoute()
 const { codeSending, codeSent, countdown, sendVerificationCode, login: authLogin, register: authRegister } = useAuth()
 
-// 状态：login | register
 const activeTab = ref<'login' | 'register'>('login')
+const isCardHovered = ref(false)
 
+let hoverTimer: ReturnType<typeof setTimeout> | null = null
 
-// 动效降级检测
+const handleCardMouseEnter = () => {
+  if (hoverTimer) clearTimeout(hoverTimer)
+  hoverTimer = setTimeout(() => {
+    isCardHovered.value = true
+  }, 300)
+}
+
+const handleCardMouseLeave = () => {
+  if (hoverTimer) clearTimeout(hoverTimer)
+  hoverTimer = null
+  isCardHovered.value = false
+  handleMouseLeave()
+}
+
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-// 鼠标视差
 const cardRef = ref<HTMLElement | null>(null)
 const parallaxStyle = ref({ transform: 'perspective(1000px) rotateX(0deg) rotateY(0deg)' })
 const isDesktop = ref(window.innerWidth >= 768)
+const isMobile = computed(() => !isDesktop.value)
+
+let rafPending = false
+let lastMouseEvent: MouseEvent | null = null
+let cachedRect: { left: number; top: number; width: number; height: number } | null = null
 
 const handleMouseMove = (e: MouseEvent) => {
-  if (prefersReducedMotion || !cardRef.value || !isDesktop.value) return
-  const rect = cardRef.value.getBoundingClientRect()
-  const centerX = rect.left + rect.width / 2
-  const centerY = rect.top + rect.height / 2
-  const deltaX = (e.clientX - centerX) / rect.width
-  const deltaY = (e.clientY - centerY) / rect.height
-  const rotateY = deltaX * 4   // 最大 ±4°
-  const rotateX = -deltaY * 4
-  parallaxStyle.value = {
-    transform: `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`
-  }
+  if (!cardRef.value || !isDesktop.value) return
+  if (document.activeElement?.tagName === 'INPUT') return
+  lastMouseEvent = e
+  if (rafPending) return
+  rafPending = true
+  requestAnimationFrame(() => {
+    rafPending = false
+    if (!lastMouseEvent) return
+    if (!cachedRect) {
+      const rawRect = cardRef.value!.getBoundingClientRect()
+      cachedRect = { left: rawRect.left, top: rawRect.top, width: rawRect.width, height: rawRect.height }
+    }
+    const centerX = cachedRect.left + cachedRect.width / 2
+    const centerY = cachedRect.top + cachedRect.height / 2
+    const deltaX = (lastMouseEvent.clientX - centerX) / cachedRect.width
+    const deltaY = (lastMouseEvent.clientY - centerY) / cachedRect.height
+    const rotateY = deltaX * 4
+    const rotateX = -deltaY * 4
+    parallaxStyle.value = {
+      transform: `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`
+    }
+  })
 }
 
 const handleMouseLeave = () => {
-  if (prefersReducedMotion || !isDesktop.value) return
+  if (!isDesktop.value) return
+  lastMouseEvent = null
+  cachedRect = null
   parallaxStyle.value = { transform: 'perspective(1000px) rotateX(0deg) rotateY(0deg)' }
 }
 
-// 背景鼠标响应（用于后续扩展交互）
-const handleBgMouseMove = () => {
-  // 可用于驱动背景渐变跟随鼠标轻微偏转
-  // 留作扩展
-}
-
-// 响应式监听窗口尺寸
 let resizeTimer: ReturnType<typeof setTimeout> | undefined
 const checkDesktop = () => {
   isDesktop.value = window.innerWidth >= 768
@@ -69,17 +93,15 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(checkDesktop, 200)
 })
 
-// 登录表单
 const loginForm = ref({
   email: '',
   password: '',
   remember: false
 })
 const loginLoading = ref(false)
-const loginError = ref('')           // 表单级错误（鉴权失败/网络错误）
-const loginFieldErrors = ref({ email: '', password: '' })  // 字段级错误
+const loginError = ref('')
+const loginFieldErrors = ref({ email: '', password: '' })
 
-// 注册表单
 const registerForm = ref({
   username: '',
   email: '',
@@ -92,7 +114,6 @@ const registerLoading = ref(false)
 const registerError = ref('')
 const registerFieldErrors = ref({ username: '', email: '', password: '', confirmPassword: '', verificationCode: '' })
 
-/** 发送验证码（包装 composable，处理字段错误映射） */
 async function handleSendCode() {
   const { success, error } = await sendVerificationCode(registerForm.value.email)
   if (!success) {
@@ -102,22 +123,18 @@ async function handleSendCode() {
   }
 }
 
-// 输入框引用（焦点管理）
 const loginEmailRef = ref<InstanceType<any> | null>(null)
 const registerUsernameRef = ref<InstanceType<any> | null>(null)
 
-// 密码框聚焦状态（控制 shield-lock 动画显示）
 const loginPasswordFocused = ref(false)
 const registerPasswordFocused = ref(false)
 
-// 校验通过状态（控制 check-bounce 动画）
 const loginEmailValid = ref(false)
 const loginPasswordValid = ref(false)
 const registerUsernameValid = ref(false)
 const registerPasswordValid = ref(false)
 const registerConfirmValid = ref(false)
 
-// 知识元素数据
 const knowledgeChars = [
   { char: '学', x: '8%', y: '22%', size: '42px', delay: '0s', duration: '28s' },
   { char: '思', x: '85%', y: '15%', size: '36px', delay: '-5s', duration: '32s' },
@@ -127,9 +144,6 @@ const knowledgeChars = [
   { char: 'K', x: '92%', y: '45%', size: '30px', delay: '-10s', duration: '24s' },
 ]
 
-// ========================================
-// 轮播 — 卖点展示（动画 + 标题 + 描述）
-// ========================================
 const currentBanner = ref(0)
 const banners = [
   {
@@ -154,7 +168,6 @@ const banners = [
   }
 ]
 
-// 定时轮播（动效降级时不轮播）
 let bannerTimer: ReturnType<typeof setInterval> | undefined
 const startBannerLoop = () => {
   stopBannerLoop()
@@ -168,7 +181,6 @@ const stopBannerLoop = () => {
   if (bannerTimer !== undefined) clearInterval(bannerTimer)
 }
 
-// 手动点击时重置定时器，让用户有完整阅读时间
 const goToBanner = (idx: number) => {
   currentBanner.value = idx
   startBannerLoop()
@@ -177,18 +189,13 @@ const goToBanner = (idx: number) => {
 onMounted(() => startBannerLoop())
 onUnmounted(() => stopBannerLoop())
 
-// 切换面板（左右滑动切换）
 const switchTab = async (tab: 'login' | 'register') => {
   if (activeTab.value === tab) return
   activeTab.value = tab
-  
-  // 切换时清空另一 panel 的错误提示
   loginError.value = ''
   registerError.value = ''
   loginFieldErrors.value = { email: '', password: '' }
   registerFieldErrors.value = { username: '', email: '', password: '', confirmPassword: '', verificationCode: '' }
-  
-  // 切换后焦点自动落到新 panel 首个输入框
   await nextTick()
   if (tab === 'login') {
     loginEmailRef.value?.focus()
@@ -197,8 +204,44 @@ const switchTab = async (tab: 'login' | 'register') => {
   }
 }
 
+// ========================================
+// 移动端滑动切换手势
+// ========================================
+const swipeContainer = ref<HTMLElement | null>(null)
+const touchStartX = ref(0)
+const touchStartY = ref(0)
+const touchEndX = ref(0)
+const touchEndY = ref(0)
+const swipeThreshold = 60
+
+const onTouchStart = (e: TouchEvent) => {
+  if (!isMobile.value) return
+  touchStartX.value = e.touches[0].clientX
+  touchStartY.value = e.touches[0].clientY
+  touchEndX.value = e.touches[0].clientX
+  touchEndY.value = e.touches[0].clientY
+}
+
+const onTouchMove = (e: TouchEvent) => {
+  if (!isMobile.value) return
+  touchEndX.value = e.touches[0].clientX
+  touchEndY.value = e.touches[0].clientY
+}
+
+const onTouchEnd = () => {
+  if (!isMobile.value) return
+  const dx = touchStartX.value - touchEndX.value
+  const dy = touchStartY.value - touchEndY.value
+  if (Math.abs(dx) < swipeThreshold) return
+  if (Math.abs(dy) > Math.abs(dx) * 1.5) return
+  if (dx > 0 && activeTab.value === 'login') {
+    switchTab('register')
+  } else if (dx < 0 && activeTab.value === 'register') {
+    switchTab('login')
+  }
+}
+
 const handleLogin = async () => {
-  // 内联校验
   const errors = { email: '', password: '' }
   errors.email = validateEmail(loginForm.value.email)
   if (!loginForm.value.password) errors.password = '请输入密码'
@@ -215,14 +258,13 @@ const handleLogin = async () => {
     loginEmailValid.value = true
     loginPasswordValid.value = true
     const redirect = route.query.redirect as string
-    router.push(redirect || '/')
+    router.push(redirect || '/courses')
   } else {
     loginError.value = error
   }
 }
 
 const handleRegister = async () => {
-  // 内联校验
   const errors = { username: '', email: '', password: '', confirmPassword: '', verificationCode: '' }
   if (!registerForm.value.username) errors.username = '请输入用户名'
 
@@ -242,7 +284,6 @@ const handleRegister = async () => {
     registerError.value = '请阅读并同意相关协议'
   }
 
-  // 校验验证码
   if (!registerForm.value.verificationCode) {
     errors.verificationCode = '请输入验证码'
   } else if (registerForm.value.verificationCode.length !== 6) {
@@ -264,7 +305,7 @@ const handleRegister = async () => {
     registerUsernameValid.value = true
     registerPasswordValid.value = true
     registerConfirmValid.value = true
-    router.push('/chat')
+    router.push('/courses')
   } else {
     registerError.value = error
   }
@@ -272,68 +313,58 @@ const handleRegister = async () => {
 </script>
 
 <template>
-  <div class="min-h-screen w-full flex items-center justify-center relative overflow-hidden font-sans animated-gradient"
-       @mousemove="handleBgMouseMove">
-    <!-- 背景光效装饰 — 极光流光动效 -->
-    <div class="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] rounded-full blur-[120px] pointer-events-none aurora-1" style="background-color: var(--lt-shadow-blue);"></div>
-    <div class="absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full blur-[120px] pointer-events-none aurora-2" style="background-color: var(--lt-shadow-ai);"></div>
-    <div class="absolute top-[40%] left-[30%] w-[35%] h-[35%] rounded-full blur-[100px] pointer-events-none aurora-3" style="background-color: var(--lt-ai-light-3); opacity: 0.15;"></div>
+  <div class="min-h-screen w-full flex items-center justify-center relative overflow-hidden font-sans animated-gradient">
+    <div class="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] rounded-full blur-[80px] pointer-events-none aurora-1" style="background-color: var(--lt-shadow-blue);"></div>
+    <div class="absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full blur-[80px] pointer-events-none aurora-2" style="background-color: var(--lt-shadow-ai);"></div>
+    <div class="absolute top-[40%] left-[30%] w-[35%] h-[35%] rounded-full blur-[60px] pointer-events-none aurora-3" style="background-color: var(--lt-ai-light-3); opacity: 0.15;"></div>
 
-        <!-- 交互式 Canvas 粒子网络（移动端禁用，性能优化） -->
     <InteractiveParticles v-if="isDesktop" />
 
-    <!-- 微井网格背景 -->
     <div class="absolute inset-0 z-0 pointer-events-none opacity-[0.04]"
-         style="background-mage: linear-gradient(rgba(43,111,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(43,111,255,0.5) 1px, transparent 1px); background-size: 60px 60px;">
+         style="background-image: linear-gradient(rgba(43,111,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(43,111,255,0.5) 1px, transparent 1px); background-size: 60px 60px;">
     </div>
 
     <div ref="cardRef"
-         class="login-card-wrapper w-full max-w-[1040px] min-h-[640px] flex mx-4 backdrop-blur-sm border overflow-hidden relative z-10 card-breathing"
-         style="background-color: var(--lt-bg-card); border-radius: var(--lt-radius-lg, 28px); box-shadow: var(--lt-shadow-elevated, 0 24px 60px -12px rgba(0,0,0,0.08)); border-color: var(--lt-border);"
+         class="login-card-wrapper w-full max-w-[1040px] min-h-[640px] flex mx-4 border overflow-hidden relative z-10 card-breathing"
+         style="background-color: var(--lt-bg-card); border-radius: var(--lt-radius-lg, 28px); box-shadow: var(--lt-shadow-elevated, 0 24px 60px -12px rgba(0,0,0,0.08)); border-color: var(--lt-border); will-change: transform;"
          :style="[parallaxStyle, { transition: 'transform 0.15s ease-out' }]"
+         @mouseenter="handleCardMouseEnter"
          @mousemove="handleMouseMove"
-         @mouseleave="handleMouseLeave">
-      
-      <!-- 左侧：品牌 AI 舞台空间 -->
-      <div class="hidden md:flex w-[46%] relative overflow-hidden flex-col justify-between p-12 text-white">
-        <!-- 背景粒子/星云网络 Lottie -->
+         @mouseleave="handleCardMouseLeave">
+
+      <!-- 左侧：品牌 AI 舞台空间（桌面） -->
+      <div class="hidden md:flex w-[46%] relative overflow-hidden flex-col justify-between p-12 text-white login-left-stage">
         <div class="absolute inset-0 z-0 opacity-40">
-          <LottieAnimation :animationData="bgParticlesLottie" width="100%" height="100%" />
+          <LottieAnimation :animationData="bgParticlesLottie" width="100%" height="100%" :speed="0.5" :paused="!isCardHovered" />
         </div>
-        <!-- 沉浸式高级渐变背景 (覆盖在动画下层) -->
         <div class="absolute inset-0 -z-10 opacity-90" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-ai-dark-2));"></div>
 
-        <!-- 悬浮 AI 核心 (Hero Lottie) -->
         <div class="absolute top-[5%] right-[-10%] w-[350px] h-[350px] z-0 opacity-80 mix-blend-screen pointer-events-none drop-shadow-2xl flex items-center justify-center">
-          <LottieAnimation :animationData="aiCoreLottie" width="100%" height="100%" />
+          <LottieAnimation :animationData="aiCoreLottie" width="100%" height="100%" :speed="0.6" :paused="!isCardHovered" />
         </div>
-        
-        <!-- 辅助发光球体 -->
+
         <div class="absolute bottom-[-10%] left-[-10%] w-[250px] h-[250px] rounded-full mix-blend-overlay filter blur-[60px] opacity-40 z-0" style="background-color: var(--lt-ai-light-3);"></div>
-        
+
         <div class="relative z-10">
-                    <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 border border-white/20 backdrop-blur-md mb-8 shadow-sm">
-          <div class="flex items-center justify-center opacity-90 -ml-1">
-            <LottieAnimation :animationData="aiPulseLottie" width="20px" height="20px" />
+            <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 border border-white/20 mb-8 shadow-sm">
+            <div class="flex items-center justify-center opacity-90 -ml-1">
+              <LottieAnimation :animationData="aiPulseLottie" width="20px" height="20px" />
+            </div>
+            <span class="text-xs font-medium tracking-wide text-white/90">智能体环境已就绪</span>
           </div>
-          <span class="text-xs font-medium tracking-wide text-white/90">智能体环境已就绪</span>
-          </div>
-                    <!-- 浮动 AI 小助手（LottieFiles 官方动画） -->
           <div class="absolute bottom-6 right-4 w-20 h-20 z-10 opacity-50 pointer-events-none drop-shadow-lg">
-          <LottieAnimation :animationData="aiAssistantLottie" width="100%" height="100%" />
+            <LottieAnimation :animationData="aiAssistantLottie" width="100%" height="100%" />
           </div>
           <h1 class="text-4xl font-extrabold tracking-tight mb-4 flex items-center gap-2">
             LearnThink
-            <span class="px-2 py-0.5 rounded-md bg-white/20 text-[14px] font-bold tracking-normal backdrop-blur-sm">AI</span>
+            <span class="px-2 py-0.5 rounded-md bg-white/20 text-[14px] font-bold tracking-normal">AI</span>
           </h1>
           <p class="text-lg text-blue-50/90 font-light tracking-wide leading-relaxed">基于学习画像驱动，<br/>为你打造专属的多智能体学习助手。</p>
         </div>
-        
-                <div class="relative z-10 w-full mb-4 flex flex-col">
-          <!-- 轮播内容区 -->
+
+        <div class="relative z-10 w-full mb-4 flex flex-col">
           <transition name="banner-fade" mode="out-in">
             <div :key="currentBanner" class="flex flex-col items-center justify-center">
-              <!-- 主题动画 -->
               <div class="w-[100px] h-[100px] mb-4 opacity-85 drop-shadow-lg">
                 <LottieAnimation
                   :animationData="banners[currentBanner].lottie"
@@ -341,22 +372,19 @@ const handleRegister = async () => {
                   height="100%"
                 />
               </div>
-              <!-- 标题 -->
               <h3 class="text-white text-xl font-bold tracking-tight mb-2 drop-shadow-sm">
                 {{ banners[currentBanner].title }}
               </h3>
-              <!-- 描述文案 -->
               <p class="text-white/80 text-sm font-light tracking-wide leading-relaxed text-center max-w-[260px]">
                 {{ banners[currentBanner].subtitle }}
               </p>
             </div>
           </transition>
-          <!-- 优雅的指示器 -->
           <div class="flex gap-2.5 mt-4 justify-center">
-            <button 
-              v-for="(_, idx) in banners" 
-              :key="idx" 
-              class="h-1.5 rounded-full transition-all duration-500 ease-out cursor-pointer"
+            <button
+              v-for="(_, idx) in banners"
+              :key="idx"
+              class="h-1.5 rounded-full transition-[width,background-color,box-shadow] duration-500 ease-out cursor-pointer"
               :class="currentBanner === idx ? 'w-8 bg-white shadow-[0_0_8px_rgba(255,255,255,0.6)]' : 'w-2 bg-white/30 hover:bg-white/50'"
               @click="goToBanner(idx)"
             ></button>
@@ -364,85 +392,122 @@ const handleRegister = async () => {
         </div>
       </div>
 
-      <!-- 右侧：表单侧 (绝对定位解决溢出和排版问题) -->
+      <!-- 右侧：表单侧 -->
       <div class="w-full md:w-[54%] relative flex flex-col" style="background-color: var(--lt-bg-card);">
-        
-                <!-- 移动端顶部 -->
-        <div class="md:hidden flex flex-col items-center pt-10 pb-2 z-20 relative">
-          <img src="/logo.svg" alt="LearnThink Logo" class="w-10 h-10 mb-2" />
-          <h1 class="text-2xl font-bold" style="color: var(--lt-text-primary);">LearnThink <span style="color: var(--lt-brand);">AI</span></h1>
+
+        <!-- ========= 移动端品牌头部（紧凑轮播） ========= -->
+        <div class="mobile-brand md:hidden relative overflow-hidden pt-5 pb-2 z-20 px-6">
+          <div class="flex items-center gap-3 mb-2">
+            <img src="/logo.svg" alt="LearnThink Logo" class="w-8 h-8" />
+            <h1 class="text-lg font-bold" style="color: var(--lt-text-primary);">
+              LearnThink <span style="color: var(--lt-brand);">AI</span>
+            </h1>
+          </div>
+          <transition name="banner-fade" mode="out-in">
+            <div :key="currentBanner" class="flex items-center gap-3 min-h-[44px]">
+              <div class="w-9 h-9 flex-shrink-0 opacity-85">
+                <LottieAnimation
+                  :animationData="banners[currentBanner].lottie"
+                  width="100%"
+                  height="100%"
+                />
+              </div>
+              <div class="min-w-0">
+                <p class="text-sm font-semibold truncate" style="color: var(--lt-text-primary);">
+                  {{ banners[currentBanner].title }}
+                </p>
+                <p class="text-xs truncate" style="color: var(--lt-text-auxiliary);">
+                  {{ banners[currentBanner].subtitle }}
+                </p>
+              </div>
+            </div>
+          </transition>
+          <div class="flex gap-1.5 mt-2">
+            <button
+              v-for="(_, idx) in banners"
+              :key="idx"
+              class="h-1 rounded-full transition-[width,background-color] duration-500 ease-out"
+              :class="currentBanner === idx ? 'w-5 bg-[var(--lt-brand)]' : 'w-1 bg-[var(--lt-border)]'"
+              @click="goToBanner(idx)"
+            ></button>
+          </div>
         </div>
 
         <!-- 悬浮切换头 -->
-        <div class="flex justify-center mt-10 md:mt-14 mb-2 relative z-20 w-full px-8">
-          <div class="p-1.5 rounded-2xl flex gap-1 w-full max-w-[260px] relative backdrop-blur-sm" style="background-color: var(--lt-bg-page);">
+        <div class="flex justify-center mt-3 md:mt-14 mb-2 relative z-20 w-full px-6 sm:px-14">
+          <div class="p-1.5 rounded-2xl flex gap-1 w-full md:max-w-[260px] relative" style="background-color: var(--lt-bg-page);">
             <div class="absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-xl shadow-sm transition-transform duration-400 ease-[cubic-bezier(0.34,1.15,0.64,1)]"
                  style="background-color: var(--lt-bg-card);"
                  :style="{ transform: activeTab === 'login' ? 'translateX(0)' : 'translateX(100%)' }"></div>
-            
-            <button class="flex-1 py-2 text-sm font-semibold transition-colors duration-300 relative z-10 rounded-xl"
+
+            <button class="flex-1 py-2.5 text-sm font-semibold transition-[color] duration-300 relative z-10 rounded-xl"
               :style="{ color: activeTab === 'login' ? 'var(--lt-brand)' : 'var(--lt-text-secondary)' }"
               @click="switchTab('login')">登 录</button>
-            <button class="flex-1 py-2 text-sm font-semibold transition-colors duration-300 relative z-10 rounded-xl"
+            <button class="flex-1 py-2.5 text-sm font-semibold transition-[color] duration-300 relative z-10 rounded-xl"
               :style="{ color: activeTab === 'register' ? 'var(--lt-brand)' : 'var(--lt-text-secondary)' }"
               @click="switchTab('register')">注 册</button>
           </div>
         </div>
 
-                <!-- 滑动内容区：左右滑动切换（200~300ms） -->
-        <div class="relative flex-1 w-full overflow-hidden">
-                    <!-- 滑动容器：登录在左（translateX(0)），注册在右（translateX(-100%)） -->
-          <div class="flex h-full w-full transition-all duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)]"
+        <!-- 滑动内容区（移动端支持滑动切换） -->
+        <div ref="swipeContainer"
+             class="relative flex-1 w-full overflow-hidden"
+             @touchstart="onTouchStart"
+             @touchmove="onTouchMove"
+             @touchend="onTouchEnd">
+          <div class="flex h-full w-full transition-transform duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)]"
                :class="{ '!transition-none !duration-0': prefersReducedMotion }"
                :style="{ transform: activeTab === 'login' ? 'translateX(0)' : 'translateX(-100%)' }">
-            
+
             <!-- 登录面板 -->
-            <div class="min-w-full h-full flex-shrink-0 flex flex-col items-center justify-center px-8 sm:px-14 pb-8"
+            <div class="min-w-full h-full flex-shrink-0 flex flex-col items-center justify-start md:justify-center px-6 sm:px-14 pt-4 md:pt-0 pb-8"
                  role="tabpanel"
                  aria-label="登录表单"
                  v-show="!prefersReducedMotion || activeTab === 'login'">
               <div class="w-full max-w-[340px]">
-                                <div class="mb-8 text-center">
-                                    <h2 class="text-2xl font-bold tracking-tight mb-2" style="color: var(--lt-text-primary);">欢迎回来</h2>
-                                    <p class="text-sm" style="color: var(--lt-text-secondary);">登录以继续你的个性化学习之旅</p>
-                                  </div>
+                <div class="mb-5 md:mb-8 text-center">
+                  <h2 class="text-xl md:text-2xl font-bold tracking-tight mb-1.5" style="color: var(--lt-text-primary);">欢迎回来</h2>
+                  <p class="text-sm" style="color: var(--lt-text-secondary);">登录以继续你的个性化学习之旅</p>
+                </div>
 
-                <!-- 表单级错误提示 -->
                 <div v-if="loginError" class="mb-4 px-4 py-2.5 rounded-xl text-sm font-medium border"
                      role="alert"
                      style="background-color: var(--lt-ai-light-9); border-color: var(--lt-ai-light-5); color: var(--lt-ai-dark-2);">
                   {{ loginError }}
                 </div>
 
-                                <el-form @submit.prevent="handleLogin">
-                                  <el-form-item class="mb-4" :error="loginFieldErrors.email || ''">
-                                    <div class="relative w-full">
-                                      <!-- 校验通过对勾 -->
-                                      <div v-if="loginEmailValid && !loginFieldErrors.email" 
-                                           class="absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 z-10 pointer-events-none">
-                                        <LottieAnimation :animationData="checkBounceLottie" width="100%" height="100%" :loop="false" />
-                                      </div>
-                                      <el-input v-model="loginForm.email"
-                                                placeholder="邮箱地址"
-                                                size="large"
-                                                :prefix-icon="Message"
-                                                clearable
-                                                class="premium-input h-[46px]"
-                                                ref="loginEmailRef"
-                                                aria-label="邮箱地址" />
-                                    </div>
-                                  </el-form-item>
-
-                                    <!-- 密码安全守护小盾牌 -->
-                  <div class="relative">
-                    <div v-if="loginPasswordFocused && !loginFieldErrors.password" 
-                         class="absolute -right-16 top-1/2 -translate-y-1/2 w-16 h-16 z-10 pointer-events-none">
-                                               <LottieAnimation :animationData="cyberSecurityLottie" width="100%" height="100%" />
-                                             </div>
-                                                                 <el-form-item class="mb-2" :error="loginFieldErrors.password || ''">
+                <el-form @submit.prevent="handleLogin">
+                  <!-- 邮箱 -->
+                  <div class="mb-4">
+                    <label class="input-label" :class="{ 'input-label-error': !!loginFieldErrors.email }">邮箱地址</label>
+                    <el-form-item class="mb-0" :error="loginFieldErrors.email || ''">
                       <div class="relative w-full">
-                        <!-- 校验通过对勾 -->
-                        <div v-if="loginPasswordValid && !loginFieldErrors.password" 
+                        <div v-if="loginEmailValid && !loginFieldErrors.email"
+                             class="absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 z-10 pointer-events-none">
+                          <LottieAnimation :animationData="checkBounceLottie" width="100%" height="100%" :loop="false" />
+                        </div>
+                        <el-input v-model="loginForm.email"
+                                  placeholder="请输入邮箱地址"
+                                  size="large"
+                                  :prefix-icon="Message"
+                                  clearable
+                                  class="premium-input h-[46px]"
+                                  ref="loginEmailRef"
+                                  aria-label="邮箱地址" />
+                      </div>
+                    </el-form-item>
+                  </div>
+
+                  <!-- 密码 -->
+                  <div class="relative mb-2">
+                    <label class="input-label" :class="{ 'input-label-error': !!loginFieldErrors.password }">密码</label>
+                    <div v-show="loginPasswordFocused && !loginFieldErrors.password"
+                         class="hidden md:block absolute -right-16 top-7 w-16 h-16 z-10 pointer-events-none">
+                      <LottieAnimation :animationData="cyberSecurityLottie" width="100%" height="100%" :paused="!loginPasswordFocused" />
+                    </div>
+                    <el-form-item class="mb-0" :error="loginFieldErrors.password || ''">
+                      <div class="relative w-full">
+                        <div v-if="loginPasswordValid && !loginFieldErrors.password"
                              class="absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 z-10 pointer-events-none">
                           <LottieAnimation :animationData="checkBounceLottie" width="100%" height="100%" :loop="false" />
                         </div>
@@ -470,7 +535,7 @@ const handleRegister = async () => {
                     <el-button type="primary" size="large" class="w-full btn-gradient" :disabled="loginLoading" @click="handleLogin" aria-label="登录">
                       <span v-if="!loginLoading">登录</span>
                       <div v-else class="flex items-center justify-center gap-2">
-                                                <LottieAnimation :animationData="aiSpinnerLottie" width="24px" height="24px" />
+                        <LottieAnimation :animationData="aiSpinnerLottie" width="24px" height="24px" />
                         <span>登录中…</span>
                       </div>
                     </el-button>
@@ -479,51 +544,56 @@ const handleRegister = async () => {
               </div>
             </div>
 
-                        <!-- 注册面板 -->
-            <div class="min-w-full h-full flex-shrink-0 flex flex-col items-center justify-center px-8 sm:px-14 pb-8"
+            <!-- 注册面板 -->
+            <div class="min-w-full h-full flex-shrink-0 flex flex-col items-center justify-start md:justify-center px-6 sm:px-14 pt-4 md:pt-0 pb-8"
                  role="tabpanel"
                  aria-label="注册表单"
                  v-show="!prefersReducedMotion || activeTab === 'register'">
               <div class="w-full max-w-[340px]">
-                                <div class="mb-6 text-center">
-                                    <h2 class="text-2xl font-bold tracking-tight mb-2" style="color: var(--lt-text-primary);">创建你的学思伴行账号</h2>
-                                    <p class="text-sm" style="color: var(--lt-text-secondary);">开始你的 AI 学习之旅</p>
-                                  </div>
+                <div class="mb-5 md:mb-6 text-center">
+                  <h2 class="text-xl md:text-2xl font-bold tracking-tight mb-1.5" style="color: var(--lt-text-primary);">创建你的学思伴行账号</h2>
+                  <p class="text-sm" style="color: var(--lt-text-secondary);">开始你的 AI 学习之旅</p>
+                </div>
 
-                <!-- 表单级错误提示 -->
                 <div v-if="registerError" class="mb-4 px-4 py-2.5 rounded-xl text-sm font-medium border"
                      role="alert"
                      style="background-color: var(--lt-ai-light-9); border-color: var(--lt-ai-light-5); color: var(--lt-ai-dark-2);">
                   {{ registerError }}
                 </div>
 
-                                <el-form @submit.prevent="handleRegister">
-                                  <el-form-item class="mb-4" :error="registerFieldErrors.username || ''">
-                                    <div class="relative w-full">
-                                      <!-- 校验通过对勾 -->
-                                      <div v-if="registerUsernameValid && !registerFieldErrors.username" 
-                                           class="absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 z-10 pointer-events-none">
-                                        <LottieAnimation :animationData="checkBounceLottie" width="100%" height="100%" :loop="false" />
-                                      </div>
-                                      <el-input v-model="registerForm.username"
-                                                placeholder="设置用户名"
-                                                size="large"
-                                                :prefix-icon="Avatar"
-                                                clearable
-                                                class="premium-input h-[46px]"
-                                                ref="registerUsernameRef"
-                                                aria-label="用户名" />
-                                    </div>
-                                  </el-form-item>
+                <el-form @submit.prevent="handleRegister">
+                  <!-- 用户名 -->
+                  <div class="mb-4">
+                    <label class="input-label" :class="{ 'input-label-error': !!registerFieldErrors.username }">用户名</label>
+                    <el-form-item class="mb-0" :error="registerFieldErrors.username || ''">
+                      <div class="relative w-full">
+                        <div v-if="registerUsernameValid && !registerFieldErrors.username"
+                             class="absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 z-10 pointer-events-none">
+                          <LottieAnimation :animationData="checkBounceLottie" width="100%" height="100%" :loop="false" />
+                        </div>
+                        <el-input v-model="registerForm.username"
+                                  placeholder="设置用户名"
+                                  size="large"
+                                  :prefix-icon="Avatar"
+                                  clearable
+                                  class="premium-input h-[46px]"
+                                  ref="registerUsernameRef"
+                                  aria-label="用户名" />
+                      </div>
+                    </el-form-item>
+                  </div>
 
-                  <el-form-item class="mb-4">
-                    <el-input v-model="registerForm.email"
-                                                            placeholder="邮箱地址"
-                              size="large"
-                              :prefix-icon="Message"
-                              clearable
-                              class="premium-input h-[46px]"
-                              aria-label="邮箱地址">
+                  <!-- 邮箱 + 验证码 -->
+                  <div class="mb-4">
+                    <label class="input-label" :class="{ 'input-label-error': !!registerFieldErrors.email }">邮箱地址</label>
+                    <el-form-item class="mb-0" :error="registerFieldErrors.email || ''">
+                      <el-input v-model="registerForm.email"
+                                placeholder="请输入邮箱地址"
+                                size="large"
+                                :prefix-icon="Message"
+                                clearable
+                                class="premium-input h-[46px]"
+                                aria-label="邮箱地址">
                         <template #append>
                           <el-button
                             :disabled="codeSending || codeSent"
@@ -537,18 +607,19 @@ const handleRegister = async () => {
                           </el-button>
                         </template>
                       </el-input>
-                  </el-form-item>
+                    </el-form-item>
+                  </div>
 
-                                                                        <!-- 密码安全守护小盾牌 -->
-                                    <div class="relative">
-                    <div v-if="registerPasswordFocused && !registerFieldErrors.password" 
-                         class="absolute -right-16 top-1/2 -translate-y-1/2 w-16 h-16 z-10 pointer-events-none">
-                                               <LottieAnimation :animationData="cyberSecurityLottie" width="100%" height="100%" />
-                                             </div>
-                                                                 <el-form-item class="mb-1" :error="registerFieldErrors.password || ''">
+                  <!-- 密码 -->
+                  <div class="relative mb-1">
+                    <label class="input-label" :class="{ 'input-label-error': !!registerFieldErrors.password }">密码</label>
+                    <div v-show="registerPasswordFocused && !registerFieldErrors.password"
+                         class="hidden md:block absolute -right-16 top-7 w-16 h-16 z-10 pointer-events-none">
+                      <LottieAnimation :animationData="cyberSecurityLottie" width="100%" height="100%" :paused="!registerPasswordFocused" />
+                    </div>
+                    <el-form-item class="mb-0" :error="registerFieldErrors.password || ''">
                       <div class="relative w-full">
-                        <!-- 校验通过对勾 -->
-                        <div v-if="registerPasswordValid && !registerFieldErrors.password" 
+                        <div v-if="registerPasswordValid && !registerFieldErrors.password"
                              class="absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 z-10 pointer-events-none">
                           <LottieAnimation :animationData="checkBounceLottie" width="100%" height="100%" :loop="false" />
                         </div>
@@ -564,54 +635,56 @@ const handleRegister = async () => {
                                   @blur="registerPasswordFocused = false" />
                       </div>
                     </el-form-item>
+                    <p class="mt-1 px-1 text-xs leading-relaxed" style="color: var(--lt-text-auxiliary);">
+                      密码至少 8 个字符，包含大、小写字母和数字
+                    </p>
                   </div>
-                    <!-- 密码强度提示 -->
-                    <div class="mb-4 px-1">
-                      <p class="text-xs leading-relaxed" style="color: var(--lt-text-auxiliary);">
-                        密码至少 8 个字符，包含大、小写字母和数字
-                      </p>
-                    </div>
 
-                                                                                                                                                <el-form-item class="mb-2" :error="registerFieldErrors.confirmPassword || ''">
-                    <div class="relative w-full">
-                      <!-- 校验通过对勾 -->
-                      <div v-if="registerConfirmValid && !registerFieldErrors.confirmPassword" 
-                           class="absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 z-10 pointer-events-none">
-                        <LottieAnimation :animationData="checkBounceLottie" width="100%" height="100%" :loop="false" />
+                  <!-- 确认密码 -->
+                  <div class="mb-4">
+                    <label class="input-label" :class="{ 'input-label-error': !!registerFieldErrors.confirmPassword }">确认密码</label>
+                    <el-form-item class="mb-0" :error="registerFieldErrors.confirmPassword || ''">
+                      <div class="relative w-full">
+                        <div v-if="registerConfirmValid && !registerFieldErrors.confirmPassword"
+                             class="absolute -right-9 top-1/2 -translate-y-1/2 w-6 h-6 z-10 pointer-events-none">
+                          <LottieAnimation :animationData="checkBounceLottie" width="100%" height="100%" :loop="false" />
+                        </div>
+                        <el-input v-model="registerForm.confirmPassword"
+                                  type="password"
+                                  placeholder="再次输入密码"
+                                  size="large"
+                                  show-password
+                                  :prefix-icon="Lock"
+                                  class="premium-input h-[46px]"
+                                  aria-label="确认密码" />
                       </div>
-                      <el-input v-model="registerForm.confirmPassword"
-                                type="password"
-                                placeholder="确认密码"
-                                size="large"
-                                show-password
-                                :prefix-icon="Lock"
-                                class="premium-input h-[46px]"
-                                aria-label="确认密码" />
-                    </div>
-                  </el-form-item>
+                    </el-form-item>
+                  </div>
 
                   <!-- 验证码 -->
-                  <el-form-item class="mb-4" :error="registerFieldErrors.verificationCode || ''">
-                    <div class="relative w-full">
-                      <el-input v-model="registerForm.verificationCode"
-                                placeholder="邮箱验证码"
-                                size="large"
-                                maxlength="6"
-                                class="premium-input h-[46px]"
-                                aria-label="邮箱验证码" />
-                    </div>
-                  </el-form-item>
+                  <div class="mb-4">
+                    <label class="input-label" :class="{ 'input-label-error': !!registerFieldErrors.verificationCode }">邮箱验证码</label>
+                    <el-form-item class="mb-0" :error="registerFieldErrors.verificationCode || ''">
+                      <div class="relative w-full">
+                        <el-input v-model="registerForm.verificationCode"
+                                  placeholder="请输入6位验证码"
+                                  size="large"
+                                  maxlength="6"
+                                  class="premium-input h-[46px]"
+                                  aria-label="邮箱验证码" />
+                      </div>
+                    </el-form-item>
+                  </div>
 
-                  <!-- 流光底部装饰（输入框聚焦动效延伸） -->
                   <div class="mb-1 -mt-1 h-2 w-full overflow-hidden rounded-full opacity-30">
-                    <LottieAnimation :animationData="inputGlowLottie" width="100%" height="100%" />
+                    <LottieAnimation :animationData="inputGlowLottie" width="100%" height="100%" :speed="0.3" :paused="!isCardHovered" />
                   </div>
 
                   <el-form-item class="mb-0">
                     <el-button type="primary" size="large" class="w-full btn-gradient" :disabled="registerLoading" @click="handleRegister" aria-label="注册并进入">
                       <span v-if="!registerLoading">注册并进入</span>
                       <div v-else class="flex items-center justify-center gap-2">
-                                                <LottieAnimation :animationData="aiSpinnerLottie" width="24px" height="24px" />
+                        <LottieAnimation :animationData="aiSpinnerLottie" width="24px" height="24px" />
                         <span>注册中…</span>
                       </div>
                     </el-button>
@@ -629,12 +702,12 @@ const handleRegister = async () => {
           </div>
         </div>
       </div>
-      
+
   </div>
 
-        <!-- 知识元素：漂浮字符（极淡潜意识层） -->
+    <!-- 知识元素：漂浮字符（桌面端） -->
     <div v-for="(item, idx) in knowledgeChars" :key="'char-'+idx"
-         class="absolute z-0 pointer-events-none select-none floating-knowledge-char"
+         class="mobile-hidden absolute z-0 pointer-events-none select-none floating-knowledge-char"
          :style="{
            left: item.x,
            top: item.y,
@@ -642,16 +715,15 @@ const handleRegister = async () => {
            animationDelay: item.delay,
            animationDuration: item.duration,
            color: idx < 5 ? 'var(--lt-brand)' : 'var(--lt-ai)',
-                      opacity: 0.09
+           opacity: 0.09
          }">
       {{ item.char }}
     </div>
 
-    <!-- 知识元素：迷你知识图谱 SVG -->
-    <svg class="absolute inset-0 z-0 pointer-events-none select-none"
+    <!-- 知识元素：迷你知识图谱 SVG（桌面端） -->
+    <svg class="mobile-hidden absolute inset-0 z-0 pointer-events-none select-none"
          style="opacity: 0.09; width: 100%; height: 100%;"
          viewBox="0 0 100 100" preserveAspectRatio="none">
-      <!-- 边（连接线） -->
       <line x1="28" y1="55" x2="38" y2="48" stroke="var(--lt-brand)" stroke-width="0.3" opacity="0.5">
         <animate attributeName="opacity" values="0.3;0.7;0.3" dur="6s" repeatCount="indefinite" begin="0s" />
       </line>
@@ -667,7 +739,6 @@ const handleRegister = async () => {
       <line x1="48" y1="52" x2="45" y2="68" stroke="var(--lt-brand)" stroke-width="0.3" opacity="0.5">
         <animate attributeName="opacity" values="0.3;0.7;0.3" dur="6.5s" repeatCount="indefinite" begin="-1.5s" />
       </line>
-      <!-- 节点（圆点） -->
       <circle cx="28" cy="55" r="0.8" fill="var(--lt-brand)">
         <animate attributeName="r" values="0.6;1.2;0.6" dur="4s" repeatCount="indefinite" begin="0s" />
         <animate attributeName="opacity" values="0.4;1;0.4" dur="4s" repeatCount="indefinite" begin="0s" />
@@ -694,9 +765,6 @@ const handleRegister = async () => {
 </template>
 
 <style scoped>
-/* ========================
-/* 动态渐变背景流动 */
-/* ======================== */
 @keyframes gradient-flow {
   0% { background-position: 0% 50%; }
   25% { background-position: 100% 0%; }
@@ -716,11 +784,9 @@ const handleRegister = async () => {
   ) !important;
   background-size: 300% 300% !important;
   animation: gradient-flow 25s ease-in-out infinite;
+  will-change: background-position;
 }
 
-/* ======================== */
-/* 极光流光动效 */
-/* ======================== */
 @keyframes aurora-drift-1 {
   0% { transform: translate(0, 0) scale(1); opacity: 0.6; }
   33% { transform: translate(4%, 3%) scale(1.08); opacity: 0.8; }
@@ -752,9 +818,6 @@ const handleRegister = async () => {
   animation: aurora-drift-3 12s ease-in-out infinite alternate;
 }
 
-/* ======================== */
-/* 知识字符漂浮动效 */
-/* ======================== */
 @keyframes float-knowledge {
   0% { transform: translate(0, 0) rotate(0deg) scale(1); }
   20% { transform: translate(18px, -22px) rotate(4deg) scale(1.04); }
@@ -770,53 +833,25 @@ const handleRegister = async () => {
   text-shadow: 0 0 30px currentColor, 0 0 70px currentColor, 0 0 140px currentColor;
 }
 
-/* ======================== */
-/* 浮动几何体动效 */
-/* ======================== */
-@keyframes float-ring {
-  0%, 100% { transform: translateY(0) rotate(0deg) scale(1); opacity: 0.12; }
-  33% { transform: translateY(-12px) rotate(120deg) scale(1.04); opacity: 0.18; }
-  66% { transform: translateY(6px) rotate(240deg) scale(0.97); opacity: 0.10; }
-}
-@keyframes float-hex {
-  0%, 100% { transform: translateY(0) rotate(0deg) scale(1); opacity: 0.10; }
-  50% { transform: translateY(-16px) rotate(-180deg) scale(1.06); opacity: 0.16; }
-}
-
-.floating-ring {
-  will-change: transform;
-  animation: float-ring 20s ease-in-out infinite;
-}
-.floating-hex {
-  will-change: transform;
-  animation: float-hex 15s ease-in-out infinite;
-}
-
-/* ======================== */
-/* 卡片呼吸光晕 */
-/* ======================== */
 @keyframes card-shadow-breathe {
   0%, 100% {
-    box-shadow: var(--lt-shadow-elevated, 0 24px 60px -12px rgba(0,0,0,0.08));
     border-color: var(--lt-border);
   }
   50% {
-    box-shadow: 0 24px 64px -8px rgba(43,111,255,0.14), 0 0 0 1px rgba(43,111,255,0.04);
     border-color: rgba(43,111,255,0.08);
   }
 }
 
 .card-breathing {
   animation: card-shadow-breathe 4s ease-in-out infinite;
+  contain: layout style;
 }
 
-/* 左侧动效 */
-@keyframes pulse-op {
-  0%, 100% { opacity: 0.4; transform: scale(1); }
-  50% { opacity: 0.7; transform: scale(1.05); }
+.login-left-stage {
+  contain: layout style paint;
+  content-visibility: auto;
 }
 
-/* 轮播淡入淡出过渡 */
 .banner-fade-enter-active,
 .banner-fade-leave-active {
   transition: opacity 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -830,15 +865,12 @@ const handleRegister = async () => {
   transform: translateY(-10px) scale(0.96);
 }
 
-/* ======================== */
-/* 高级输入框覆写（token化） */
-/* ======================== */
 :deep(.premium-input .el-input__wrapper) {
   background-color: var(--lt-bg-page);
   box-shadow: none !important;
   border-radius: 12px;
   padding: 0 14px;
-  transition: all 0.3s ease;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
   border: 1px solid var(--lt-border);
 }
 
@@ -869,9 +901,6 @@ const handleRegister = async () => {
   font-size: 18px;
 }
 
-/* ======================== */
-/* 主按钮（使用 token 色） */
-/* ======================== */
 :deep(.btn-gradient) {
   background: linear-gradient(135deg, var(--lt-brand) 0%, var(--lt-brand-dark) 100%) !important;
   border: none !important;
@@ -881,7 +910,7 @@ const handleRegister = async () => {
   font-weight: 600 !important;
   letter-spacing: 0.5px;
   box-shadow: 0 8px 16px -4px var(--lt-shadow-blue) !important;
-  transition: all 0.3s ease !important;
+  transition: box-shadow 0.3s ease, transform 0.3s ease, opacity 0.3s ease !important;
 }
 
 :deep(.btn-gradient:hover) {
@@ -900,9 +929,6 @@ const handleRegister = async () => {
   box-shadow: none !important;
 }
 
-/* ======================== */
-/* 发送验证码按钮 */
-/* ======================== */
 :deep(.send-code-btn) {
   border: none !important;
   background: linear-gradient(135deg, var(--lt-brand) 0%, var(--lt-brand-dark) 100%) !important;
@@ -913,7 +939,9 @@ const handleRegister = async () => {
   height: 46px !important;
   padding: 0 16px !important;
   white-space: nowrap;
-  transition: all 0.3s ease !important;
+  transition: box-shadow 0.3s ease, opacity 0.3s ease !important;
+  min-width: 100px;
+  min-height: 44px;
 }
 
 :deep(.send-code-btn:hover) {
@@ -932,16 +960,14 @@ const handleRegister = async () => {
   cursor: not-allowed;
 }
 
-/* El-Input 搭配 append slot 时去除内边框合并缝隙 */
 :deep(.el-input-group__append) {
   background-color: transparent !important;
   border: none !important;
   box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
 }
 
-/* ======================== */
-/* 复选框与文字对齐 */
-/* ======================== */
 :deep(.custom-checkbox .el-checkbox__label) {
   display: flex !important;
   align-items: center;
@@ -950,9 +976,6 @@ const handleRegister = async () => {
   line-height: 1.4;
 }
 
-/* ======================== */
-/* Element Plus 表单错误覆写 */
-/* ======================== */
 :deep(.el-form-item.is-error .premium-input .el-input__wrapper) {
   border-color: var(--el-color-danger);
   box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.08) !important;
@@ -964,11 +987,23 @@ const handleRegister = async () => {
   padding-top: 4px;
 }
 
-/* ======================== */
-/* 动效降级：prefers-reduced-motion */
-/* ======================== */
+/* ==================== */
+/* 输入框可见 Label (spec 7.3) */
+/* ==================== */
+.input-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--lt-text-secondary);
+  margin-bottom: 6px;
+  padding-left: 2px;
+  transition: color 0.2s ease;
+}
+.input-label-error {
+  color: var(--lt-danger);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  /* 禁止所有位移动画 */
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
@@ -976,7 +1011,6 @@ const handleRegister = async () => {
     scroll-behavior: auto !important;
   }
 
-    /* 切换不滑动，直接用显示/隐藏 */
   .\!transition-none {
     transition: none !important;
   }
@@ -985,7 +1019,6 @@ const handleRegister = async () => {
     transition-duration: 0ms !important;
   }
 
-    /* 轮播只保留淡入，不位移 */
   .banner-fade-enter-active,
   .banner-fade-leave-active {
     transition: opacity 0.2s ease !important;
@@ -1000,49 +1033,35 @@ const handleRegister = async () => {
     transform: none;
   }
 
-    /* 动态渐变停止 */
-    .animated-gradient {
-      animation: none !important;
-      background: linear-gradient(135deg, var(--lt-brand-lightest), var(--lt-bg-card), var(--lt-ai-light-9)) !important;
-      background-size: 100% 100% !important;
-    }
+  .animated-gradient {
+    animation: none !important;
+    background: linear-gradient(135deg, var(--lt-brand-lightest), var(--lt-bg-card), var(--lt-ai-light-9)) !important;
+    background-size: 100% 100% !important;
+  }
 
-    /* 卡片呼吸停止 + 无视差 */
-    .card-breathing {
-      animation: none !important;
-      box-shadow: var(--lt-shadow-elevated) !important;
-      border-color: var(--lt-border) !important;
-      transform: none !important;
-    }
+  .card-breathing {
+    animation: none !important;
+    box-shadow: var(--lt-shadow-elevated) !important;
+    border-color: var(--lt-border) !important;
+    transform: none !important;
+  }
 
-    /* 知识字符固定 */
-    .floating-knowledge-char {
-            animation: none !important;
-      opacity: 0.06 !important;
-    }
+  .floating-knowledge-char {
+    animation: none !important;
+    opacity: 0.06 !important;
+  }
 
-    /* 极光固定居中不飘移 */
-    .aurora-1, .aurora-2, .aurora-3 {
-      will-change: auto;
-      animation: none !important;
-      opacity: 0.5 !important;
-      transform: none !important;
-    }
-
-    /* 几何体固定 */
-    .floating-ring, .floating-hex {
-      will-change: auto;
-      animation: none !important;
-      opacity: 0.08 !important;
-      transform: none !important;
-    }
-
-  
+  .aurora-1, .aurora-2, .aurora-3 {
+    will-change: auto;
+    animation: none !important;
+    opacity: 0.5 !important;
+    transform: none !important;
+  }
 }
 
-/* ======================== */
-/* 移动端响应式调整 */
-/* ======================== */
+/* ==================== */
+/* 移动端响应式 */
+/* ==================== */
 @media (max-width: 767px) {
   .min-h-screen {
     padding: 0;
@@ -1055,10 +1074,36 @@ const handleRegister = async () => {
     margin: 0 !important;
     border-radius: 0 !important;
     max-width: 100% !important;
+    animation: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    will-change: auto !important;
+    contain: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .animated-gradient {
+    animation: none !important;
+    background: linear-gradient(180deg, var(--lt-bg-card) 0%, var(--lt-brand-lightest) 100%) !important;
+    background-size: 100% 100% !important;
+  }
+
+  .aurora-1, .aurora-2, .aurora-3 {
+    display: none !important;
+  }
+
+  .card-breathing {
+    animation: none !important;
+    box-shadow: none !important;
+    border: none !important;
   }
 
   :deep(.premium-input .el-input__wrapper) {
     min-height: 48px;
+    border-radius: 10px;
   }
 
   :deep(.premium-input .el-input__inner) {
@@ -1069,12 +1114,39 @@ const handleRegister = async () => {
   :deep(.btn-gradient) {
     height: 52px !important;
     font-size: 16px !important;
+    border-radius: 10px !important;
   }
 
   :deep(.send-code-btn) {
     height: 48px !important;
     font-size: 12px !important;
     padding: 0 12px !important;
+    min-width: 88px;
+  }
+
+  /* 移动端隐藏装饰元素 */
+  .mobile-hidden {
+    display: none !important;
+  }
+
+  /* 移动端品牌头部 */
+  .mobile-brand {
+    background: linear-gradient(180deg, var(--lt-brand-lightest) 0%, transparent 100%);
+  }
+
+  .input-label {
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+}
+
+/* 桌面端恢复显示 */
+@media (min-width: 768px) {
+  .mobile-hidden {
+    display: block;
+  }
+  .mobile-brand {
+    display: none;
   }
 }
 </style>

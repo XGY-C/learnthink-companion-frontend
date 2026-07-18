@@ -3,40 +3,62 @@ import { ref, watch, onBeforeUnmount } from 'vue'
 /**
  * Pausable scene animation timer.
  * Tracks virtual playback time that respects isPlaying and speed.
- * Used by all scene components to replace bare setTimeout.
+ * Uses requestAnimationFrame for smooth, tab-aware ticking.
  */
 export function useSceneTimer(
   isPlaying: () => boolean,
   speed: () => number,
-  totalDuration: number,
+  totalDuration: number | (() => number),
   onComplete: () => void,
 ) {
   const virtualTime = ref(0)
-  let intervalId: ReturnType<typeof setInterval> | null = null
+  let rafId: number | null = null
   let lastTickReal = 0
   let _completed = false
 
-  function startTicking() {
-    if (intervalId || _completed) return
-    lastTickReal = Date.now()
-    intervalId = setInterval(() => {
-      if (isPlaying()) {
-        const now = Date.now()
-        virtualTime.value += (now - lastTickReal) * speed()
-        lastTickReal = now
-        if (virtualTime.value >= totalDuration) {
-          stopTicking()
-          _completed = true
-          onComplete()
-        }
-      } else {
-        lastTickReal = Date.now()
+  const getDuration = typeof totalDuration === 'function' ? totalDuration : () => totalDuration
+
+  function tick() {
+    if (isPlaying()) {
+      const now = performance.now()
+      const delta = now - lastTickReal
+      lastTickReal = now
+      // 大间隔（标签页不活跃、GC 暂停等）不推进时间，避免跳跃
+      if (delta < 500) {
+        virtualTime.value += delta * speed()
       }
-    }, 50)
+      if (virtualTime.value >= getDuration()) {
+        stopTicking()
+        _completed = true
+        try {
+          onComplete()
+        } catch (e) {
+          console.error('onComplete callback error:', e)
+        }
+        return
+      }
+    } else {
+      lastTickReal = performance.now()
+    }
+    rafId = requestAnimationFrame(tick)
+  }
+
+  function startTicking() {
+    if (rafId || _completed) return
+    lastTickReal = performance.now()
+    rafId = requestAnimationFrame(tick)
   }
 
   function stopTicking() {
-    if (intervalId) { clearInterval(intervalId); intervalId = null }
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+  }
+
+  /** 重置计时器状态，允许重新播放 */
+  function reset() {
+    stopTicking()
+    _completed = false
+    virtualTime.value = 0
+    lastTickReal = performance.now()
   }
 
   watch(() => isPlaying(), (playing) => {
@@ -46,5 +68,5 @@ export function useSceneTimer(
 
   onBeforeUnmount(() => stopTicking())
 
-  return { virtualTime, stopTicking }
+  return { virtualTime, stopTicking, reset }
 }

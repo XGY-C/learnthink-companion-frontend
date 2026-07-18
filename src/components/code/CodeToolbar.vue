@@ -36,16 +36,23 @@ defineEmits<{
 
 <style scoped>
 .code-toolbar {
-  display: flex;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  padding: 4px 6px;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 0;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 4px;
 }
 .code-toolbar-left {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 .code-toolbar-right {

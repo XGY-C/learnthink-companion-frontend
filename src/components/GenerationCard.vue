@@ -26,10 +26,10 @@ const props = withDefaults(defineProps<{
 const router = useRouter()
 
 const typeIcons: Record<string, string> = {
-  doc: '📄', quiz: '📝', mindmap: '🧠', code: '💻', reading: '📚', video: '🎬',
+  doc: '📄', quiz: '📝', mindmap: '🧠', code: '💻', reading: '📚', video: '🎬', html: '🌐',
 }
 const typeLabels: Record<string, string> = {
-  doc: '讲解文档', quiz: '练习题', mindmap: '思维导图', code: '代码实操', reading: '拓展阅读', video: '讲解视频',
+  doc: '讲解文档', quiz: '练习题', mindmap: '思维导图', code: '代码实操', reading: '拓展阅读', video: '讲解视频', html: '交互文档',
 }
 
 const resourceBadges = computed(() =>

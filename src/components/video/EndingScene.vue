@@ -85,7 +85,7 @@ const particles = Array.from({ length: 16 }, (_, i) => ({
 .ending-scene {
   width: 100%; height: 100%;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #0f0f13 0%, #1a1a2e 40%, #16213e 100%);
+  background: linear-gradient(135deg, #0d0d12 0%, #1a1a2e 40%, #16213e 100%);
   position: relative; overflow: hidden;
 }
 

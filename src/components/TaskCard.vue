@@ -109,6 +109,7 @@ function typeTagBg(t: string): string {
     code: 'rgba(239,68,68,0.08)',
     mindmap: 'rgba(245,158,11,0.08)',
     reading: 'rgba(139,92,246,0.08)',
+    html: 'rgba(124,92,252,0.08)',
   }
   return map[t] || 'var(--lt-bg-page)'
 }
@@ -120,6 +121,7 @@ function typeTagColor(t: string): string {
     code: 'var(--lt-danger)',
     mindmap: 'var(--lt-warning)',
     reading: 'var(--lt-ai)',
+    html: 'var(--lt-ai)',
   }
   return map[t] || 'var(--lt-text-auxiliary)'
 }

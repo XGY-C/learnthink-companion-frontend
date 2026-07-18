@@ -3,7 +3,7 @@
     <!-- Top Navigation -->
     <div class="mob-topbar">
       <div class="mob-topbar-left">
-        <button class="mob-back-btn" @click="handleBack">
+        <button class="mob-back-btn" aria-label="返回" @click="handleBack">
           <el-icon :size="20"><ArrowLeft /></el-icon>
         </button>
       </div>
@@ -29,7 +29,7 @@
         </div>
       </div>
       <div class="mob-topbar-right">
-        <button class="mob-menu-btn" @click="showMenu = !showMenu">
+        <button class="mob-menu-btn" aria-label="菜单" @click="showMenu = !showMenu">
           <el-icon :size="20"><MoreFilled /></el-icon>
         </button>
       </div>
@@ -114,6 +114,7 @@
             :guided-blanks="guidedBlanksData"
             @update:content="onCodeEdit"
             @gutter-click="onEditorGutterClick"
+            @selection-change="onSelectionChange"
           />
         </div>
 
@@ -268,6 +269,8 @@ import type { CodeContentExtended, LearningMode, FoldableRegion, VariableInfo } 
 import type { GutterMarkerDef, GuidedBlankDef } from '@/components/code/CodeEditorPanel.vue'
 
 const router = useRouter()
+
+const LINE_H = 22
 
 const ORIGINAL_CODE_M = `def squares(n):
     result = [x**2 for x in range(n)]
@@ -436,6 +439,28 @@ const guidedBlanksData = computed<GuidedBlankDef[]>(() => {
 function onEditorGutterClick(line: number) {
   if (breakpoints.has(line)) { breakpoints.delete(line); return }
   breakpoints.add(line)
+  const kp = content.knowledgePoints?.[0]
+  currentConcept.value = {
+    name: kp?.name || '代码分析',
+    description: `AI 对第 ${line} 行代码的详细原理解释`,
+    syntax: kp ? ['[表达式 for 变量 in 可迭代对象]', '[表达式 for 变量 in 可迭代 if 条件]'] : undefined,
+    mistakes: kp?.commonMistakes,
+  }
+}
+
+function onSelectionChange(info: { text: string; from: number; to: number } | null) {
+  if (!info || !info.text.trim()) {
+    selectedVar.value = null
+    return
+  }
+  selectedVar.value = {
+    name: info.text,
+    type: 'unknown',
+    scope: '局部',
+    definitionLine: info.from,
+    definition: info.text,
+    references: [],
+  }
 }
 
 // ─── Computed ───
@@ -484,6 +509,18 @@ function setMode(m: LearningMode) {
 }
 
 // ─── Steps ───
+function updatePanelForStep(stepIndex: number) {
+  const kp = content.knowledgePoints?.[stepIndex % (content.knowledgePoints?.length || 1)]
+  if (kp) {
+    currentConcept.value = {
+      name: kp.name,
+      description: kp.definition || '',
+      syntax: ['[表达式 for 变量 in 可迭代对象]', '[表达式 for 变量 in 可迭代 if 条件]'],
+      mistakes: kp.commonMistakes,
+    }
+  }
+}
+
 function jumpToStep(i: number) {
   if (i > currentStepIndex.value && !completedSteps.has(i)) return
   currentStepIndex.value = i
@@ -492,8 +529,9 @@ function jumpToStep(i: number) {
   refs.forEach(r => { for (let l = r.startLine; l <= r.endLine; l++) lines.push(l) })
   highlightedLines.value = lines
   if (editorWrapRef.value && refs[0]) {
-    editorWrapRef.value.scrollTo({ top: (refs[0].startLine - 3) * 20, behavior: 'smooth' })
+    editorWrapRef.value.scrollTo({ top: (refs[0].startLine - 3) * LINE_H, behavior: 'smooth' })
   }
+  updatePanelForStep(i)
 }
 
 function prevStep() {
@@ -511,7 +549,7 @@ function toggleFold(startLine: number) {
 }
 
 function foldStyle(r: FoldableRegion) {
-  return { top: (r.startLine - 1) * 20 + 'px', height: (r.endLine - r.startLine + 1) * 20 + 'px' }
+  return { top: (r.startLine - 1) * LINE_H + 'px', height: (r.endLine - r.startLine + 1) * LINE_H + 'px' }
 }
 
 // ─── Code ───
@@ -570,21 +608,17 @@ function onGoalClick(id: string) {
 }
 function gotoLine(line: number) {
   highlightedLines.value = [line]
-  if (editorWrapRef.value) editorWrapRef.value.scrollTo({ top: (line - 3) * 20, behavior: 'smooth' })
+  if (editorWrapRef.value) editorWrapRef.value.scrollTo({ top: (line - 3) * LINE_H, behavior: 'smooth' })
 }
 
 function sendTutor(text: string) {
   if (!text.trim()) return
-  if (text === '解释这段' || text === '为什么报错' || text === '如何优化') {
-    // quick questions
-  } else {
-    tutorMsgs.value.push({ role: 'user', content: text })
-  }
+  tutorMsgs.value.push({ role: 'user', content: text })
   tutorInput.value = ''
   setTimeout(() => {
-    tutorMsgs.value.push({ role: 'assistant', content: `关于 "${text}" 的回答：\n\n这是一个很好的问题！` })
+    tutorMsgs.value.push({ role: 'assistant', content: `关于 "${text}" 的问题，这里是 AI 助教的回答。\n\n这是一个很好的问题！让我为你详细解释...` })
     if (tutorRef.value) tutorRef.value.scrollTop = tutorRef.value.scrollHeight
-  }, 300)
+  }, 500)
 }
 
 function stripHtml(s: string) {
@@ -615,8 +649,8 @@ onMounted(() => {
 .mob-topbar {
   display: flex;
   align-items: center;
-  height: 48px;
-  padding: 0 8px;
+  min-height: 48px;
+  padding: var(--mobile-safe-area-inset-top, 0px) 8px 0;
   background: var(--lt-bg-card);
   border-bottom: 0.5px solid var(--lt-border);
   flex-shrink: 0;
@@ -661,8 +695,8 @@ onMounted(() => {
   font-size: 10px;
   padding: 1px 5px;
   border-radius: 3px;
-  background: #fff3e0;
-  color: #e65100;
+  background: var(--lt-orange-light-9);
+  color: var(--lt-orange-text);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -712,7 +746,7 @@ onMounted(() => {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(0,0,0,0.3);
+  background: var(--mobile-sheet-scrim);
 }
 .mob-dropdown-menu {
   position: absolute;
@@ -1071,7 +1105,7 @@ onMounted(() => {
   line-height: 1.5;
   white-space: pre-wrap;
 }
-.mob-out-body.stdout { color: #34C759; }
-.mob-out-body.stderr { color: #FF3B30; }
+.mob-out-body.stdout { color: var(--lt-success); }
+.mob-out-body.stderr { color: var(--lt-danger); }
 .mob-out-body.diff { color: var(--lt-warning); }
 </style>

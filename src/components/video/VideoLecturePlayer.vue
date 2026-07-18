@@ -6,6 +6,8 @@ import PlayerTopBar from './PlayerTopBar.vue'
 import SceneCanvas from './SceneCanvas.vue'
 import ControlBar from './ControlBar.vue'
 import ProgressBar from './ProgressBar.vue'
+import InteractiveOverlay from './InteractiveOverlay.vue'
+import InteractContinueBar from './InteractContinueBar.vue'
 
 const store = useVideoLectureStore()
 
@@ -52,6 +54,7 @@ watch(() => store.isPlaying, (playing) => {
 
 watch(() => store.phase, (p) => {
   if (p === 'playing') resetHideTimer()
+  else showControls.value = true
 })
 
 // 键盘快捷键
@@ -78,10 +81,14 @@ function onKeyDown(e: KeyboardEvent) {
 function toggleFullscreen() {
   if (!playerRef.value) return
   if (!document.fullscreenElement) {
-    playerRef.value.requestFullscreen().then(() => { isFullscreen.value = true })
+    playerRef.value.requestFullscreen()
   } else {
-    document.exitFullscreen().then(() => { isFullscreen.value = false })
+    document.exitFullscreen()
   }
+}
+
+function onFullscreenChange() {
+  isFullscreen.value = !!document.fullscreenElement
 }
 
 function handleClose() {
@@ -107,9 +114,13 @@ watch(() => store.phase, (p) => {
   if (p !== 'buffering') loadError.value = false
 })
 
-onMounted(() => { document.addEventListener('keydown', onKeyDown) })
+onMounted(() => {
+  document.addEventListener('keydown', onKeyDown)
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+})
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeyDown)
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
   if (hideTimer) clearTimeout(hideTimer)
   if (phaseTimer) clearTimeout(phaseTimer)
 })
@@ -127,9 +138,10 @@ const showCloseEnding = computed(() =>
       ref="playerRef"
       class="video-lecture-player"
       :class="{
+        'is-loading': store.phase === 'loading',
         'is-darkening': store.phase === 'darkening',
         'is-expanding': store.phase === 'expanding',
-        'is-active': store.phase === 'playing' || store.phase === 'paused' || store.phase === 'buffering',
+        'is-active': store.phase === 'playing' || store.phase === 'paused' || store.phase === 'buffering' || store.phase === 'interactive-paused',
         'is-closing': store.phase === 'closing',
         'is-fullscreen': isFullscreen,
       }"
@@ -137,6 +149,20 @@ const showCloseEnding = computed(() =>
       @mouseleave="onMouseLeave"
     >
       <DarkOverlay />
+
+      <!-- 规划中微动画 -->
+      <div v-if="store.phase === 'loading'" class="planning-overlay">
+        <button class="planning-close" @click="handleClose" aria-label="关闭">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+        <div class="planning-content">
+          <div class="planning-dots"><span></span><span></span><span></span></div>
+          <p class="planning-text">正在规划讲解中</p>
+          <p v-if="store.topic" class="planning-topic">{{ store.topic }}</p>
+        </div>
+      </div>
 
       <div class="player-container" :class="{ 'controls-hidden': !showControls && store.phase === 'playing' }">
         <PlayerTopBar @close="handleClose" />
@@ -148,13 +174,27 @@ const showCloseEnding = computed(() =>
           @complete="store.onSceneComplete()"
         />
 
+        <!-- 交互问答覆盖层 -->
+        <InteractiveOverlay v-if="store.phase === 'interactive-paused' && store.interactionMode === 'quiz'" />
+
+        <!-- 探索型"继续"按钮 -->
+        <InteractContinueBar
+          :visible="store.phase === 'interactive-paused' && store.interactionMode === 'explore'"
+          :hint="store.exploreHint"
+          @confirm="store.confirmContinue()"
+        />
+
         <!-- Load error overlay -->
         <div v-if="loadError" class="player-error-overlay">
-          <p class="player-error-text">场景加载超时，请检查网络后重试</p>
-          <button class="player-retry-btn" @click="handleRetry">重新加载</button>
+          <p class="player-error-text">场景加载超时，可能是网络不稳定或生成中断</p>
+          <p class="player-error-hint">可重播已生成的内容，或关闭后重新提问</p>
+          <div class="player-error-actions">
+            <button class="player-retry-btn" @click="handleRetry">重新播放</button>
+            <button class="player-close-btn" @click="handleClose">关闭</button>
+          </div>
         </div>
 
-        <ProgressBar />
+        <ProgressBar :show="showControls || store.phase !== 'playing'" />
 
         <ControlBar
           :show="showControls || store.phase !== 'playing'"
@@ -162,6 +202,8 @@ const showCloseEnding = computed(() =>
           :speed="store.speed"
           :has-prev="store.hasPrevScene"
           :has-next="store.hasNextScene"
+          :is-fullscreen="isFullscreen"
+          :interactive-paused="store.phase === 'interactive-paused'"
           @toggle-play="store.togglePlay()"
           @prev="store.prevScene()"
           @next="store.nextScene()"
@@ -188,6 +230,11 @@ const showCloseEnding = computed(() =>
   z-index: 1000;
   pointer-events: none;
   opacity: 0;
+}
+
+.video-lecture-player.is-loading {
+  pointer-events: all;
+  opacity: 1;
 }
 
 .video-lecture-player.is-darkening {
@@ -227,7 +274,7 @@ const showCloseEnding = computed(() =>
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #0f0f13;
+  background: #08080c;
 }
 
 .player-container.controls-hidden {
@@ -247,17 +294,98 @@ const showCloseEnding = computed(() =>
 /* 桌面端最大尺寸 */
 @media (min-width: 1024px) {
   .video-lecture-player:not(.is-fullscreen) .player-container {
-    max-width: 900px;
-    max-height: 680px;
+    position: absolute;
+    inset: 0;
+    max-width: min(1100px, 92vw);
+    max-height: min(800px, 88vh);
     margin: auto;
     border-radius: 16px;
     box-shadow: 0 0 80px rgba(0, 0, 0, 0.6);
   }
-  .is-darkening:not(.is-fullscreen) .player-container {
+  .is-loading:not(.is-fullscreen) .planning-overlay {
     position: absolute;
     inset: 0;
     margin: auto;
+    max-width: min(1100px, 92vw);
+    max-height: min(800px, 88vh);
+    border-radius: 16px;
+    box-shadow: 0 0 80px rgba(0, 0, 0, 0.6);
   }
+}
+
+/* 规划中微动画 */
+.planning-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1002;
+  background: #08080c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+}
+
+.planning-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+.planning-close:hover {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.planning-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.planning-dots {
+  display: flex;
+  gap: 10px;
+}
+.planning-dots span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--lt-brand, #2B6FFF);
+  animation: planning-pulse 1.4s infinite ease-in-out;
+}
+.planning-dots span:nth-child(2) { animation-delay: 0.2s; }
+.planning-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes planning-pulse {
+  0%, 80%, 100% { transform: scale(0.5); opacity: 0.3; }
+  40% { transform: scale(1.2); opacity: 1; }
+}
+
+.planning-text {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0;
+  letter-spacing: 0.05em;
+}
+
+.planning-topic {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.35);
+  margin: 0;
+  max-width: 400px;
+  text-align: center;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* 移动端全屏 */
@@ -323,6 +451,15 @@ const showCloseEnding = computed(() =>
   font-size: 15px;
   margin: 0;
 }
+.player-error-hint {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 13px;
+  margin: 0;
+}
+.player-error-actions {
+  display: flex;
+  gap: 12px;
+}
 .player-retry-btn {
   padding: 10px 24px;
   border: none;
@@ -334,5 +471,19 @@ const showCloseEnding = computed(() =>
 }
 .player-retry-btn:hover {
   background: var(--lt-brand-dark);
+}
+.player-close-btn {
+  padding: 10px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.player-close-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 </style>

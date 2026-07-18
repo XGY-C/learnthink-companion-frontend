@@ -1,8 +1,4 @@
 <script setup lang="ts">
-defineProps<{
-  title?: string
-}>()
-
 const emit = defineEmits<{ close: [] }>()
 </script>
 

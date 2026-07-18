@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProfileStore } from '@/stores/profile'
-import { DataBoard, ChatLineRound, MagicStick, User, ArrowLeft } from '@element-plus/icons-vue'
+import { usePushStore } from '@/stores/push'
+import { DataBoard, ChatLineRound, MagicStick, User, ArrowLeft, Bell } from '@element-plus/icons-vue'
+import { usePushSSE } from '@/composables/usePushSSE'
+import { navDirection } from '@/composables/useNavDirection'
 
 const profileStore = useProfileStore()
+const pushStore = usePushStore()
+const { connect: connectPushSSE } = usePushSSE()
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +37,8 @@ const showTabBar = computed(() => {
 })
 
 // ===== 导航栏 =====
+const hideNav = computed(() => route.meta?.hideMobileNav === true)
+
 const pageTitle = computed(() => {
   return (route.meta?.title as string) || ''
 })
@@ -59,12 +66,27 @@ const isActive = (tab: TabItem) => {
   if (tab.path === '/') return route.path === '/'
   return route.path.startsWith(tab.path)
 }
+
+// ===== 页面转场方向 =====
+const transitionName = computed(() => {
+  if (navDirection.value === 'tab') return 'mobile-tab'
+  if (navDirection.value === 'back') return 'mobile-pop'
+  return 'mobile-push'
+})
+
+onMounted(() => {
+  profileStore.refreshProfile()
+  if (profileStore.activeCourseId) {
+    pushStore.fetchNotifications(profileStore.activeCourseId)
+  }
+  connectPushSSE()
+})
 </script>
 
 <template>
   <div class="mobile-shell">
-    <!-- 顶部导航栏 -->
-    <header class="mobile-nav" :style="{
+    <!-- 顶部导航栏（页面可通过 route.meta.hideMobileNav 自带顶栏时隐藏） -->
+    <header v-if="!hideNav" class="mobile-nav" :style="{
       paddingTop: 'var(--mobile-safe-area-inset-top)',
     }">
       <div class="mobile-nav-inner">
@@ -85,16 +107,30 @@ const isActive = (tab: TabItem) => {
 
         <!-- 右侧 -->
         <div class="mobile-nav-right">
-          <slot name="nav-actions" />
+          <button
+            class="mobile-nav-bell"
+            @click="router.push('/notifications')"
+            aria-label="通知"
+          >
+            <el-icon :size="20"><Bell /></el-icon>
+            <span
+              v-if="pushStore.unreadCount > 0"
+              class="mobile-bell-badge"
+            >
+              {{ pushStore.unreadCount > 99 ? '99+' : pushStore.unreadCount }}
+            </span>
+          </button>
         </div>
       </div>
     </header>
 
     <!-- 内容区 -->
-    <main class="mobile-content" :class="{ 'has-tabbar': showTabBar }">
+    <main class="mobile-content" :class="{ 'has-tabbar': showTabBar, 'nav-hidden': hideNav }">
       <router-view v-slot="{ Component }">
-        <transition name="mobile-page" mode="out-in">
-          <component :is="Component" :key="profileStore.activeCourseId" />
+        <transition :name="transitionName" mode="out-in">
+          <div class="mobile-page-view" :key="route.path">
+            <component :is="Component" />
+          </div>
         </transition>
       </router-view>
     </main>
@@ -112,6 +148,7 @@ const isActive = (tab: TabItem) => {
         :class="{ active: isActive(tab) }"
         @click="handleTabClick(tab)"
       >
+        <span v-if="isActive(tab)" class="mobile-tabbar-indicator" />
         <el-icon :size="24"><component :is="tab.icon" /></el-icon>
         <span class="mobile-tabbar-label">{{ tab.label }}</span>
       </button>
@@ -140,13 +177,13 @@ const isActive = (tab: TabItem) => {
 .mobile-nav-inner {
   display: flex;
   align-items: center;
-  height: 48px;
-  padding: 0 8px;
+  height: 40px;
+  padding: 0 4px;
 }
 
 .mobile-nav-left,
 .mobile-nav-right {
-  width: 48px;
+  width: 40px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -157,8 +194,8 @@ const isActive = (tab: TabItem) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   border: none;
   background: transparent;
   color: var(--lt-text-secondary);
@@ -172,10 +209,49 @@ const isActive = (tab: TabItem) => {
   background-color: rgba(43, 111, 255, 0.06);
 }
 
+/* 通知铃铛 */
+.mobile-nav-bell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--lt-text-secondary);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background-color 150ms ease-out;
+  touch-action: manipulation;
+}
+
+.mobile-nav-bell:active {
+  background-color: rgba(43, 111, 255, 0.06);
+}
+
+.mobile-bell-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--lt-danger);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
 .mobile-nav-title {
   flex: 1;
   text-align: center;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--lt-text-primary);
   white-space: nowrap;
@@ -189,11 +265,19 @@ const isActive = (tab: TabItem) => {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
 }
 
 .mobile-content.has-tabbar {
   padding-bottom: calc(56px + var(--mobile-safe-area-inset-bottom, 0px));
+}
+
+.mobile-page-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ===== 底部 TabBar ===== */
@@ -212,6 +296,7 @@ const isActive = (tab: TabItem) => {
 }
 
 .mobile-tabbar-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -232,6 +317,24 @@ const isActive = (tab: TabItem) => {
   color: var(--lt-brand);
 }
 
+/* 选中态顶部指示条 */
+.mobile-tabbar-indicator {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--lt-brand);
+  transform: translateX(-50%);
+  animation: tabIndicatorIn 0.15s ease-out;
+}
+
+@keyframes tabIndicatorIn {
+  from { opacity: 0; transform: translateX(-50%) scaleX(0); }
+  to { opacity: 1; transform: translateX(-50%) scaleX(1); }
+}
+
 .mobile-tabbar-label {
   font-size: 10px;
   font-weight: 500;
@@ -242,22 +345,50 @@ const isActive = (tab: TabItem) => {
   font-weight: 600;
 }
 
-/* ===== 页面过渡动画 ===== */
-.mobile-page-enter-active {
-  transition: opacity 0.15s ease-out, transform 0.2s ease-out;
+/* ===== 方向性页面转场 ===== */
+/* 前进 push：新页从右滑入，旧页向左微退淡出 */
+.mobile-push-enter-active {
+  transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.22s ease-out;
 }
-
-.mobile-page-leave-active {
-  transition: opacity 0.12s ease-in, transform 0.15s ease-in;
+.mobile-push-leave-active {
+  transition: transform 0.15s ease-in, opacity 0.15s ease-in;
 }
-
-.mobile-page-enter-from {
+.mobile-push-enter-from {
+  transform: translateX(100%);
+  opacity: 0.5;
+}
+.mobile-push-leave-to {
+  transform: translateX(-30%);
   opacity: 0;
-  transform: translateX(20px);
 }
 
-.mobile-page-leave-to {
+/* 返回 pop：新页从左滑入，旧页向右滑出（退出快于进入） */
+.mobile-pop-enter-active {
+  transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease-out;
+}
+.mobile-pop-leave-active {
+  transition: transform 0.15s ease-in, opacity 0.15s ease-in;
+}
+.mobile-pop-enter-from {
+  transform: translateX(-30%);
   opacity: 0;
-  transform: translateX(-8px);
+}
+.mobile-pop-leave-to {
+  transform: translateX(100%);
+  opacity: 0.5;
+}
+
+/* Tab 切换：交叉淡入淡出（无位移） */
+.mobile-tab-enter-active {
+  transition: opacity 0.15s ease-out;
+}
+.mobile-tab-leave-active {
+  transition: opacity 0.15s ease-in;
+}
+.mobile-tab-enter-from {
+  opacity: 0;
+}
+.mobile-tab-leave-to {
+  opacity: 0;
 }
 </style>

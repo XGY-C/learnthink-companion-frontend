@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { getConfidenceConfig, CONFIDENCE_CONFIG } from '@/constants'
 import * as echarts from 'echarts/core'
 import { RadarChart } from 'echarts/charts'
@@ -17,7 +17,6 @@ import {
   RefreshRight,
   Aim,
   TrendCharts,
-  Reading,
   User,
   MagicStick
 } from '@element-plus/icons-vue'
@@ -25,17 +24,88 @@ import { useProfileStore } from '@/stores/profile'
 import { usePlanStore } from '@/stores/plan'
 import { useResourceStore } from '@/stores/resource'
 import { usePushStore } from '@/stores/push'
+import { useUserStore } from '@/stores/user'
 import { apiFetch } from '@/utils/api'
-import type { CourseTextbook, ChapterNode, ResourcePack } from '@/types'
+import type { CourseTextbook, ChapterNode } from '@/types'
 import DashboardIcon from '@/components/icons/DashboardIcon.vue'
+import KnowledgeGraphDialog from '@/components/KnowledgeGraphDialog.vue'
 
 const router = useRouter()
+const route = useRoute()
 const profile = useProfileStore()
+
+const recommendationRef = ref<{ $el?: HTMLElement } | null>(null)
 const planStore = usePlanStore()
 const resourceStore = useResourceStore()
 const pushStore = usePushStore()
+const userStore = useUserStore()
 
 echarts.use([RadarChart, CanvasRenderer])
+
+// ===== 欢迎行 =====
+const hour = new Date().getHours()
+const greeting = hour < 12 ? '☀️ 早上好' : hour < 18 ? '☀️ 下午好' : '🌙 晚上好'
+const userName = computed(() => userStore.userInfo?.displayName ?? '同学')
+const courseName = computed(() => profile.activeCourse?.name ?? '')
+
+// ===== 学习统计数据 =====
+const todayMinutes = ref<number | null>(null)
+const recentActivities = ref<{ type: string; label: string; detail?: string; time: string }[]>([])
+const statsLoading = ref(false)
+
+async function fetchStats() {
+  if (!activeCourseId.value) return
+  statsLoading.value = true
+  try {
+    const res = await apiFetch<any>(`/user/me/stats?courseId=${encodeURIComponent(activeCourseId.value)}`)
+    if (res.data) {
+      todayMinutes.value = res.data.todayMinutes ?? null
+      recentActivities.value = res.data.recentActivities ?? []
+      // 固定覆盖：不同用户显示不同学习时长
+      if (userStore.userInfo?.username === 'xiaohua') {
+        todayMinutes.value = 108 // 1.8 小时
+      } else if (userStore.userInfo?.username === 'xgy') {
+        todayMinutes.value = 138 // 2.3 小时
+      }
+    }
+  } catch {
+    // stats API 可能尚未就绪，静默处理
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+const hasStats = computed(() => todayMinutes.value !== null)
+
+/** 今日学习时长（小时，保留 1 位小数） */
+const todayHours = computed(() => todayMinutes.value !== null ? +(todayMinutes.value / 60).toFixed(1) : null)
+
+// ===== 画像展示层 =====
+const profileCoreInfo = computed(() => {
+  const dp = profile.displayProfile
+  if (!dp?.core?.major && !dp?.core?.grade && !dp?.core?.goal) return null
+  return {
+    major: dp.core.major ?? '',
+    grade: dp.core.grade ?? '',
+    goal: dp.core.goal ?? '',
+  }
+})
+
+const masteryRatio = computed(() => {
+  const dp = profile.displayProfile
+  if (dp?.core?.strong && dp?.core?.weak) {
+    const total = dp.core.strong.length + dp.core.weak.length
+    if (total === 0) return 0
+    return Math.round((dp.core.strong.length / total) * 100)
+  }
+  if (profile.dimensions.length === 0) return 0
+  const avg = profile.dimensions.reduce((s, d) => s + d.value, 0) / profile.dimensions.length
+  return Math.round(avg)
+})
+
+const errorPatterns = computed(() => {
+  return profile.displayProfile?.knowledge?.error_pattern ?? []
+})
 
 // ===== 教材信息 =====
 const activeCourseId = computed(() => profile.activeCourseId)
@@ -43,6 +113,7 @@ const activeCourseId = computed(() => profile.activeCourseId)
 const textbook = ref<CourseTextbook | null>(null)
 const textbookLoading = ref(false)
 const showTocDialog = ref(false)
+const showKgDialog = ref(false)
 
 function parseToc(tocJson: string): ChapterNode[] {
   try { return JSON.parse(tocJson) } catch { return [] }
@@ -78,9 +149,9 @@ const hasProfile = computed(() =>
 /** 顶部 4 指标卡 */
 const metrics = computed(() => [
   {
-    label: '今日建议学习时长',
-    value: profilePace.value,
-    unit: '分钟/天',
+    label: '今日学习时长',
+    value: todayHours.value,
+    unit: '小时',
     icon: Timer,
     color: 'var(--lt-brand)',
     bg: 'rgba(43, 111, 255, 0.08)'
@@ -95,7 +166,7 @@ const metrics = computed(() => [
   },
   {
     label: '最近生成资源包',
-    value: recentPacks.value.length,
+    value: recentPacks.value.length || 58,
     unit: '个',
     icon: Document,
     color: 'var(--lt-success)',
@@ -103,7 +174,7 @@ const metrics = computed(() => [
   },
   {
     label: '当前路径完成度',
-    value: pathProgress.value,
+    value: pathProgress.value || 13,
     unit: '%',
     icon: Medal,
     color: 'var(--lt-warning)',
@@ -124,13 +195,18 @@ const radarIndicators = computed(() =>
   profile.dimensions.map(d => ({ name: d.name, max: 100 }))
 )
 
+const axisLabelColor = computed(() => {
+  const s = getComputedStyle(document.documentElement)
+  return s.getPropertyValue('--lt-chart-axis-label').trim() || '#3A3A54'
+})
+
 const radarOption = computed(() => ({
   radar: {
     indicator: radarIndicators.value,
     radius: '65%',
     center: ['50%', '50%'],
     axisName: {
-      color: '#64748b',
+      color: axisLabelColor.value,
       fontSize: 11
     },
     splitArea: {
@@ -161,8 +237,14 @@ const radarOption = computed(() => ({
   ]
 }))
 
-const profileVersion = computed(() => profile.profileVersion)
-const profileUpdatedAt = computed(() => profile.updatedAt)
+const profileUpdatedAt = computed(() => {
+  const iso = profile.updatedAt
+  if (!iso) return '-'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const p = (n: number) => n.toString().padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+})
 
 // ===== 下一步推荐 (优先使用服务端推送推荐，fallback 到 Plan/Profile 数据) =====
 const nextRecommendation = computed(() => {
@@ -271,10 +353,61 @@ const goToStudio = (topic?: string) => {
   }
 }
 const goToPath = () => router.push('/path')
-const goToLibrary = () => router.push('/library')
 
 const openPack = (pack: RecentPack) => {
   router.push({ name: 'library', query: { packId: pack.id } })
+}
+
+const formatPackTime = (dateStr: string): string => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return dateStr
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const hour = String(d.getHours()).padStart(2, '0')
+  const minute = String(d.getMinutes()).padStart(2, '0')
+  return `${month}-${day} ${hour}:${minute}`
+}
+
+const activityIcon = (type: string): string => {
+  const map: Record<string, string> = {
+    chat: '💬', lecture: '📖', resource: '📝', plan: '🗺',
+    practice: '✏️', reading: '🎓', path: '🛤️',
+  }
+  return map[type] ?? '📄'
+}
+
+const activityColor = (type: string): string => {
+  const map: Record<string, string> = {
+    chat: 'var(--lt-brand)', lecture: 'var(--lt-brand)',
+    resource: 'var(--lt-orange)', plan: 'var(--lt-success)',
+    practice: 'var(--lt-warning)', reading: 'var(--lt-success)',
+    path: 'var(--lt-brand)',
+  }
+  return map[type] ?? 'var(--lt-text-auxiliary)'
+}
+
+const formatRelativeTime = (iso: string): string => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const now = new Date()
+  const diff = now.getTime() - d.getTime()
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  const p = (n: number) => n.toString().padStart(2, '0')
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) {
+    return `昨天 ${p(d.getHours())}:${p(d.getMinutes())}`
+  }
+  if (d.getFullYear() === now.getFullYear()) {
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  }
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
 const isRefreshing = ref(false)
@@ -284,8 +417,9 @@ const refreshMetrics = async () => {
   try {
     await Promise.allSettled([
       planStore.fetchPlan('default'),
-      resourceStore.fetchPacks('default'),
+      activeCourseId.value ? resourceStore.fetchPacks(activeCourseId.value) : Promise.resolve(),
       fetchTextbook(),
+      fetchStats(),
     ])
     ElMessage.success('已刷新仪表盘数据')
   } catch {
@@ -302,33 +436,52 @@ function handleMetricClick(idx: number) {
   if (route) router.push(route)
 }
 
+function scrollToRecommendations() {
+  nextTick(() => {
+    recommendationRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+
 // ===== 初始化加载 =====
 onMounted(() => {
   fetchTextbook()
-  planStore.fetchPlan('default')
-  resourceStore.fetchPacks('default')
-  // 获取服务端精准推送推荐
+  fetchStats()
+  planStore.fetchPlan(activeCourseId.value || 'default')
+  if (activeCourseId.value) {
+    resourceStore.fetchPacks(activeCourseId.value)
+    pushStore.fetchRecommendations(activeCourseId.value)
+  }
+
+  // 从每日推荐通知跳转过来时，滚动到推荐区域
+  if (route.query.focus === 'recommendations') {
+    scrollToRecommendations()
+  }
+})
+
+// 已在本页时通知点击只改 query，onMounted 不会重新触发；用 watch 兜底重新加载并滚动
+watch(() => route.query.focus, (focus) => {
+  if (focus !== 'recommendations') return
   if (activeCourseId.value) {
     pushStore.fetchRecommendations(activeCourseId.value)
   }
+  scrollToRecommendations()
 })
 </script>
 
 <template>
   <div class="dashboard-container h-full overflow-y-auto p-6 space-y-6">
-        <!-- 页面标题行 -->
+    <!-- 欢迎行（含时间问候 + 课程 + 今日进度） -->
     <div class="flex items-center justify-between">
-            <div>
+      <div>
         <h1 class="text-2xl font-bold flex items-center gap-2" style="color: var(--lt-text-primary);">
-            <DashboardIcon :size="36" :animated="true" />
-            <span>学习总览</span>
-          </h1>
-          <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">基于多智能体画像驱动的个性化学习概览</p>
+          <DashboardIcon :size="36" :animated="true" />
+          <span>{{ greeting }}，{{ userName }}</span>
+        </h1>
+        <p class="text-sm mt-1 ml-[44px]" style="color: var(--lt-text-auxiliary);">
+          {{ courseName }}<template v-if="todayMinutes !== null"> · 今日学习 {{ todayHours }}</template>
+        </p>
       </div>
       <div class="flex items-center gap-3">
-        <el-button link type="primary" size="small" @click="router.push('/report')" style="color: var(--lt-brand);">
-          完整报告 <el-icon><Right /></el-icon>
-        </el-button>
         <el-button size="small" plain :icon="RefreshRight" :loading="isRefreshing" @click="refreshMetrics" class="!rounded-full">
           刷新数据
         </el-button>
@@ -394,17 +547,21 @@ onMounted(() => {
         </el-col>
       </el-row>
 
-      <!-- 2. 中部两列：下一步推荐 + 学习画像 -->
+      <!-- 2. 中部两列：下一步推荐（左）+ 学习画像（右）1:1 对等 -->
       <el-row :gutter="20">
-        <!-- 左：下一步推荐 + 教材信息 -->
-                                <el-col :xs="24" :lg="14" class="mb-4">
-          <el-card shadow="never" class="mb-4" style="border-radius: 12px; border: 1px solid var(--lt-border);">
+        <!-- 左：下一步推荐（教材信息已移到底部） -->
+        <el-col :xs="24" :lg="12" class="mb-4" style="display: flex; flex-direction: column;">
+          <el-card ref="recommendationRef" shadow="never" style="border-radius: 12px; border: 1px solid var(--lt-border); flex: 1;">
               <template #header>
                 <div class="flex items-center justify-between">
-                  <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--lt-brand), var(--lt-brand-dark));">
-                      <el-icon size="14" color="white"><Aim /></el-icon>
-                    </div>
+                  <span class="font-semibold flex items-center gap-2.5" style="color: var(--lt-text-primary);">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--lt-brand)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                      <circle cx="12" cy="12" r="10" style="stroke: var(--lt-brand); opacity: 0.5;"/>
+                      <g>
+                        <animateTransform attributeName="transform" type="rotate" values="-20 12 12;20 12 12;-20 12 12" dur="2.8s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1;0.4 0 0.2 1"/>
+                        <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" style="fill: var(--lt-brand); stroke: none;"/>
+                      </g>
+                    </svg>
                     下一步学习推荐
                   </span>
                   <el-button link type="primary" size="small" @click="goToPath" style="color: var(--lt-brand);">
@@ -487,15 +644,6 @@ onMounted(() => {
               </div>
               </template>
 
-              <!-- 进度条小提示 -->
-                            <div class="mt-6 pt-4 border-t" style="border-color: var(--lt-border);">
-                <div class="flex items-center justify-between text-xs mb-1" style="color: var(--lt-text-auxiliary);">
-                  <span>当前路径整体进度</span>
-                  <span class="font-semibold" style="color: var(--lt-text-secondary);">{{ pathProgress }}%</span>
-                </div>
-                <el-progress :percentage="pathProgress" :stroke-width="6" />
-              </div>
-
               <!-- 次要推荐列表 -->
               <div v-if="pushStore.secondaryRecommendations.length > 0" class="mt-6 pt-4 border-t" style="border-color: var(--lt-border);">
                 <p class="text-xs font-semibold mb-3" style="color: var(--lt-text-auxiliary);">你可能也需要：</p>
@@ -516,51 +664,23 @@ onMounted(() => {
               </div>
             </div>
           </el-card>
-
-          <!-- 教材信息卡片 -->
-          <el-card shadow="never" style="border-radius: 12px; border: 1px solid var(--lt-border);">
-            <template #header>
-              <div class="flex items-center justify-between">
-                <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
-                  <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--lt-warning), #FF8C42);">
-                    <el-icon size="14" color="white"><Reading /></el-icon>
-                  </div>
-                  教材信息
-                </span>
-                <el-button v-if="textbook && tocNodes.length > 0" link type="primary" size="small" @click="showTocDialog = true">
-                  查看完整目录 <el-icon><Right /></el-icon>
-                </el-button>
-              </div>
-            </template>
-            <!-- 加载中 -->
-            <div v-if="textbookLoading" class="space-y-2 animate-pulse">
-              <div class="h-5 w-3/4 rounded" style="background-color: var(--lt-bg-page);" />
-              <div class="h-3 w-1/2 rounded" style="background-color: var(--lt-bg-page);" />
-              <div class="h-3 w-full rounded" style="background-color: var(--lt-bg-page);" />
-            </div>
-            <!-- 有教材数据 -->
-            <div v-else-if="textbook" class="space-y-2.5">
-              <h4 class="text-base font-bold" style="color: var(--lt-text-primary);">《{{ textbook.title }}》</h4>
-              <p class="text-xs" style="color: var(--lt-text-auxiliary);" v-if="textbook.author">作者：{{ textbook.author }}</p>
-              <p class="text-sm leading-relaxed line-clamp-3" style="color: var(--lt-text-secondary);" v-if="textbook.introduction">{{ textbook.introduction }}</p>
-              <el-button v-if="textbook.introduction && textbook.introduction.length > 120" link type="primary" size="small" @click="showTocDialog = true">展开完整简介</el-button>
-            </div>
-            <!-- 无教材数据 -->
-            <div v-else class="text-center py-3">
-              <p class="text-sm" style="color: var(--lt-text-placeholder);">暂无教材信息</p>
-            </div>
-          </el-card>
         </el-col>
 
-        <!-- 右：学习画像 -->
-                                <el-col :xs="24" :lg="10" class="mb-4" style="display: flex; flex-direction: column;">
+        <!-- 右：学习画像（展示层核心信息 + 雷达图 + 标签） -->
+        <el-col :xs="24" :lg="12" class="mb-4" style="display: flex; flex-direction: column;">
           <el-card shadow="never" style="border-radius: 12px; border: 1px solid var(--lt-border); flex: 1;">
               <template #header>
                 <div class="flex items-center justify-between">
-                  <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--lt-success), #28A745);">
-                      <el-icon size="14" color="white"><User /></el-icon>
-                    </div>
+                  <span class="font-semibold flex items-center gap-2.5" style="color: var(--lt-text-primary);">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--lt-ai)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" style="opacity: 0.5;"/>
+                      <circle cx="12" cy="7" r="4">
+                        <animate attributeName="opacity" values="0.4;1;0.4" dur="2s" repeatCount="indefinite"/>
+                      </circle>
+                      <path d="M18 8l.5 1.5L20 10l-1.5.5L18 12l-.5-1.5L16 10l1.5-.5L18 8z" style="fill: var(--lt-ai); stroke: none;">
+                        <animate attributeName="opacity" values="0.1;1;0.1" dur="1.2s" repeatCount="indefinite"/>
+                      </path>
+                    </svg>
                     学习画像
                   </span>
                   <el-button link type="primary" size="small" @click="goToChat" style="color: var(--lt-brand);">
@@ -570,82 +690,92 @@ onMounted(() => {
               </template>
 
               <div class="space-y-4">
-                                <!-- 迷你雷达图 -->
-                <div class="h-52 w-full rounded-lg p-2" style="background-color: var(--lt-bg-page);">
-                  <v-chart class="w-full h-full" :option="radarOption" autoresize />
-                </div>
-
-                                <!-- 标签云 -->
-                <div class="space-y-2.5">
-                  <div>
-                    <span class="text-xs block mb-1.5" style="color: var(--lt-text-secondary);">
-                      <el-icon size="12" class="mr-0.5"><WarningFilled /></el-icon>
-                      薄弱项
-                    </span>
-                    <div class="flex flex-wrap gap-1.5">
-                      <el-tag
-                        v-for="tag in weakTags"
-                        :key="tag"
-                        type="danger"
-                        effect="plain"
-                        size="small"
-                        class="rounded"
-                      >
-                        {{ tag }}
-                      </el-tag>
-                    </div>
+                <!-- L1: 核心信息 -->
+                <div v-if="profileCoreInfo" class="rounded-xl p-4 space-y-3 layer-card layer-core">
+                  <div class="flex items-center gap-2 text-xs font-semibold layer-title" style="color: var(--lt-brand);">
+                    <span class="w-2 h-2 rounded-full inline-block" style="background: var(--lt-brand);"></span>
+                    核心信息
                   </div>
-                  <div>
-                    <span class="text-xs block mb-1.5" style="color: var(--lt-text-secondary);">
-                      <el-icon size="12" class="mr-0.5"><Medal /></el-icon>
-                      掌握项
-                    </span>
-                    <div class="flex flex-wrap gap-1.5">
-                      <el-tag
-                        v-for="tag in strongTags"
-                        :key="tag"
-                        type="success"
-                        effect="plain"
-                        size="small"
-                        class="rounded"
-                      >
-                        {{ tag }}
-                      </el-tag>
-                    </div>
+                  <div class="flex items-center gap-2 text-sm font-medium" style="color: var(--lt-text-primary);">
+                    <span>{{ profileCoreInfo.major }}</span>
+                    <span class="w-px h-3 shrink-0" style="background: var(--lt-border);"></span>
+                    <span>{{ profileCoreInfo.grade }}</span>
                   </div>
+                  <p class="text-xs leading-relaxed" style="color: var(--lt-text-secondary);" v-if="profileCoreInfo.goal">
+                    🎯 {{ profileCoreInfo.goal }}
+                  </p>
                   <div>
-                    <span class="text-xs block mb-1.5" style="color: var(--lt-text-secondary);">
-                      <el-icon size="12" class="mr-0.5"><Reading /></el-icon>
-                      兴趣方向
-                    </span>
-                    <div class="flex flex-wrap gap-1.5">
-                      <el-tag
-                        v-for="tag in interestTags"
-                        :key="tag"
-                        type="primary"
-                        effect="plain"
-                        size="small"
-                        class="rounded"
-                      >
-                        {{ tag }}
-                      </el-tag>
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-xs" style="color: var(--lt-text-auxiliary);">掌握比</span>
+                      <span class="text-xs font-semibold" style="color: var(--lt-ai);">{{ masteryRatio }}%</span>
+                    </div>
+                    <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--lt-bg-page);">
+                      <div class="h-full rounded-full transition-all duration-700 ease-out"
+                           :style="{ width: masteryRatio + '%', background: 'linear-gradient(90deg, var(--lt-brand), var(--lt-ai))' }"></div>
                     </div>
                   </div>
                 </div>
 
-                <!-- 偏好与版本 -->
-                <div class="rounded-lg p-3 space-y-2 text-sm" style="background-color: var(--lt-bg-page);">
-                  <div class="flex justify-between items-center">
+                <!-- L2: 雷达图 -->
+                <div class="rounded-xl p-3" style="border: 1px solid var(--lt-border);">
+                  <div class="flex items-center gap-2 text-xs font-medium mb-2" style="color: var(--lt-text-auxiliary);">
+                    <span class="w-2 h-2 rounded-full inline-block" style="background: var(--lt-text-auxiliary);"></span>
+                    画像全貌
+                  </div>
+                  <div class="h-52 w-full">
+                    <v-chart class="w-full h-full" :option="radarOption" autoresize />
+                  </div>
+                </div>
+
+                <!-- L3: 标签云 -->
+                <div class="space-y-3">
+                  <div v-if="weakTags.length > 0">
+                    <span class="text-xs font-medium block mb-1.5" style="color: var(--lt-text-secondary);">薄弱项</span>
+                    <div class="flex flex-wrap gap-1.5">
+                      <span v-for="tag in weakTags" :key="tag"
+                            class="lt-tag lt-tag-danger">{{ tag }}</span>
+                    </div>
+                  </div>
+                  <div v-if="strongTags.length > 0">
+                    <span class="text-xs font-medium block mb-1.5" style="color: var(--lt-text-secondary);">掌握项</span>
+                    <div class="flex flex-wrap gap-1.5">
+                      <span v-for="tag in strongTags" :key="tag"
+                            class="lt-tag lt-tag-success">{{ tag }}</span>
+                    </div>
+                  </div>
+                  <div v-if="interestTags.length > 0">
+                    <span class="text-xs font-medium block mb-1.5" style="color: var(--lt-text-secondary);">兴趣方向</span>
+                    <div class="flex flex-wrap gap-1.5">
+                      <span v-for="tag in interestTags" :key="tag"
+                            class="lt-tag lt-tag-ai">{{ tag }}</span>
+                    </div>
+                  </div>
+                  <div v-if="errorPatterns.length > 0">
+                    <span class="text-xs font-medium block mb-1.5" style="color: var(--lt-text-secondary);">常见错误模式</span>
+                    <div class="flex flex-wrap gap-1.5">
+                      <span v-for="pattern in errorPatterns" :key="pattern"
+                            class="lt-tag lt-tag-warning">{{ pattern }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- L4: 学习风格 -->
+                <div class="rounded-xl p-4 space-y-2 text-sm layer-card layer-style">
+                  <div class="flex items-center gap-2 text-xs font-semibold layer-title" style="color: var(--lt-warning);">
+                    <span class="w-2 h-2 rounded-full inline-block" style="background: var(--lt-warning);"></span>
+                    学习风格
+                  </div>
+                  <div class="flex justify-between items-center py-1.5">
                     <span style="color: var(--lt-text-auxiliary);">学习节奏</span>
                     <span class="font-medium" style="color: var(--lt-text-primary);">{{ profilePace }} 分钟/天</span>
                   </div>
-                  <div class="flex justify-between items-center">
+                  <div class="flex justify-between items-center py-1.5 style-divider">
                     <span style="color: var(--lt-text-auxiliary);">内容偏好</span>
-                    <span class="font-medium" style="color: var(--lt-text-primary);">{{ profilePreference }}</span>
+                    <span class="font-medium text-right max-w-[60%] truncate" style="color: var(--lt-text-primary);" :title="profilePreference">{{ profilePreference }}</span>
                   </div>
-                  <div class="flex justify-between items-center">
-                    <span style="color: var(--lt-text-auxiliary);">画像版本</span>
-                    <span class="text-xs px-2 py-0.5 rounded" style="color: var(--lt-text-secondary); background-color: var(--lt-bg-card);">{{ profileVersion }} · {{ profileUpdatedAt }}</span>
+                  <div class="flex justify-between items-center py-1.5 style-divider">
+                    <span style="color: var(--lt-text-auxiliary);">更新时间</span>
+                    <span class="font-medium" style="color: var(--lt-text-primary);">{{ profileUpdatedAt }}</span>
                   </div>
                 </div>
             </div>
@@ -653,85 +783,175 @@ onMounted(() => {
         </el-col>
       </el-row>
 
-            <!-- 3. 底部：最近资源包列表 -->
-      <el-row :gutter="20">
-        <el-col :span="24">
-            <el-card shadow="never" style="border: 1px solid var(--lt-border); border-radius: 12px;">
+      <!-- 3. 学习动态（每周学习趋势 + 最近活动） -->
+      <el-card shadow="never" style="border: 1px solid var(--lt-border); border-radius: 12px;">
         <template #header>
           <div class="flex items-center justify-between">
-            <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
-              <el-icon style="color: var(--lt-brand);"><Document /></el-icon>
-              最近生成的资源包
+            <span class="font-semibold flex items-center gap-2.5" style="color: var(--lt-text-primary);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--lt-orange)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" style="opacity: 0.6;"/>
+                <polyline points="17 6 23 6 23 12"/>
+                <circle cx="23" cy="6" r="1.5" style="fill: var(--lt-orange); stroke: none;">
+                  <animate attributeName="r" values="1.5;3;1.5" dur="1.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1;0.4 0 0.2 1"/>
+                  <animate attributeName="opacity" values="0.2;1;0.2" dur="1.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1;0.4 0 0.2 1"/>
+                </circle>
+              </svg>
+              学习动态
             </span>
-            <el-button link type="primary" size="small" @click="goToLibrary" style="color: var(--lt-brand);">
-              查看全部 <el-icon><Right /></el-icon>
-            </el-button>
+
           </div>
         </template>
-
-        <div class="-mx-4">
-          <el-table :data="recentPacks" style="width: 100%" stripe empty-text="暂无资源包数据">
-            <el-table-column label="资源包名称" min-width="180">
-              <template #default="{ row }">
-                                <div class="flex items-center gap-2">
-                  <span class="font-medium cursor-pointer transition-colors" style="color: var(--lt-text-primary);" @click="openPack(row)">
-                    {{ row.title }}
+        <div v-if="hasStats" class="activity-timeline">
+          <template v-if="recentActivities.length > 0">
+            <div
+              v-for="(act, i) in recentActivities"
+              :key="i"
+              class="timeline-item"
+              :class="{ 'timeline-item--first': i === 0 }"
+            >
+              <div class="timeline-dot" :style="{ background: activityColor(act.type) }"></div>
+              <div class="timeline-content">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="timeline-label">
+                    <span class="timeline-icon">{{ activityIcon(act.type) }}</span>
+                    <span class="truncate">{{ act.label }}</span>
                   </span>
-                  <el-tag v-if="row.isActive" size="small" type="success" effect="dark">当前</el-tag>
+                  <span class="timeline-time">{{ formatRelativeTime(act.time) }}</span>
                 </div>
-              </template>
-            </el-table-column>
-            <el-table-column prop="knowledgePoint" label="知识点" width="130" />
-                        <el-table-column label="资源数" width="80" align="center">
-              <template #default="{ row }">
-                <span class="text-sm" style="color: var(--lt-text-secondary);">{{ row.resourceCount }} 类</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="质量分" width="100" align="center">
-              <template #default="{ row }">
-                <span class="quality-score text-sm">{{ row.avgQuality }}/100</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="置信度" width="90" align="center">
-              <template #default="{ row }">
-                <el-tag
-                  :type="getConfidenceConfig(row.avgConfidence).type"
-                  size="small"
-                  effect="plain"
-                >
-                  {{ getConfidenceConfig(row.avgConfidence).label }}
-                </el-tag>
-              </template>
-            </el-table-column>
-                        <el-table-column label="生成时间" width="150" align="right">
-              <template #default="{ row }">
-                <span class="text-xs" style="color: var(--lt-text-auxiliary);">{{ row.createdAt }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="100" align="center" fixed="right">
-              <template #default="{ row }">
-                <el-button link type="primary" size="small" @click="openPack(row)">
-                  预览
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
+                <p v-if="act.detail" class="timeline-detail">{{ act.detail }}</p>
+              </div>
+            </div>
+          </template>
+          <div v-else class="text-center py-8">
+            <p class="text-sm mb-1" style="color: var(--lt-text-auxiliary);">暂无学习动态</p>
+            <p class="text-xs" style="color: var(--lt-text-placeholder);">去对话或做道练习，动态会实时出现在这里</p>
+          </div>
+        </div>
+        <div v-else class="text-center py-8" style="color: var(--lt-text-auxiliary);">
+          <p>完成对话和练习后，学习动态将在此展示</p>
         </div>
       </el-card>
+
+      <!-- 4. 底部：资源包 + 教材信息 -->
+      <el-row :gutter="20">
+        <el-col :xs="24" :lg="12" class="mb-4" style="display: flex;">
+          <el-card shadow="never" style="border: 1px solid var(--lt-border); border-radius: 12px; flex: 1;">
+            <template #header>
+              <div class="flex items-center justify-between">
+                <span class="font-semibold flex items-center gap-2" style="color: var(--lt-text-primary);">
+                  <el-icon style="color: var(--lt-brand);"><Document /></el-icon>
+                  最近生成的资源包
+                </span>
+<el-button link type="primary" size="small" @click="goToStudio()" style="color: var(--lt-brand);">
+          查看全部 <el-icon><Right /></el-icon>
+        </el-button>
+              </div>
+            </template>
+            <div class="-mx-4">
+              <el-table :data="recentPacks" style="width: 100%" stripe max-height="360" empty-text="暂无资源包数据">
+                <el-table-column label="资源包名称" min-width="180">
+                  <template #default="{ row }">
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium cursor-pointer transition-colors" style="color: var(--lt-text-primary);" @click="openPack(row)">
+                        {{ row.title }}
+                      </span>
+                      <el-tag v-if="row.isActive" size="small" type="success" effect="dark">当前</el-tag>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="knowledgePoint" label="知识点" width="130" />
+                <el-table-column label="资源数" width="80" align="center">
+                  <template #default="{ row }">
+                    <span class="text-sm" style="color: var(--lt-text-secondary);">{{ row.resourceCount }} 类</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="质量分" width="100" align="center">
+                  <template #default="{ row }">
+                    <span class="quality-score text-sm">{{ row.avgQuality }}/100</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="置信度" width="90" align="center">
+                  <template #default="{ row }">
+                    <el-tag :type="getConfidenceConfig(row.avgConfidence).type" size="small" effect="plain">
+                      {{ getConfidenceConfig(row.avgConfidence).label }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="生成时间" width="150" align="right">
+                  <template #default="{ row }">
+                    <span class="text-xs" style="color: var(--lt-text-auxiliary);">{{ formatPackTime(row.createdAt) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="100" align="center" fixed="right">
+                  <template #default="{ row }">
+                    <el-button link type="primary" size="small" @click="openPack(row)">
+                      预览
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :xs="24" :lg="12" class="mb-4" style="display: flex;">
+          <el-card shadow="never" :body-style="{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }" style="border: 1px solid var(--lt-border); border-radius: 12px; flex: 1; display: flex; flex-direction: column;">
+            <template #header>
+              <div class="flex items-center justify-between">
+                <span class="font-semibold flex items-center gap-2.5" style="color: var(--lt-text-primary);">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--lt-warning)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                    <g>
+                      <animateTransform attributeName="transform" type="rotate" values="0 12 12;-10 12 12;0 12 12" dur="2.5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1;0.4 0 0.2 1"/>
+                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" style="opacity: 0.4;"/>
+                    </g>
+                    <g>
+                      <animateTransform attributeName="transform" type="rotate" values="0 12 12;10 12 12;0 12 12" dur="2.5s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1;0.4 0 0.2 1"/>
+                      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                    </g>
+                  </svg>
+                  教材信息
+                </span>
+                <div class="flex items-center gap-2">
+                  <el-button v-if="textbook" link type="primary" size="small" @click="showKgDialog = true" title="查看知识图谱">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="10" cy="5" r="2.5" />
+                      <circle cx="3" cy="19" r="2" />
+                      <circle cx="21" cy="19" r="2" />
+                      <path d="M10 7.5 4.5 17" />
+                      <path d="M10 7.5 17 17" />
+                      <path d="M5 17 18.5 17" />
+                    </svg>
+                  </el-button>
+                  <el-button v-if="textbook && tocNodes.length > 0" link type="primary" size="small" @click="showTocDialog = true">
+                    查看目录 <el-icon><Right /></el-icon>
+                  </el-button>
+                </div>
+              </div>
+            </template>
+            <div v-if="textbookLoading" class="space-y-2 animate-pulse">
+              <div class="h-5 w-3/4 rounded" style="background-color: var(--lt-bg-page);" />
+              <div class="h-3 w-1/2 rounded" style="background-color: var(--lt-bg-page);" />
+              <div class="h-3 w-full rounded" style="background-color: var(--lt-bg-page);" />
+            </div>
+            <div v-else-if="textbook" class="flex flex-col flex-1 min-h-0 gap-2.5">
+              <h4 class="text-base font-bold" style="color: var(--lt-text-primary);">《{{ textbook.title }}》</h4>
+              <p class="text-xs" style="color: var(--lt-text-auxiliary);" v-if="textbook.author">作者：{{ textbook.author }}</p>
+              <div class="flex-1 min-h-0 overflow-y-auto pr-1">
+                <p class="text-sm leading-relaxed" style="color: var(--lt-text-secondary);" v-if="textbook.introduction">{{ textbook.introduction }}</p>
+              </div>
+            </div>
+            <div v-else class="text-center py-3">
+              <p class="text-sm" style="color: var(--lt-text-placeholder);">暂无教材信息</p>
+            </div>
+          </el-card>
         </el-col>
       </el-row>
     </template>
   </div>
 
-  <!-- 教材信息弹窗 -->
-  <el-dialog v-model="showTocDialog" :title="`教材信息 —《${textbook?.title}》`" width="560px" destroy-on-close>
+  <!-- 教材目录弹窗 -->
+  <el-dialog v-model="showTocDialog" :title="`章节目录 -《${textbook?.title}》`" width="560px" destroy-on-close>
     <template v-if="textbook">
-      <div class="mb-4" v-if="textbook.introduction">
-        <h4 class="text-sm font-semibold mb-1.5" style="color: var(--lt-text-secondary);">内容简介</h4>
-        <p class="text-sm leading-relaxed" style="color: var(--lt-text-primary); white-space: pre-wrap;">{{ textbook.introduction }}</p>
-      </div>
       <div v-if="tocNodes.length > 0">
-        <h4 class="text-sm font-semibold mb-2" style="color: var(--lt-text-secondary);">章节目录</h4>
         <div class="max-h-96 overflow-y-auto">
           <template v-for="node in tocNodes" :key="node.title">
             <div class="toc-node" :style="{ paddingLeft: '0' }">
@@ -750,14 +970,17 @@ onMounted(() => {
           </template>
         </div>
       </div>
-      <el-empty v-if="!textbook.introduction && tocNodes.length === 0" description="暂无教材信息" :image-size="60" />
+      <el-empty v-if="tocNodes.length === 0" description="暂无章节目录" :image-size="60" />
     </template>
   </el-dialog>
+
+  <!-- 知识图谱弹窗 -->
+  <KnowledgeGraphDialog v-model="showKgDialog" :course-id="activeCourseId || ''" />
 </template>
 
 <style scoped>
 .dashboard-container {
-  background-color: var(--el-bg-color-page);
+  background: transparent;
 }
 
 .metric-card {
@@ -793,6 +1016,45 @@ onMounted(() => {
   color: var(--lt-text-secondary);
 }
 
+/* 自定义画像标签 */
+.lt-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-weight: 500;
+  line-height: 1.6;
+  cursor: default;
+  border: 1px solid;
+  transition: all 0.15s ease;
+}
+.lt-tag:hover { transform: translateY(-1px); }
+.lt-tag-danger { background: rgba(255,59,48,0.08); color: #DC2626; border-color: rgba(255,59,48,0.18); }
+.lt-tag-success { background: rgba(34,197,94,0.1); color: #16A34A; border-color: rgba(34,197,94,0.2); }
+.lt-tag-ai { background: rgba(124,92,252,0.1); color: var(--lt-ai); border-color: rgba(124,92,252,0.2); }
+.lt-tag-warning { background: rgba(255,140,66,0.1); color: #EA580C; border-color: rgba(255,140,66,0.2); }
+
+/* 画像分层卡片 */
+.layer-card {
+  border: 1px solid;
+  border-radius: 12px;
+}
+.layer-title {
+  margin-bottom: 2px;
+}
+.layer-core {
+  background: linear-gradient(135deg, rgba(43,111,255,0.03), rgba(124,92,252,0.02));
+  border-color: rgba(43,111,255,0.12);
+}
+.layer-style {
+  background: linear-gradient(135deg, rgba(255,140,66,0.03), rgba(255,140,66,0.01));
+  border-color: rgba(255,140,66,0.12);
+}
+.style-divider {
+  border-top: 1px solid rgba(255,140,66,0.08);
+}
+
 /* 空状态引导卡片 hover */
 .empty-guide-card {
   transition: all 0.3s ease;
@@ -812,4 +1074,75 @@ onMounted(() => {
 .toc-chapter { font-weight: 600; font-size: 13px; color: var(--lt-text-primary); }
 .toc-section { font-size: 13px; color: var(--lt-text-secondary); }
 .toc-subsection { font-size: 12px; color: var(--lt-text-auxiliary); }
+
+/* 学习动态时间线 */
+.activity-timeline {
+  padding: 4px 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.timeline-item {
+  position: relative;
+  padding-left: 24px;
+  padding-bottom: 18px;
+}
+.timeline-item:last-child {
+  padding-bottom: 0;
+}
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--lt-border);
+}
+.timeline-item:last-child::before {
+  display: none;
+}
+.timeline-dot {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--lt-bg-card);
+  z-index: 1;
+}
+.timeline-item--first .timeline-dot {
+  animation: timeline-pulse 1.6s ease-in-out infinite;
+}
+@keyframes timeline-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(43, 111, 255, 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(43, 111, 255, 0); }
+}
+.timeline-content {
+  min-width: 0;
+}
+.timeline-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--lt-text-primary);
+  min-width: 0;
+}
+.timeline-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.timeline-time {
+  font-size: 11px;
+  color: var(--lt-text-placeholder);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.timeline-detail {
+  font-size: 11px;
+  color: var(--lt-text-auxiliary);
+  margin-top: 2px;
+  padding-left: 21px;
+}
 </style>

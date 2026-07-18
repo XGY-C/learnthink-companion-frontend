@@ -5,6 +5,7 @@
 
 export type TutoringSSEEventName =
   | 'tutoring.started'
+  | 'tutoring.react.thought'
   | 'tutoring.plan.mode'
   | 'tutoring.plan.clarify'
   | 'tutoring.plan.clarify_timeout'
@@ -23,12 +24,27 @@ export type TutoringSSEEventName =
   | 'tutoring.diagram.done'
   | 'tutoring.diagram.degraded'
   | 'tutoring.section.regenerated'
+  | 'tutoring.guided.step_start'
+  | 'tutoring.guided.guidance_chunk'
+  | 'tutoring.guided.question'
+  | 'tutoring.guided.waiting_answer'
+  | 'tutoring.guided.feedback'
+  | 'tutoring.guided.step_done'
+  | 'tutoring.guided.revealed'
+  | 'tutoring.guided.summary'
   | 'tutoring.done'
   | 'tutoring.error'
 
 export interface TutoringSSEEvent {
   event: TutoringSSEEventName
   data: any
+}
+
+// ReAct 思考步骤
+export interface ReActThought {
+  iteration: number
+  thought: string
+  action: string
 }
 
 // ========== 会话 ==========
@@ -54,12 +70,15 @@ export interface TutoringSessionDetail {
 // ========== 请求 DTO ==========
 // 对应后端 TutoringStartRequest
 
+export type TutoringMode = 'smart' | 'guided' | 'direct' | 'test'
+
 export interface TutoringStartRequest {
   question: string
   sessionId?: string | null
   chatId?: string | null
   courseId?: string | null
   clarificationResponse?: ClarificationResponse | null
+  mode?: TutoringMode
 }
 
 // 对应后端 ClarificationResponse
@@ -192,7 +211,7 @@ export interface DiagramSpec {
 
 // ========== 前端状态类型 ==========
 
-export type TutoringStatus = 'idle' | 'planning' | 'clarifying' | 'preparing' | 'generating' | 'done' | 'error'
+export type TutoringStatus = 'idle' | 'planning' | 'clarifying' | 'preparing' | 'generating' | 'guided' | 'done' | 'error'
 
 export type SectionStatus = 'pending' | 'streaming' | 'done' | 'error'
 
@@ -236,4 +255,35 @@ export interface TutoringError {
 export interface TutoringFeedback {
   rating: 'like' | 'dislike'
   comment?: string | null
+}
+
+// ========== Guided Mode 类型 ==========
+
+export type GuidedStage = 'understanding' | 'analysis' | 'recall' | 'execution' | 'verification'
+export type GuidedStepStatus = 'pending' | 'guiding' | 'waiting_answer' | 'evaluating' | 'done'
+
+export interface GuidedStepState {
+  id: string
+  order: number
+  stage: GuidedStage
+  title: string
+  status: GuidedStepStatus
+  guidanceContent: string
+  question: string
+  studentAnswer: string
+  feedback: string
+  hint: string
+  evaluation: string
+  attempt: number
+  maxAttempts: number
+  allowReveal: boolean
+  timeSpentMs: number
+}
+
+// 对应后端 GuidedAnswerRequest
+export interface GuidedAnswerRequest {
+  sessionId: string
+  stepId: string
+  action: 'answer' | 'reveal' | 'hint'
+  answer?: string
 }

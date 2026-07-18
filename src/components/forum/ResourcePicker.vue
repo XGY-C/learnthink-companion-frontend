@@ -1,0 +1,190 @@
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useForumStore } from '@/stores/forum'
+import type { ForumResource } from '@/types/forum'
+import { Search, Document, Reading, List, Monitor, Connection, VideoCamera, Share } from '@element-plus/icons-vue'
+
+const emit = defineEmits<{
+  (e: 'select', resources: ForumResource[]): void
+  (e: 'close'): void
+}>()
+
+const store = useForumStore()
+const selected = ref<ForumResource[]>([])
+const filterType = ref('all')
+const searchQuery = ref('')
+
+const typeMeta: Record<string, { icon: any; label: string; color: string }> = {
+  doc: { icon: Document, label: '文档', color: 'var(--lt-brand)' },
+  quiz: { icon: List, label: '习题', color: 'var(--lt-orange)' },
+  reading: { icon: Reading, label: '阅读', color: 'var(--lt-ai)' },
+  code: { icon: Monitor, label: '代码', color: 'var(--lt-success)' },
+  mindmap: { icon: Share, label: '思维导图', color: 'var(--lt-orange)' },
+  html: { icon: Connection, label: '交互文档', color: 'var(--lt-ai)' },
+  video: { icon: VideoCamera, label: '视频', color: 'var(--lt-ai)' },
+}
+
+function getMeta(type: string) {
+  return typeMeta[type] || { icon: Document, label: type, color: 'var(--lt-text-secondary)' }
+}
+
+const filteredResources = computed(() => {
+  let list = store.availableResources
+  if (filterType.value !== 'all') {
+    list = list.filter(r => r.type === filterType.value)
+  }
+  if (searchQuery.value) {
+    const q = searchQuery.value.toLowerCase()
+    list = list.filter(r => r.title.toLowerCase().includes(q))
+  }
+  return list
+})
+
+import { computed } from 'vue'
+
+function toggleSelect(r: ForumResource) {
+  const idx = selected.value.findIndex(s => s.resourceItemId === r.resourceItemId)
+  if (idx >= 0) selected.value.splice(idx, 1)
+  else selected.value.push(r)
+}
+
+function confirm() {
+  emit('select', [...selected.value])
+}
+
+onMounted(() => {
+  store.fetchAvailableResources()
+})
+</script>
+
+<template>
+  <div class="resource-picker">
+    <div class="picker-header">
+      <h3 class="text-base font-semibold m-0">关联系统资源</h3>
+      <el-button text @click="emit('close')">✕</el-button>
+    </div>
+
+    <div class="picker-body">
+      <div class="flex items-center gap-2 mb-3">
+        <el-input
+          v-model="searchQuery"
+          placeholder="搜索资源..."
+          :prefix-icon="Search"
+          size="small"
+          class="flex-1"
+          clearable
+        />
+      </div>
+
+      <div class="flex gap-2 mb-3 flex-wrap">
+        <button
+          class="filter-chip"
+          :class="{ active: filterType === 'all' }"
+          @click="filterType = 'all'"
+        >全部</button>
+        <button
+          v-for="(meta, key) in typeMeta" :key="key"
+          class="filter-chip"
+          :class="{ active: filterType === key }"
+          @click="filterType = key"
+        >{{ meta.label }}</button>
+      </div>
+
+      <div class="resource-list">
+        <div
+          v-for="r in filteredResources" :key="r.resourceItemId"
+          class="resource-item"
+          :class="{ selected: selected.some(s => s.resourceItemId === r.resourceItemId) }"
+          @click="toggleSelect(r)"
+        >
+          <div class="flex items-center gap-3">
+            <div
+              class="resource-type-icon flex items-center justify-center rounded-lg w-9 h-9 flex-shrink-0"
+              :style="{ background: getMeta(r.type).color + '15', color: getMeta(r.type).color }"
+            >
+              <el-icon :size="18"><component :is="getMeta(r.type).icon" /></el-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium truncate m-0" style="color: var(--lt-text-primary);">{{ r.title }}</p>
+              <p class="text-xs m-0 mt-0.5" style="color: var(--lt-text-auxiliary);">{{ getMeta(r.type).label }}</p>
+            </div>
+            <el-checkbox
+              :model-value="selected.some(s => s.resourceItemId === r.resourceItemId)"
+              @click.stop
+            />
+          </div>
+        </div>
+        <div v-if="filteredResources.length === 0" class="text-center py-6 text-sm" style="color: var(--lt-text-auxiliary);">
+          暂无可用资源
+        </div>
+      </div>
+    </div>
+
+    <div class="picker-footer flex items-center justify-between">
+      <span class="text-sm" style="color: var(--lt-text-auxiliary);">已选 {{ selected.length }} 项</span>
+      <div class="flex gap-2">
+        <el-button @click="emit('close')">取消</el-button>
+        <el-button type="primary" @click="confirm">确认关联</el-button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.resource-picker {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--lt-border);
+}
+.picker-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+.picker-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--lt-border);
+  background: var(--lt-bg-card);
+}
+.filter-chip {
+  padding: 3px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  border: 1px solid var(--lt-border);
+  cursor: pointer;
+  background: var(--lt-bg-card);
+  color: var(--lt-text-secondary);
+  transition: all var(--lt-transition-base);
+}
+.filter-chip:hover, .filter-chip.active {
+  border-color: var(--lt-brand);
+  color: var(--lt-brand);
+  background: var(--lt-brand-lightest);
+}
+.resource-item {
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--lt-radius-md);
+  cursor: pointer;
+  transition: all var(--lt-transition-base);
+}
+.resource-item:hover {
+  background: var(--lt-bg-card);
+  border-color: var(--lt-border);
+  box-shadow: var(--lt-shadow-hover);
+}
+.resource-item.selected {
+  background: var(--lt-brand-lightest);
+  border-color: var(--lt-brand-lighter);
+}
+.resource-type-icon {
+  border-radius: var(--lt-radius-md);
+}
+</style>

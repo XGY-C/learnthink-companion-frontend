@@ -4,13 +4,27 @@ import { usePlanStore } from '@/stores/plan'
 import { useVideoLectureStore } from '@/stores/videoLecture'
 import { useTutoringStore } from '@/stores/tutoring'
 import { useTutoringSSE } from '@/composables/useTutoringSSE'
-import { apiFetch, ensureValidToken } from '@/utils/api'
+import { useDirectAnswerStore } from '@/stores/directAnswer'
+import { useDirectAnswerInlineSSE } from '@/composables/useDirectAnswerInlineSSE'
+import { apiFetch, ensureValidToken, getToken } from '@/utils/api'
 import { useSSE } from '@/composables/useSSE'
 import { ElMessageBox } from 'element-plus'
-import type { ThinkingStep, ThinkingRecord, ThinkingPhase } from '@/types'
+import type { ThinkingStep, ThinkingRecord, ThinkingPhase, SearchSource } from '@/types'
 import type { SceneItemEvent } from '@/types/scene'
+import type { TutoringMode, TutoringStartRequest, SectionState, QuestionAnalysis, ReActThought, GuidedStepState } from '@/types/tutoring'
+import type { DirectAnswerSectionState, AnswerMetadata, ProblemAnalysis } from '@/types/directAnswer'
+import type { VisualRenderType } from '@/types/smart'
 
 // ===== Types =====
+
+export interface ChatFileAttachment {
+  fileName: string
+  fileUrl: string
+  parsedText: string
+  fileSize: number
+  contentType: string
+  isImage: boolean
+}
 
 export interface Suggestion {
   text: string
@@ -20,10 +34,15 @@ export interface Suggestion {
 export interface ChatMessage {
   role: 'assistant' | 'user'
   text: string
+  messageId?: string
   isStreaming?: boolean
   suggestions?: Suggestion[]
   suggestionStyle?: 'plain' | 'primary'
   thinking?: ThinkingRecord
+  feedback?: 'liked' | 'disliked' | null
+  mode?: string
+  metadataJson?: Record<string, any>
+  _files?: ChatFileAttachment[]
   _feedback?: 'liked' | 'disliked'
   _planOffer?: {
     type: 'resource' | 'plan'
@@ -69,6 +88,55 @@ export interface ChatMessage {
     active: boolean
     completed: boolean
     sessionId: string | null
+    subMode?: string
+    /** 活跃 tutoring 的运行时状态快照（切换会话时保存/恢复用） */
+    runtimeState?: {
+      status: string
+      currentGuidedStepIdx: number
+      sectionOrder: string[]
+      sections: Record<string, SectionState>
+    }
+    snapshot?: {
+      expanded?: boolean
+      analysis: QuestionAnalysis | null
+      reactThoughts: ReActThought[]
+      sections: SectionState[]
+      guidedSteps?: GuidedStepState[]
+      guidedSummary?: string
+    }
+  }
+  /** DirectAnswer state — 直接模式内联渲染 */
+  _directAnswer?: {
+    active: boolean
+    completed: boolean
+    sessionId: string | null
+    snapshot?: {
+      sections: DirectAnswerSectionState[]
+      thoughtContent?: string
+      metadata?: AnswerMetadata | null
+      analysis?: ProblemAnalysis | null
+    }
+  }
+  /** Smart v2 state - Agent ReAct 模式内联渲染 */
+  _smart?: {
+    active: boolean
+    completed: boolean
+    sessionId: string | null
+    /** 内容块序列 -- 文字和可视化自然交替 */
+    blocks: Array<
+      | { type: 'text'; content: string }
+      | { type: 'visual'; renderType: VisualRenderType; code: string; description: string; status?: 'pending' | 'ready' }
+    >
+    /** 思考链步骤 */
+    thinkingSteps: ThinkingStep[]
+    /** 思考链展开状态 */
+    thinkingExpanded?: boolean
+    /** 认知状态 */
+    conceptState?: Record<string, string>
+    totalTurns?: number
+    converged?: boolean
+    /** 错误信息 */
+    error?: { code: string; message: string; retryable: boolean }
   }
 }
 
@@ -77,7 +145,7 @@ export interface ChatSession {
   title: string
   messages: ChatMessage[]
   courseId: string
-  type?: 'chat' | 'tutoring'
+  type?: 'chat' | 'lecture' | 'resource' | 'plan'
   createdAt: string
   updatedAt: string
   lastMessagePreview?: string
@@ -108,6 +176,7 @@ interface AgentThoughtSSE {
   agentName: string; agentRole: string; phase: string
   context: string; observation: string; thought: string
   decision: string; confidenceLevel: string; timestamp: string
+  sources?: SearchSource[]
 }
 
 // ===== Helpers =====
@@ -127,10 +196,88 @@ function formatSessionTime(iso: string): string {
   return `${d.getMonth() + 1}-${d.getDate().toString().padStart(2, '0')}`
 }
 
+/**
+ * C3: 根据消息元数据推断 session 的实际 type。
+ * 后端 type 字段迁移未全覆盖时的前端兜底。
+ */
+function inferSessionType(
+  session: { messages?: { metadataJson?: Record<string, any>; mode?: string }[] },
+  rawMessages?: { metadataJson?: Record<string, any>; mode?: string }[]
+): 'chat' | 'lecture' | 'resource' | 'plan' {
+  // 优先使用 rawMessages（后端返回的最新数据），因为调用时 session.messages 可能尚未赋值
+  const msgs = (rawMessages && rawMessages.length > 0) ? rawMessages : session.messages
+  if (!msgs || msgs.length === 0) return 'chat'
+  // 如果消息中有 tutoring_session_id 元数据或 mode 为 lecture/smart，推断为 lecture（辅导）
+  const hasLecture = msgs.some(m => m.metadataJson?.tutoring_session_id || m.mode === 'lecture' || m.mode === 'smart')
+  if (hasLecture) return 'lecture'
+  // 如果有 plan 元数据或 mode 为 plan，推断为 plan
+  const hasPlan = msgs.some(m => m.metadataJson?.plan_id || m.mode === 'plan')
+  if (hasPlan) return 'plan'
+  // 如果有 resource task 元数据或 mode 为 resource，推断为 resource
+  const hasResource = msgs.some(m => m.metadataJson?.task_id || m.mode === 'resource')
+  if (hasResource) return 'resource'
+  return 'chat'
+}
+
+// ===== Visual Placeholder Helpers =====
+
+/** 生成工具 -> 可视化渲染类型映射（用于提前显示占位框） */
+const visualToolToRenderType: Record<string, VisualRenderType> = {
+  generate_svg: 'svg',
+  generate_chart: 'chartjs',
+  generate_mermaid: 'mermaid',
+  generate_mindmap: 'mindmap',
+  generate_html: 'html',
+  generate_image: 'image',
+  generate_threejs: 'model',
+}
+
+/** 规范化 renderType：后端可能发 'threejs'，统一为 'model' */
+function normalizeVisualRenderType(rt: string): VisualRenderType {
+  if (rt === 'threejs') return 'model'
+  return rt as VisualRenderType
+}
+
+interface PendingVisualBlock {
+  type: 'visual'
+  renderType: VisualRenderType
+  code: string
+  description: string
+  status?: 'pending' | 'ready'
+}
+
+/** 查找最后一个 pending 的 visual block（按 renderType 匹配） */
+function findPendingVisualBlock(
+  blocks: Array<{ type: string } & PendingVisualBlock>,
+  renderType: VisualRenderType
+): PendingVisualBlock | null {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i]
+    if (b.type === 'visual' && b.status === 'pending' && b.renderType === renderType) {
+      return b as PendingVisualBlock
+    }
+  }
+  return null
+}
+
+/** 清理所有仍在 pending 的 visual block（done/error 时调用） */
+function cleanupPendingVisualBlocks(
+  blocks: Array<{ type: string } & PendingVisualBlock>
+) {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i]
+    if (b.type === 'visual' && b.status === 'pending') {
+      blocks.splice(i, 1)
+    }
+  }
+}
+
 // ===== Composable =====
 
 export function useChatSSE() {
   const profile = useProfileStore()
+  let streamAbortController: AbortController | null = null
+  let lastStreamActivity = 0
 
   // ===== Session State =====
   const sessions = ref<ChatSession[]>([])
@@ -161,13 +308,128 @@ export function useChatSSE() {
   const isGenerating = ref(false)
   /** Resource types detected from the last generation intent, passed to task creation */
   const pendingGenTypes = ref<string[]>([])
+  /** Files pending to be sent with the next message */
+  const pendingFiles = ref<ChatFileAttachment[]>([])
+
+  // 切换模式时，若当前活跃会话是空会话，同步更新其 type，使图标立即跟随模式变化
+  watch(chatMode, (mode) => {
+    const cur = activeSession.value
+    if (cur && cur.messages.length === 0 && !(cur as any).messageCount) {
+      cur.type = mode === 'chat' ? undefined : mode
+    }
+  })
 
   // ===== Tutoring (图文辅导) State =====
   const tutoringStore = useTutoringStore()
   const tutoringSSE = useTutoringSSE()
   const activeTutoringMsgIdx = ref(-1)
+  const tutoringSessionId = ref('')  // 辅导所属的 chat session ID
+  const lectureSessionId = ref('')   // 视频讲解所属的 chat session ID
   const tutoringQuestion = ref('')
   const tutoringRound = ref(1)
+  const currentTutoringSubMode = ref<string>('smart') // 当前辅导子模式，用于快照持久化
+  let tutoringGen = 0  // incremented each round to detect stale async completions
+
+  /**
+   * 保存当前 tutoringStore 运行时状态到消息的 _tutoring.runtimeState。
+   * 在 switchSession 离开当前会话时调用。
+   */
+  function saveTutoringRuntimeState() {
+    if (activeTutoringMsgIdx.value < 0) return
+    const sess = sessions.value.find(s => s.id === tutoringSessionId.value)
+    if (!sess) return
+    const msg = sess.messages[activeTutoringMsgIdx.value]
+    if (!msg || !msg._tutoring) return
+
+    msg._tutoring.runtimeState = {
+      status: tutoringStore.status,
+      currentGuidedStepIdx: tutoringStore.currentGuidedStepIdx,
+      sectionOrder: [...tutoringStore.sectionOrder],
+      sections: JSON.parse(JSON.stringify(tutoringStore.sections)),
+    }
+    // 同步保存 snapshot 数据，供恢复时使用
+    msg._tutoring.snapshot = {
+      expanded: msg._tutoring.snapshot?.expanded ?? false,
+      analysis: tutoringStore.analysis ? JSON.parse(JSON.stringify(tutoringStore.analysis)) : null,
+      reactThoughts: JSON.parse(JSON.stringify(tutoringStore.reactThoughts)),
+      sections: JSON.parse(JSON.stringify(tutoringStore.sectionList)),
+      guidedSteps: JSON.parse(JSON.stringify(tutoringStore.guidedSteps)),
+      guidedSummary: tutoringStore.guidedSummary,
+    }
+  }
+
+  /**
+   * 从消息的 _tutoring.runtimeState 恢复 tutoringStore。
+   * 在 switchSession 进入目标会话时调用。
+   */
+  function restoreTutoringRuntimeState(sessionId: string) {
+    const sess = sessions.value.find(s => s.id === sessionId)
+    if (!sess) return
+
+    // 查找该会话中是否有活跃的 tutoring 消息
+    const msgIdx = sess.messages.findIndex(m =>
+      m._tutoring?.active && !m._tutoring?.completed && m._tutoring?.runtimeState
+    )
+    if (msgIdx < 0) return
+
+    const msg = sess.messages[msgIdx]
+    const rs = msg._tutoring!.runtimeState!
+
+    // 如果 store 当前持有该 session 的活跃数据（SSE 在后台更新了 store），
+    // 直接复用 store 数据，只恢复 composable 索引
+    if (tutoringStore.sessionId === msg._tutoring!.sessionId &&
+        tutoringStore.status !== 'idle' &&
+        tutoringStore.status !== 'done' &&
+        tutoringStore.status !== 'error') {
+      activeTutoringMsgIdx.value = msgIdx
+      tutoringSessionId.value = sessionId
+      currentTutoringSubMode.value = msg._tutoring!.subMode || 'smart'
+      return
+    }
+
+    // 否则从 runtimeState 恢复
+    tutoringStore.status = rs.status as any
+    tutoringStore.sessionId = msg._tutoring!.sessionId
+    tutoringStore.currentGuidedStepIdx = rs.currentGuidedStepIdx
+    tutoringStore.sectionOrder = [...rs.sectionOrder]
+    tutoringStore.sections = JSON.parse(JSON.stringify(rs.sections))
+    tutoringStore.analysis = msg._tutoring!.snapshot?.analysis ?? null
+    tutoringStore.reactThoughts = msg._tutoring!.snapshot?.reactThoughts
+      ? JSON.parse(JSON.stringify(msg._tutoring!.snapshot.reactThoughts)) : []
+    tutoringStore.guidedSteps = msg._tutoring!.snapshot?.guidedSteps
+      ? JSON.parse(JSON.stringify(msg._tutoring!.snapshot.guidedSteps)) : []
+    tutoringStore.guidedSummary = msg._tutoring!.snapshot?.guidedSummary ?? ''
+
+    // 恢复 composable 状态
+    activeTutoringMsgIdx.value = msgIdx
+    tutoringSessionId.value = sessionId
+    currentTutoringSubMode.value = msg._tutoring!.subMode || 'smart'
+  }
+
+  // ===== DirectAnswer (直接模式) State =====
+  const directAnswerStore = useDirectAnswerStore()
+  const directAnswerInlineSSE = useDirectAnswerInlineSSE()
+  const activeDirectAnswerMsgIdx = ref(-1)
+  let directAnswerGen = 0
+
+  // ===== Smart v2 State =====
+  const activeSmartMsgIdx = ref(-1)
+  const smartSessionId = ref('')
+  let smartGen = 0
+  /** Smart v2 是否正在当前活跃会话中进行 */
+  const isSmartActive = computed(() =>
+    activeSmartMsgIdx.value >= 0 &&
+    smartSessionId.value === activeSessionId.value
+  )
+
+  /** 辅导是否正在当前活跃会话中进行（用于 UI 阻塞判断） */
+  const isTutoringActive = computed(() =>
+    activeTutoringMsgIdx.value >= 0 &&
+    tutoringSessionId.value === activeSessionId.value &&
+    tutoringStore.status !== 'idle' &&
+    tutoringStore.status !== 'done' &&
+    tutoringStore.status !== 'error'
+  )
 
   // ===== Task Cards =====
   const taskCards = ref<Record<string, TaskCardState>>({})
@@ -211,11 +473,28 @@ export function useChatSSE() {
 
   // ===== Session CRUD =====
 
-  function createSession() {
+  async function createSession() {
+    const currentType = chatMode.value === 'chat' ? undefined : chatMode.value
+    // 重置会话级状态，避免新会话渲染旧会话残留（顶部栏闪烁）
+    generationReady.value = false
+    planGenerationReady.value = false
+    planGenerationMeta.value = null
+    profileVersionId.value = null
+    // 复用任意空会话，直接更新其 type 为当前模式，避免产生多个空会话
     const empty = sessions.value.find(s =>
       s.courseId === profile.activeCourseId && s.messages.length === 0 && !(s as any).messageCount
     )
     if (empty) {
+      // Auto-end the previous session so profile gets updated
+      const prevId = activeSessionId.value
+      const prevSess = sessions.value.find(s => s.id === prevId)
+      if (prevId && prevId !== empty.id && prevSess && prevSess.messages.length > 0 && !prevSess.profileVersionId && !(prevSess as any)._ended) {
+        const pid = prevId
+        apiFetch(`/chat/${pid}/end`, { method: 'POST' }).catch(() => {}).finally(() => {
+          if (prevSess) (prevSess as any)._ended = true
+        })
+      }
+      empty.type = currentType
       activeSessionId.value = empty.id
       chatId.value = empty.id
       return
@@ -229,20 +508,14 @@ export function useChatSSE() {
         if (prevSess) (prevSess as any)._ended = true
       })
     }
-    const newId = crypto.randomUUID()
-    sessions.value.unshift({
-      id: newId, title: '新会话', messages: [],
-      courseId: profile.activeCourseId,
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    })
-    activeSessionId.value = newId
-    chatId.value = newId
+    // 调后端创建真实会话，避免用 crypto.randomUUID() 产生后端不认识的假 ID
+    await startChat(profile.activeCourseId, true, currentType)
   }
 
   async function loadSessions() {
     try {
       const res = await apiFetch<{
-        chatId: string; courseId: string; title: string; messageCount: number
+        chatId: string; courseId: string; title: string; type: string; messageCount: number
         lastMessagePreview: string; lastMessageAt: string; analyzed: boolean
         profileVersionId: string | null; createdAt: string
       }[]>('/chat/sessions?courseId=' + encodeURIComponent(profile.activeCourseId))
@@ -263,7 +536,7 @@ export function useChatSSE() {
     } catch (err) { console.error('loadSessions failed:', err) }
   }
 
-  async function startChat(courseId: string, forceNew = false) {
+  async function startChat(courseId: string, forceNew = false, sessionType?: string) {
     try {
       const res = await apiFetch<{
         chatId: string; courseId: string; messages: { role: string; content: string; at: string }[]
@@ -277,13 +550,15 @@ export function useChatSSE() {
         role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
         text: m.content,
       }))
+      const type = sessionType || (chatMode.value === 'chat' ? undefined : chatMode.value) as ChatSession['type']
       const existing = sessions.value.find(s => s.id === chatId.value)
-      if (existing) { existing.messages = msgs }
+      if (existing) { existing.messages = msgs; existing.type = type }
       else {
         const nowIso = new Date().toISOString()
         sessions.value.unshift({
           id: chatId.value, title: msgs.length > 0 ? autoTitle(msgs) : '新会话',
           messages: msgs, courseId, createdAt: nowIso, updatedAt: nowIso,
+          type,
         })
       }
       activeSessionId.value = chatId.value
@@ -294,7 +569,7 @@ export function useChatSSE() {
   async function loadSessionMessages(sessionId: string) {
     try {
       const res = await apiFetch<{
-        messages: { role: string; content: string; at: string; thinking?: ThinkingRecord; planOffer?: any }[]
+        messages: { role: string; content: string; at: string; messageId?: string; mode?: string; feedback?: string; metadataJson?: Record<string, any>; thinking?: ThinkingRecord; planOffer?: any; reactThoughts?: string }[]
         generationReady: boolean
         generationMeta: any
         planGenerationReady: boolean
@@ -306,16 +581,132 @@ export function useChatSSE() {
           taskType?: string
         }[]
         pendingPlan?: { plan_id?: string; status?: string; modules?: any[]; edges?: any[]; summary?: any }
+        tutoringSessionId?: string | null
+        type?: string
       }>(`/chat/${sessionId}/messages`)
+      const session = sessions.value.find(s => s.id === sessionId)
+
+      // C3: 历史 session type 推断
+      // 空会话（前端新建、尚未持久化）不覆盖 type，避免后端返回的默认值冲掉当前模式
+      const isEmptySession = session && session.messages.length === 0 && !(session as any).messageCount
+      if (session && !isEmptySession && res.data?.type) {
+        session.type = res.data.type as ChatSession['type']
+      } else if (session && !isEmptySession && res.data?.messages) {
+        session.type = inferSessionType(session, res.data.messages)
+      }
+
       if (res.data?.messages) {
-        const msgs: ChatMessage[] = res.data.messages.map(m => ({
-          role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
-          text: m.content,
-          thinking: m.thinking || undefined,
-          _planOffer: m.planOffer || undefined,
-        }))
-        const session = sessions.value.find(s => s.id === sessionId)
+        const msgs: ChatMessage[] = res.data.messages.map((m, idx) => {
+          const msg: ChatMessage = {
+            role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+            text: m.content,
+            messageId: m.messageId || `${sessionId}_${idx}`,
+            mode: m.mode,
+            feedback: m.feedback === 'like' ? 'liked' : m.feedback === 'dislike' ? 'disliked' : null,
+            metadataJson: m.metadataJson,
+            thinking: m.thinking || undefined,
+            _planOffer: m.planOffer || undefined,
+          }
+          // 恢复 ReAct 思考过程
+          if (m.reactThoughts) {
+            try {
+              const thoughts = JSON.parse(m.reactThoughts) as Array<{ iteration: number; thought: string; action: string }>
+              msg.thinking = {
+                steps: thoughts.map(t => ({
+                  label: `ReAct 第 ${t.iteration} 轮`,
+                  icon: 'thought',
+                  done: true,
+                  phase: 'DECISION' as any,
+                  detail: `Action: ${t.action}`,
+                  thought: t.thought,
+                })),
+                expanded: false,
+              }
+            } catch { /* ignore parse error */ }
+          }
+          // 恢复 Smart 模式的思考链和可视化产物
+          if (m.mode === 'smart' && m.metadataJson) {
+            const meta = m.metadataJson as Record<string, any>
+            const thinkingSteps = meta.thinking_steps
+            const visuals = meta.visuals
+            const blocks = meta.blocks
+            // 如果有 thinking_steps 或 visuals/blocks，重建 _smart 状态
+            if ((thinkingSteps && Array.isArray(thinkingSteps) && thinkingSteps.length > 0) ||
+                (visuals && Array.isArray(visuals) && visuals.length > 0) ||
+                (blocks && Array.isArray(blocks) && blocks.length > 0)) {
+              const smartBlocks: Array<{ type: 'text'; content: string } | { type: 'visual'; renderType: VisualRenderType; code: string; description: string; status?: 'pending' | 'ready' }> = []
+              // 优先使用 blocks 结构（含交替顺序），否则从 content + visuals 重建
+              if (blocks && Array.isArray(blocks) && blocks.length > 0) {
+                for (const b of blocks) {
+                  if (b.type === 'text') {
+                    smartBlocks.push({ type: 'text', content: b.content || '' })
+                  } else if (b.type === 'visual') {
+                    smartBlocks.push({
+                      type: 'visual',
+                      renderType: normalizeVisualRenderType(b.renderType || 'svg'),
+                      code: b.code || '',
+                      description: b.description || '',
+                      status: 'ready',
+                    })
+                  }
+                }
+              } else {
+                // 没有 blocks 时，文字作为唯一 text block
+                if (m.content) {
+                  smartBlocks.push({ type: 'text', content: m.content })
+                }
+                // visuals 追加在文字后面
+                if (visuals && Array.isArray(visuals)) {
+                  for (const v of visuals) {
+                    smartBlocks.push({
+                      type: 'visual',
+                      renderType: normalizeVisualRenderType(v.renderType || 'svg'),
+                      code: v.code || '',
+                      description: v.description || '',
+                      status: 'ready',
+                    })
+                  }
+                }
+              }
+              // 重建 thinkingSteps
+              const smartThinkingSteps: any[] = []
+              if (thinkingSteps && Array.isArray(thinkingSteps)) {
+                for (const ts of thinkingSteps) {
+                  smartThinkingSteps.push({
+                    label: ts.label || ts.phase || '',
+                    icon: ts.icon || '●',
+                    done: ts.done !== false,
+                    phase: ts.phase,
+                    detail: ts.content || ts.args || '',
+                    sources: ts.sources || undefined,
+                  })
+                }
+              }
+              ;(msg as any)._smart = {
+                active: false,
+                completed: true,
+                sessionId: null,
+                blocks: smartBlocks,
+                thinkingSteps: smartThinkingSteps,
+              }
+            }
+          }
+          return msg
+        })
         if (session) { session.messages = msgs }
+      }
+
+      if (res.data?.tutoringSessionId && session) {
+        await hydrateTutoringHistory(session, res.data.tutoringSessionId)
+      }
+
+      // 检测 direct_answer 会话，恢复直接模式结构化渲染
+      if (session) {
+        const daMsg = session.messages.find(m => m.metadataJson?.direct_answer_session_id)
+        const daSessionId = daMsg?.metadataJson?.direct_answer_session_id
+        if (daSessionId) {
+          await hydrateDirectAnswerHistory(session, daSessionId)
+        }
       }
 
       // Reconstruct generation / plan offer state from session
@@ -342,7 +733,6 @@ export function useChatSSE() {
 
       // Reconstruct active generation cards
       const hasActiveTasks = res.data?.activeTasks && res.data.activeTasks.length > 0
-      const session = sessions.value.find(s => s.id === sessionId)
       if (hasActiveTasks) {
         for (const task of res.data.activeTasks) {
           const isActive = task.status === 'RUNNING' || task.status === 'PENDING'
@@ -356,6 +746,7 @@ export function useChatSSE() {
             }
           }
           const card = taskCards.value[task.taskId]
+          card.taskType = resolvedTaskType
           card.progress = task.percent
           card.message = task.stage || ''
           card.resourceTypes = task.resourceTypes
@@ -372,17 +763,23 @@ export function useChatSSE() {
               role: 'assistant' as const,
               text: `好的！我已经为你启动了「${task.topic}」的资源包生成。`,
               // @ts-ignore - embedded card marker
-              _generationCard: { taskId: task.taskId, topic: task.topic },
+              _generationCard: { taskId: task.taskId, topic: task.topic, taskType: resolvedTaskType },
             }
             // plan_generate 任务的卡片插入延迟到 pendingPlan 处理之后，
             // 届时 _pendingPlan 已挂载到正确消息上，可精确定位插入点
             if (task.taskType === 'plan_generate') continue
-            // resource_generate: 搜索用户确认消息定位插入点
-            const confirmIdx = [...session.messages].reverse().findIndex(
-              m => m.role === 'user' && m.text.includes(task.topic)
+            // resource_generate: 搜索最后一条 resource planOffer 的 AI 消息定位插入点
+            // 优先匹配 topic，确保多任务场景下卡片位置正确；找不到则追加到末尾
+            const reversedMsgs = [...session.messages].reverse()
+            const topicMatchIdx = reversedMsgs.findIndex(
+              (m: any) => m.role === 'assistant' && m._planOffer?.type === 'resource' && m._planOffer.topic === task.topic
             )
-            if (confirmIdx >= 0) {
-              const insertAt = session.messages.length - confirmIdx
+            const anyMatchIdx = reversedMsgs.findIndex(
+              (m: any) => m.role === 'assistant' && m._planOffer?.type === 'resource'
+            )
+            const matchIdx = topicMatchIdx >= 0 ? topicMatchIdx : anyMatchIdx
+            if (matchIdx >= 0) {
+              const insertAt = session.messages.length - matchIdx
               session.messages.splice(insertAt, 0, cardMsg)
             } else {
               session.messages.push(cardMsg)
@@ -510,9 +907,184 @@ export function useChatSSE() {
     } catch (err) { console.error('loadSessionMessages failed:', err) }
   }
 
+  async function hydrateTutoringHistory(session: ChatSession, tutoringSessionId: string) {
+    try {
+      const res = await apiFetch<{
+        sessionId: string
+        question: string
+        mode: string
+        subMode?: string
+        sessionStatus?: string
+        analysis?: any
+        sections?: Array<{
+          id: string
+          title: string
+          expandDefault: boolean
+          status: 'done'
+          content: string
+          diagram: any
+          regenerating: boolean
+          regeneratedContent: string
+        }>
+        guidedSteps?: Array<{
+          id: string
+          order: number
+          stage: string
+          title: string
+          status: string
+          guidanceContent: string
+          question: string
+          studentAnswer: string
+          feedback: string
+          hint: string
+          evaluation: string
+          attempt: number
+          maxAttempts: number
+          allowReveal: boolean
+          timeSpentMs: number
+        }>
+        guidedSummary?: string
+      }>(`/tutoring/${tutoringSessionId}/history`)
+      if (!res.data) return
+
+      const targetIdx = [...session.messages]
+        .map((m, i) => [m, i] as const)
+        .reverse()
+        .find(([m]) => m.role === 'assistant')?.[1] ?? -1
+      if (targetIdx < 0) return
+
+      const target = session.messages[targetIdx]
+
+      // guided 模式：从 DB 恢复 guided 快照
+      if (res.data.subMode === 'guided' && res.data.guidedSteps) {
+        // 无论是否完成，都作为只读快照渲染（中途退出的会话无法恢复 SSE 连接）
+        target._tutoring = {
+          active: false,
+          completed: true,
+          sessionId: res.data.sessionId,
+          subMode: 'guided',
+          snapshot: {
+            expanded: false,
+            analysis: res.data.analysis ?? null,
+            reactThoughts: buildReActThoughtsFromMessage(target),
+            sections: [],
+            guidedSteps: res.data.guidedSteps.map(s => ({
+              ...s,
+              stage: s.stage as any,
+              status: s.status as any,
+            })),
+            guidedSummary: res.data.guidedSummary || '',
+          },
+        }
+        // 中途退出的会话标记文本
+        if (res.data.sessionStatus !== 'completed') {
+          target.text = '(引导式教学进行中，请重新提问继续学习)';
+        } else {
+          target.text = res.data.guidedSummary || '(引导式教学已完成)';
+        }
+        return
+      }
+
+      // smart/direct 模式：原有逻辑
+      target._tutoring = {
+        active: false,
+        completed: true,
+        sessionId: res.data.sessionId,
+        snapshot: {
+          expanded: false,
+          analysis: res.data.analysis ?? null,
+          reactThoughts: buildReActThoughtsFromMessage(target),
+          sections: (res.data.sections || []).map(sec => ({
+            id: sec.id,
+            title: sec.title,
+            expandDefault: sec.expandDefault,
+            status: sec.status,
+            content: sec.content,
+            diagram: sec.diagram,
+            regenerating: sec.regenerating,
+            regeneratedContent: sec.regeneratedContent,
+          })),
+        },
+      }
+    } catch (err) {
+      console.error('hydrateTutoringHistory failed:', err)
+    }
+  }
+
+  /**
+   * 恢复直接模式历史：调 GET /direct-answer/{sessionId} 拿7段内容，
+   * 重建 _directAnswer.snapshot 供 DirectAnswerInline 组件渲染。
+   */
+  async function hydrateDirectAnswerHistory(session: ChatSession, directAnswerSessionId: string) {
+    try {
+      const res = await apiFetch<{
+        sessionId: string
+        question: string
+        metadata?: any
+        problemAnalysis?: any
+        thoughtContent?: string
+        sections?: Array<{
+          sectionId: string
+          title: string
+          content: string
+          sectionOrder: number
+        }>
+      }>(`/direct-answer/${directAnswerSessionId}`)
+      if (!res.data) return
+
+      // 定位含 direct_answer_session_id 的 assistant 消息
+      const targetIdx = session.messages.findIndex(m =>
+        m.role === 'assistant' && m.metadataJson?.direct_answer_session_id === directAnswerSessionId
+      )
+      if (targetIdx < 0) return
+
+      const target = session.messages[targetIdx]
+      const sections: DirectAnswerSectionState[] = (res.data.sections || []).map(s => ({
+        id: s.sectionId,
+        title: s.title,
+        status: 'done' as const,
+        content: s.content || '',
+      }))
+
+      target._directAnswer = {
+        active: false,
+        completed: true,
+        sessionId: directAnswerSessionId,
+        snapshot: {
+          sections,
+          thoughtContent: res.data.thoughtContent ?? '',
+          metadata: res.data.metadata ?? null,
+          analysis: res.data.problemAnalysis ?? null,
+        },
+      }
+    } catch (err) {
+      console.error('hydrateDirectAnswerHistory failed:', err)
+    }
+  }
+
+  function buildReActThoughtsFromMessage(msg: ChatMessage): ReActThought[] {
+    const steps = msg.thinking?.steps || []
+    return steps.map((step, index) => {
+      const detail = step.detail || ''
+      const action = detail.startsWith('Action: ') ? detail.slice('Action: '.length) : ''
+      return {
+        iteration: index + 1,
+        thought: step.thought || '',
+        action,
+      }
+    })
+  }
+
   async function switchSession(sessionId: string) {
     if (!sessionId) return
     if (activeSessionId.value !== sessionId) {
+      // 离开当前会话：保存活跃 tutoring 状态到消息，然后清除全局状态
+      saveTutoringRuntimeState()
+      if (activeTutoringMsgIdx.value >= 0) {
+        activeTutoringMsgIdx.value = -1
+        tutoringStore.reset()
+      }
+
       // Auto-end the previous session if it has messages and hasn't been ended yet
       const prevId = activeSessionId.value
       const prevSess = sessions.value.find(s => s.id === prevId)
@@ -521,16 +1093,38 @@ export function useChatSSE() {
           if (prevSess) (prevSess as any)._ended = true
         })
       }
+
+      // 重置会话级状态，避免新会话渲染旧会话的中间态（顶部栏闪烁）
+      generationReady.value = false
+      planGenerationReady.value = false
+      planGenerationMeta.value = null
+      // profileVersionId 延迟到目标会话数据就绪后再设置，避免先 null 再恢复的闪烁
+
       activeSessionId.value = sessionId
       chatId.value = sessionId
-      profileVersionId.value = null
+
+      // 进入目标会话：恢复活跃 tutoring 状态
+      restoreTutoringRuntimeState(sessionId)
     }
     const session = sessions.value.find(s => s.id === sessionId)
     if (session) {
+      // 先用目标会话已缓存的 profileVersionId 占位，避免标签闪到"收集中"
+      if (session.profileVersionId) {
+        profileVersionId.value = session.profileVersionId
+      }
       if (session.messages.length === 0) await loadSessionMessages(sessionId)
+      // 同步顶部栏模式按钮到会话的实际类型
+      if (session.type && session.type !== 'chat') {
+        chatMode.value = session.type
+      } else {
+        chatMode.value = 'chat'
+      }
       if (session.profileVersionId) {
         profileVersionId.value = session.profileVersionId
         await loadProfileFromBackend()
+      } else {
+        // 目标会话无画像版本：显式置空
+        profileVersionId.value = null
       }
     }
   }
@@ -554,6 +1148,11 @@ export function useChatSSE() {
   // ===== Init =====
 
   async function initChat() {
+    // 清理残留辅导状态（如页面刷新前辅导被中断）
+    if (activeTutoringMsgIdx.value >= 0) {
+      activeTutoringMsgIdx.value = -1
+      tutoringStore.reset()
+    }
     sessions.value = []
     chatId.value = ''
     activeSessionId.value = ''
@@ -561,19 +1160,62 @@ export function useChatSSE() {
     if (sessions.value.length > 0) {
       await switchSession(sessions.value[0].id)
     } else {
-      createSession()
+      await createSession()
     }
+  }
+
+  // ===== File Upload =====
+
+  async function uploadFile(file: File): Promise<ChatFileAttachment | null> {
+    const token = localStorage.getItem('token')
+    if (!token) return null
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await fetch('/api/chat/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
+      const json = await res.json()
+      if (json.code !== 0 && json.code !== 200) throw new Error(json.message || 'Upload failed')
+      const raw = json.data as any
+      const data: ChatFileAttachment = {
+        fileName: raw.fileName,
+        fileUrl: raw.url || raw.fileUrl,
+        parsedText: raw.parsedText,
+        fileSize: raw.fileSize,
+        contentType: raw.contentType,
+        isImage: raw.isImage ?? raw.image ?? false,
+      }
+      pendingFiles.value.push(data)
+      return data
+    } catch (err) {
+      console.error('File upload failed:', err)
+      return null
+    }
+  }
+
+  function removePendingFile(fileUrl: string) {
+    pendingFiles.value = pendingFiles.value.filter(f => f.fileUrl !== fileUrl)
   }
 
   // ===== Send Message (SSE streaming) =====
 
   async function sendMessage(text: string): Promise<void> {
     const content = text.trim()
-    if (!content) return
+    if (!content && pendingFiles.value.length === 0) return
     if (isStreaming.value) return
 
+    // 取消之前的流式请求
+    if (streamAbortController) {
+      streamAbortController.abort()
+    }
+    streamAbortController = new AbortController()
+
     if (!activeSessionId.value) {
-      createSession()
+      await createSession()
       if (!activeSessionId.value) return
     }
 
@@ -584,12 +1226,19 @@ export function useChatSSE() {
 
     const targetSession = activeSession.value!
 
-    targetSession.messages.push({ role: 'user', text: content })
+    const filesToSend = [...pendingFiles.value]
+    pendingFiles.value = []
+    const userMsg: ChatMessage = { role: 'user', text: content }
+    if (filesToSend.length > 0) {
+      userMsg._files = filesToSend
+    }
+    targetSession.messages.push(userMsg)
     if (targetSession.title === '新会话') {
       targetSession.title = autoTitle(targetSession.messages)
     }
     targetSession.updatedAt = new Date().toISOString()
     isStreaming.value = true
+    lastStreamActivity = Date.now()
 
     const thinkingSteps = reactive<ThinkingStep[]>([])
     const thinking: ThinkingRecord = { steps: thinkingSteps, expanded: true }
@@ -598,7 +1247,7 @@ export function useChatSSE() {
     targetSession.messages.push({ role: 'assistant', text: '', isStreaming: true, thinking })
 
     await ensureValidToken()
-    const token = localStorage.getItem('token') || ''
+    const token = getToken()
 
     try {
       const response = await fetch(`/api/chat/${activeSessionId.value}/send/stream`, {
@@ -613,13 +1262,18 @@ export function useChatSSE() {
           courseId: profile.activeCourseId,
           ...(chatMode.value !== 'chat' ? { mode: chatMode.value } : {}),
           ...(import.meta.env.VITE_DIALOGUE_MODE === 'unified' ? { dialogueMode: 'unified' } : {}),
+          ...(filesToSend.length > 0 ? { files: filesToSend } : {}),
         }),
+        signal: streamAbortController.signal,
       })
 
       if (!response.ok) {
         if (response.status === 401) {
-          localStorage.removeItem('token'); localStorage.removeItem('refreshToken')
-          localStorage.removeItem('userInfo'); location.href = '/login'
+          // 只有在非 abort 状态下才跳转，避免与退出登录的 router.push 冲突
+          if (!streamAbortController?.signal.aborted) {
+            localStorage.removeItem('token'); localStorage.removeItem('refreshToken')
+            localStorage.removeItem('userInfo'); location.href = '/login'
+          }
           return
         }
         if (response.status === 404) {
@@ -637,7 +1291,10 @@ export function useChatSSE() {
         throw new Error('HTTP ' + response.status)
       }
 
-      const reader = response.body!.getReader()
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('响应体不可读，请检查网络连接')
+      }
       const decoder = new TextDecoder()
       let buffer = ''
       let profileReadyVal = false, profileVersionIdVal: string | null = null
@@ -651,6 +1308,7 @@ export function useChatSSE() {
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
+        lastStreamActivity = Date.now()
         const blocks = buffer.split('\n\n')
         buffer = blocks.pop() || ''
 
@@ -673,11 +1331,11 @@ export function useChatSSE() {
               const parsed: AgentThoughtSSE = JSON.parse(dataStr)
               const phaseLabels: Record<string, { label: string; icon: string }> = {
                 CONTEXT:  { label: '理解上下文', icon: '📋' },
-                RETRIEVE: { label: '检索知识库', icon: '🔗' },
-                REFLECT:  { label: '评估画像',   icon: '🎯' },
-                RAG:      { label: '检索分析',   icon: '🔍' },
+                RETRIEVE: { label: '检索知识库', icon: '🔍' },
+                REFLECT:  { label: '评估画像',   icon: '🪞' },
+                RAG:      { label: '检索分析',   icon: '📚' },
                 DECISION: { label: '决策判断',   icon: '⚖️' },
-                PLANNING: { label: '意图分析与回复规划', icon: '🔍' },
+                PLANNING: { label: '意图分析与回复规划', icon: '📐' },
                 ERROR:    { label: '执行异常',   icon: '⚠️' },
               }
               const meta = phaseLabels[parsed.phase] || { label: parsed.phase, icon: '●' }
@@ -687,19 +1345,20 @@ export function useChatSSE() {
                 done: true,
                 phase: (parsed.phase as ThinkingPhase) || undefined,
                 detail: parsed.observation || parsed.thought || '',
+                context: parsed.context || undefined,
                 observation: parsed.observation || undefined,
                 thought: parsed.thought || undefined,
                 decision: parsed.decision || undefined,
                 confidenceLevel: parsed.confidenceLevel || undefined,
+                agentName: parsed.agentName || undefined,
+                agentRole: parsed.agentRole || undefined,
+                sources: parsed.sources && parsed.sources.length > 0 ? parsed.sources : undefined,
               }
               if (!thinkingSteps.some(s => s.label === meta.label)) {
                 thinkingSteps.push(step)
               }
               if (parsed.phase === 'REFLECT') {
-                targetSession.messages[msgIndex].thinking = {
-                  steps: [...thinkingSteps],
-                  expanded: false,
-                }
+                // keep original reactive thinkingSteps — don't replace with snapshot
               }
             } catch { /* ignore */ }
           } else if (eventType === 'done') {
@@ -716,16 +1375,20 @@ export function useChatSSE() {
               if (parsed.replyPlan && parsed.replyPlan.shouldShowOffer === false) {
                 generationReadyVal = false
               }
+              // Entry A: Chat → DirectAnswer 自动跳转
+              if (parsed.replyPlan?.strategy === 'direct_answer' && parsed.replyPlan?.directAnswerSessionId) {
+                console.log('[SSE done] redirecting to DirectAnswer:', parsed.replyPlan.directAnswerSessionId)
+                // 异步跳转，不阻塞 done 事件处理
+                setTimeout(() => {
+                  window.location.href = `/answer/${parsed.replyPlan.directAnswerSessionId}`
+                }, 500)
+              }
               console.log('[SSE done] generationReady=', generationReadyVal, 'replyPlan=', parsed.replyPlan)
             } catch { /* fall through */ }
             if (targetSession) {
               const msg = targetSession.messages[msgIndex]
               if (msg && msg.thinking) {
                 thinkingSteps.forEach(s => s.done = true)
-                targetSession.messages[msgIndex].thinking = {
-                  steps: [...thinkingSteps],
-                  expanded: false,
-                }
               }
             }
           } else if (eventType === 'chunk' || !eventType) {
@@ -754,7 +1417,6 @@ export function useChatSSE() {
       const finalThinking = targetSession.messages[msgIndex].thinking
       if (finalThinking) {
         finalThinking.steps.forEach(s => s.done = true)
-        finalThinking.expanded = false
       }
       targetSession.messages[msgIndex].isStreaming = false
 
@@ -822,6 +1484,10 @@ export function useChatSSE() {
         }
       }
     } catch (err) {
+      // 忽略 abort 错误（组件卸载或新请求取消旧请求时）
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
       if (targetSession.messages[msgIndex]) {
         targetSession.messages[msgIndex].text = '抱歉，消息发送失败，请重试。'
         targetSession.messages[msgIndex].isStreaming = false
@@ -839,8 +1505,14 @@ export function useChatSSE() {
     if (!content) return
     if (isStreaming.value) return
 
+    // 取消之前的流式请求
+    if (streamAbortController) {
+      streamAbortController.abort()
+    }
+    streamAbortController = new AbortController()
+
     if (!activeSessionId.value) {
-      createSession()
+      await createSession()
       if (!activeSessionId.value) return
     }
 
@@ -850,6 +1522,7 @@ export function useChatSSE() {
     }
 
     const targetSession = activeSession.value!
+    lectureSessionId.value = targetSession.id
     const videoStore = useVideoLectureStore()
 
     targetSession.messages.push({ role: 'user', text: content })
@@ -858,6 +1531,7 @@ export function useChatSSE() {
     }
     targetSession.updatedAt = new Date().toISOString()
     isStreaming.value = true
+    lastStreamActivity = Date.now()
 
     // Start the video lecture loading phase
     videoStore.startLoading(content)
@@ -867,7 +1541,7 @@ export function useChatSSE() {
     targetSession.messages.push({ role: 'assistant', text: '', isStreaming: true })
 
     await ensureValidToken()
-    const token = localStorage.getItem('token') || ''
+    const token = getToken()
 
     let lastSceneReceived = false
 
@@ -883,26 +1557,35 @@ export function useChatSSE() {
           question: content,
           courseId: profile.activeCourseId,
         }),
+        signal: streamAbortController.signal,
       })
 
       if (!response.ok) {
         if (response.status === 401) {
-          localStorage.removeItem('token'); localStorage.removeItem('refreshToken')
-          localStorage.removeItem('userInfo'); location.href = '/login'
+          // 只有在非 abort 状态下才跳转，避免与退出登录的 router.push 冲突
+          if (!streamAbortController?.signal.aborted) {
+            localStorage.removeItem('token'); localStorage.removeItem('refreshToken')
+            localStorage.removeItem('userInfo'); location.href = '/login'
+          }
           return
         }
         throw new Error('HTTP ' + response.status)
       }
 
-      const reader = response.body!.getReader()
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('响应体不可读，请检查网络连接')
+      }
       const decoder = new TextDecoder()
       let buffer = ''
+      let shouldExit = false
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
+        lastStreamActivity = Date.now()
         const blocks = buffer.split('\n\n')
         buffer = blocks.pop() || ''
 
@@ -922,9 +1605,13 @@ export function useChatSSE() {
 
           if (eventType === 'error') {
             const errorMsg = dataStr || '回答失败，请稍后重试。'
-            targetSession.messages[msgIndex].text = errorMsg
-            targetSession.messages[msgIndex].isStreaming = false
+            if (targetSession.messages[msgIndex]) {
+              targetSession.messages[msgIndex].text = errorMsg
+              targetSession.messages[msgIndex].isStreaming = false
+            }
             videoStore.reset()
+            shouldExit = true
+            break
           } else if (eventType === 'item') {
             try {
               const parsed: SceneItemEvent = JSON.parse(dataStr)
@@ -935,18 +1622,32 @@ export function useChatSSE() {
             }
           } else if (eventType === 'done') {
             videoStore.markStreamEnded()
+            shouldExit = true
+            break
           } else if (eventType === 'chunk' || !eventType) {
             // Legacy chunk events — used as fallback text
             if (onStreamChunk) onStreamChunk()
           }
         }
+        if (shouldExit) break
+      }
+
+      // 安全网：连接断开但后端没发 done/error 事件时，确保流标记为结束
+      if (!shouldExit) {
+        videoStore.markStreamEnded()
       }
 
       // If no scenes were received at all, show as text fallback
       if (!lastSceneReceived) {
-        targetSession.messages[msgIndex].text = '抱歉，未能生成视频讲解，请重试。'
+        if (targetSession.messages[msgIndex]) {
+          targetSession.messages[msgIndex].text = '抱歉，未能生成视频讲解，请重试。'
+        }
       }
     } catch (err) {
+      // 忽略 abort 错误（组件卸载或新请求取消旧请求时）
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
       if (targetSession.messages[msgIndex]) {
         targetSession.messages[msgIndex].text = '抱歉，消息发送失败，请重试。'
       }
@@ -954,11 +1655,12 @@ export function useChatSSE() {
       console.error('sendLectureMessage failed:', err)
     } finally {
       // Remove the loading placeholder — the video player handles the display
+      const msg = targetSession.messages[msgIndex]
       if (!lastSceneReceived) {
-        targetSession.messages[msgIndex].isStreaming = false
+        if (msg) msg.isStreaming = false
       } else {
         // Remove placeholder message; the video record card will replace it on close
-        targetSession.messages.splice(msgIndex, 1)
+        if (msg) targetSession.messages.splice(msgIndex, 1)
       }
       isStreaming.value = false
     }
@@ -980,17 +1682,67 @@ export function useChatSSE() {
 
   /** 辅导结束（done/error）时，将结果写入聊天消息 */
   function finalizeTutoring() {
-    const session = activeSession.value
-    if (!session || activeTutoringMsgIdx.value < 0) return
+    // 用 tutoringSessionId 定位正确的 session，而非 activeSession
+    const session = sessions.value.find(s => s.id === tutoringSessionId.value)
+    if (!session || activeTutoringMsgIdx.value < 0) {
+      activeTutoringMsgIdx.value = -1
+      tutoringStore.reset()
+      return
+    }
 
     const msgIdx = activeTutoringMsgIdx.value
     const msg = session.messages[msgIdx]
-    if (!msg) return
+    if (!msg) {
+      activeTutoringMsgIdx.value = -1
+      tutoringStore.reset()
+      return
+    }
 
     if (tutoringStore.status === 'done') {
-      msg.text = sectionsToMarkdown() || '(辅导已完成)'
+      if (currentTutoringSubMode.value === 'guided') {
+        // guided 模式完成：保存 guided 快照
+        msg.text = tutoringStore.guidedSummary || '(引导式教学已完成)'
+        msg.isStreaming = false
+        msg._tutoring = {
+          active: false,
+          completed: true,
+          sessionId: tutoringStore.sessionId,
+          subMode: 'guided',
+          snapshot: {
+            expanded: false,
+            analysis: tutoringStore.analysis,
+            reactThoughts: JSON.parse(JSON.stringify(tutoringStore.reactThoughts)),
+            sections: [],
+            guidedSteps: JSON.parse(JSON.stringify(tutoringStore.guidedSteps)),
+            guidedSummary: tutoringStore.guidedSummary,
+          },
+        }
+      } else {
+        msg.text = sectionsToMarkdown() || '(辅导已完成)'
+        msg.isStreaming = false
+        msg._tutoring = {
+          active: false,
+          completed: true,
+          sessionId: tutoringStore.sessionId,
+          subMode: currentTutoringSubMode.value,
+          snapshot: {
+            expanded: false,
+            analysis: tutoringStore.analysis,
+            reactThoughts: JSON.parse(JSON.stringify(tutoringStore.reactThoughts)),
+            sections: JSON.parse(JSON.stringify(tutoringStore.sectionList)),
+          },
+        }
+      }
+    } else if (tutoringStore.status === 'guided') {
+      // guided 模式挂起：保留 tutoring store 状态，不 reset，等待学生作答
       msg.isStreaming = false
-      msg._tutoring = { active: false, completed: true, sessionId: tutoringStore.sessionId }
+      msg._tutoring = {
+        active: true,
+        completed: false,
+        sessionId: tutoringStore.sessionId,
+        subMode: 'guided',
+      }
+      return  // 不 reset store，不清理 activeTutoringMsgIdx
     } else if (tutoringStore.status === 'error') {
       msg.text = tutoringStore.error?.message || '辅导过程中出错，请重试。'
       msg.isStreaming = false
@@ -998,18 +1750,32 @@ export function useChatSSE() {
     }
 
     activeTutoringMsgIdx.value = -1
-    isStreaming.value = false
     tutoringStore.reset()
   }
 
   /** 发送图文辅导消息（辅导模式 + 未开启视频） */
-  async function sendTutoringMessage(text: string): Promise<void> {
+  async function sendTutoringMessage(text: string, mode?: TutoringMode): Promise<void> {
     const content = text.trim()
     if (!content) return
-    if (isStreaming.value) return
+    // 不阻塞其它会话的普通对话；但防止同时开两个辅导
+    // smart 模式只在当前活跃会话中正在进行时才阻止
+    if (isStreaming.value || activeTutoringMsgIdx.value >= 0 || activeDirectAnswerMsgIdx.value >= 0 || isSmartActive.value) return
+
+    // ── direct 模式走 DirectAnswer 管线 ──
+    if (mode === 'direct') {
+      return sendDirectAnswerMessage(content)
+    }
+
+    // ── smart 模式走 Smart v2 Agent ReAct 管线 ──
+    if (mode === 'smart') {
+      return sendSmartMessage(content)
+    }
+
+    // 记录当前子模式，用于快照持久化
+    currentTutoringSubMode.value = mode || 'smart'
 
     if (!activeSessionId.value) {
-      createSession()
+      await createSession()
       if (!activeSessionId.value) return
     }
 
@@ -1035,20 +1801,36 @@ export function useChatSSE() {
     })
 
     activeTutoringMsgIdx.value = msgIndex
+    tutoringSessionId.value = targetSession.id
     tutoringQuestion.value = content
     tutoringRound.value = 1
-    isStreaming.value = true
+    // 同步初始化辅导状态，确保 status 立即为 'planning'，UI 即刻渲染 spinner
+    tutoringStore.initSession(content)
+    // 不设置 isStreaming — 用 isTutoringActive 替代，避免阻塞其它会话
+    const gen = ++tutoringGen
 
     try {
-      await tutoringSSE.startTutoring({ question: content })
+      await tutoringSSE.startTutoring({
+        question: content,
+        courseId: profile.activeCourseId,
+        chatId: targetSession.id,
+        mode,
+      } as TutoringStartRequest)
+
+      if (gen !== tutoringGen) return
 
       if (tutoringStore.status === 'clarifying') {
-        // 等待用户澄清回复，保持 isStreaming = true
+        return
+      }
+
+      // guided 模式：SSE 流在"等待学生作答"点挂起，不调用 finalizeTutoring
+      if (tutoringStore.status === 'guided') {
         return
       }
 
       finalizeTutoring()
     } catch (err) {
+      if (gen !== tutoringGen) return
       console.error('sendTutoringMessage failed:', err)
       if (targetSession.messages[msgIndex]) {
         targetSession.messages[msgIndex].text = '辅导请求失败，请重试。'
@@ -1056,9 +1838,563 @@ export function useChatSSE() {
         targetSession.messages[msgIndex]._tutoring = { active: false, completed: false, sessionId: null }
       }
       activeTutoringMsgIdx.value = -1
-      isStreaming.value = false
       tutoringStore.reset()
     }
+  }
+
+  // ── Smart v2 phase labels ──
+  const smartPhaseLabels: Record<string, { label: string; icon: string }> = {
+    THINKING: { label: '思考中', icon: '🤔' },
+    TOOL_CALL: { label: '调用工具', icon: '🔧' },
+    CONTEXT: { label: '理解上下文', icon: '📋' },
+    RETRIEVE: { label: '检索知识库', icon: '🔍' },
+    REFLECT: { label: '评估画像', icon: '🪞' },
+    RAG: { label: '检索分析', icon: '📚' },
+    DECISION: { label: '决策判断', icon: '⚖️' },
+    PLANNING: { label: '意图分析与回复规划', icon: '📐' },
+    ERROR: { label: '执行异常', icon: '⚠️' },
+  }
+
+  /** 工具名称 -> 图标映射 */
+  const toolIconMap: Record<string, string> = {
+    rag_retrieve: '📚',
+    web_search: '🔍',
+    paper_search: '🔍',
+    generate_svg: '🎨',
+    generate_chart: '📊',
+    generate_mermaid: '📊',
+    generate_html: '🎨',
+    generate_visualization: '🎨',
+    generate_threejs: '🎨',
+    generate_image: '🎨',
+    generate_mindmap: '🧠',
+    assess_concept: '📝',
+    challenge_transfer: '📝',
+    update_concept_status: '📝',
+    generate_summary: '📝',
+    reason: '🤔',
+    brainstorm: '💡',
+    code_execution: '💻',
+    read_profile: '👤',
+    write_profile: '👤',
+    ask_user: '❓',
+  }
+
+  /** Smart v2 SSE 事件处理 */
+  function handleSmartEvent(eventName: string, data: string, msg: ChatMessage) {
+    switch (eventName) {
+      case 'smart.started': {
+        try {
+          const parsed = JSON.parse(data)
+          console.info('[SMART-DIAG] smart.started received: sessionId=', parsed.sessionId)
+          if (msg._smart) {
+            msg._smart.sessionId = parsed.sessionId
+            console.info('[SMART-DIAG] smart.started: set msg._smart.sessionId =', msg._smart.sessionId)
+            // 不覆盖 smartSessionId，它应始终保持为 chatId（targetSession.id）
+            // smartSsid（后端 sessionId）存储在 msg._smart.sessionId 中
+          } else {
+            console.warn('[SMART-DIAG] smart.started: msg._smart is null/undefined!')
+          }
+        } catch (e) { console.error('[SMART-DIAG] smart.started parse error:', e) }
+        break
+      }
+      case 'agent.thought': {
+        try {
+          const parsed = JSON.parse(data)
+          if (msg._smart) {
+            const meta = smartPhaseLabels[parsed.phase] || { label: parsed.phase, icon: '●' }
+            msg._smart.thinkingSteps.push({
+              label: meta.label,
+              icon: meta.icon,
+              done: true,
+              phase: parsed.phase as ThinkingPhase,
+              detail: parsed.content || '',
+            })
+          }
+        } catch { /* ignore */ }
+        break
+      }
+      case 'agent.tool_call': {
+        try {
+          const parsed = JSON.parse(data)
+          if (msg._smart) {
+            msg._smart.thinkingSteps.push({
+              label: `调用工具: ${parsed.tool}`,
+              icon: toolIconMap[parsed.tool] || '🔧',
+              done: false,
+              phase: 'TOOL_CALL' as ThinkingPhase,
+              detail: parsed.args || '',
+            })
+            // 如果是可视化生成工具，提前推送 pending 占位块
+            const renderType = visualToolToRenderType[parsed.tool]
+            if (renderType) {
+              if (msg.text) {
+                msg._smart.blocks.push({ type: 'text', content: msg.text })
+                msg.text = ''
+              }
+              // 复用已有的同 renderType pending 块，避免重复工具调用产生多个占位框
+              const existing = findPendingVisualBlock(msg._smart.blocks as any, renderType)
+              if (!existing) {
+                msg._smart.blocks.push({
+                  type: 'visual',
+                  renderType,
+                  code: '',
+                  description: '',
+                  status: 'pending',
+                })
+              }
+            }
+          }
+        } catch { /* ignore */ }
+        break
+      }
+      case 'agent.tool_result': {
+        try {
+          const parsed = JSON.parse(data)
+          if (msg._smart) {
+            // 标记最近的 tool_call 步骤为完成
+            const steps = msg._smart.thinkingSteps
+            for (let i = steps.length - 1; i >= 0; i--) {
+              if (steps[i].label?.startsWith('调用工具')) {
+                steps[i].done = true
+                steps[i].detail = (steps[i].detail || '') + ' -> ' + (parsed.result || '')
+                // web_search：附加结构化来源列表
+                if (parsed.sources && Array.isArray(parsed.sources) && parsed.sources.length > 0) {
+                  steps[i].sources = parsed.sources
+                }
+                break
+              }
+            }
+            // 工具失败时清理对应的 pending visual 占位块
+            // 后端对返回 error JSON 的工具仍硬编码 success=true，故需同时检测 result 中的 "error:" 前缀
+            const resultStr = String(parsed.result || '')
+            const failed = parsed.success === false || /^error[:\s]/i.test(resultStr.trim())
+            if (failed) {
+              const failedRenderType = visualToolToRenderType[parsed.tool]
+              if (failedRenderType) {
+                const pending = findPendingVisualBlock(msg._smart.blocks as any, failedRenderType)
+                if (pending) {
+                  const idx = msg._smart.blocks.indexOf(pending as any)
+                  if (idx >= 0) msg._smart.blocks.splice(idx, 1)
+                }
+              }
+            }
+          }
+        } catch { /* ignore */ }
+        break
+      }
+      case 'agent.visual': {
+        try {
+          const parsed = JSON.parse(data)
+          if (msg._smart) {
+            // flush 文本缓冲
+            if (msg.text) {
+              msg._smart.blocks.push({ type: 'text', content: msg.text })
+              msg.text = ''
+            }
+            const rt = normalizeVisualRenderType(parsed.renderType)
+            const pending = findPendingVisualBlock(msg._smart.blocks as any, rt)
+            if (pending) {
+              pending.code = parsed.code
+              pending.description = parsed.description || ''
+              pending.status = 'ready'
+            } else {
+              msg._smart.blocks.push({
+                type: 'visual',
+                renderType: rt,
+                code: parsed.code,
+                description: parsed.description || '',
+                status: 'ready',
+              })
+            }
+          }
+        } catch { /* ignore */ }
+        break
+      }
+      case 'chunk': {
+        // chunk 事件的 data 是原始文本，非 JSON
+        msg.text += data
+        break
+      }
+      case 'smart.state': {
+        try {
+          const parsed = JSON.parse(data)
+          if (msg._smart) {
+            msg._smart.conceptState = parsed.concepts || {}
+            msg._smart.totalTurns = parsed.totalTurns
+            msg._smart.converged = parsed.converged
+          }
+        } catch { /* ignore */ }
+        break
+      }
+      case 'smart.converged': {
+        try {
+          const parsed = JSON.parse(data)
+          if (msg._smart) {
+            msg._smart.converged = true
+            // flush 文本
+            if (msg.text) {
+              msg._smart.blocks.push({ type: 'text', content: msg.text })
+              msg.text = ''
+            }
+            if (parsed.summary) {
+              msg._smart.blocks.push({ type: 'text', content: parsed.summary })
+            }
+          }
+        } catch { /* ignore */ }
+        break
+      }
+      case 'done': {
+        // flush 文本
+        if (msg.text) {
+          if (msg._smart) {
+            msg._smart.blocks.push({ type: 'text', content: msg.text })
+          }
+          msg.text = ''
+        }
+        msg.isStreaming = false
+        if (msg._smart) {
+          msg._smart.active = false
+          msg._smart.completed = true
+          // 清理未完成的 pending visual 占位块
+          cleanupPendingVisualBlocks(msg._smart.blocks as any)
+          // 读取 converged/totalTurns
+          try {
+            const parsed = JSON.parse(data)
+            msg._smart.converged = parsed.converged
+            msg._smart.totalTurns = parsed.totalTurns
+          } catch { /* ignore */ }
+        }
+        // 不清零 activeSmartMsgIdx，保持 smart 会话活跃以支持多轮对话
+        console.info('[SMART-DIAG] done event: activeSmartMsgIdx=', activeSmartMsgIdx.value,
+          'smartSessionId=', smartSessionId.value,
+          'msg._smart.sessionId=', msg._smart?.sessionId,
+          'isSmartActive=', activeSmartMsgIdx.value >= 0 && smartSessionId.value === activeSessionId.value)
+        break
+      }
+      case 'error': {
+        try {
+          const parsed = JSON.parse(data)
+          msg.text = parsed.message || '未知错误'
+          if (msg._smart) {
+            msg._smart.error = {
+              code: parsed.code || 'UNKNOWN',
+              message: parsed.message || '未知错误',
+              retryable: parsed.retryable ?? true,
+            }
+            cleanupPendingVisualBlocks(msg._smart.blocks as any)
+          }
+        } catch {
+          msg.text = data
+        }
+        msg.isStreaming = false
+        if (msg._smart) {
+          msg._smart.active = false
+        }
+        activeSmartMsgIdx.value = -1
+        break
+      }
+    }
+  }
+
+  /** Smart v2 SSE 流读取 */
+  async function readSmartSSEStream(response: Response, msg: ChatMessage) {
+    const reader = response.body?.getReader()
+    if (!reader) return
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const blocks = buffer.split('\n\n')
+        buffer = blocks.pop() || ''
+
+        for (const block of blocks) {
+          if (!block.trim()) continue
+          const lines = block.split('\n')
+          let eventType = ''
+          let dataStr = ''
+
+          for (const line of lines) {
+            if (line.startsWith('event:')) eventType = line.slice(6).trim()
+            else if (line.startsWith('data:')) {
+              const val = line.slice(5)
+              dataStr = dataStr === '' ? val : dataStr + '\n' + val
+            }
+          }
+          if (!eventType && dataStr) eventType = 'chunk'
+          if (dataStr) handleSmartEvent(eventType, dataStr, msg)
+        }
+      }
+    } finally {
+      reader.releaseLock()
+      // 兜底：流异常终止（未收到 done/error 事件）时清理残留 pending 占位块并重置状态
+      // 正常情况下 done/error 事件已处理，此处条件不触发；cleanupPendingVisualBlocks 幂等
+      if (msg._smart) {
+        cleanupPendingVisualBlocks(msg._smart.blocks as any)
+      }
+      if (msg.isStreaming) {
+        msg.isStreaming = false
+        if (msg._smart) msg._smart.active = false
+      }
+    }
+  }
+
+  /** Smart v2：启动智能辅导 */
+  async function sendSmartMessage(content: string): Promise<void> {
+    if (!activeSessionId.value) {
+      await createSession()
+      if (!activeSessionId.value) return
+    }
+
+    if (!activeSession.value) {
+      await initChat()
+      if (!activeSessionId.value) return
+    }
+
+    const targetSession = activeSession.value!
+
+    targetSession.messages.push({ role: 'user', text: content })
+    if (targetSession.title === '新会话') {
+      targetSession.title = autoTitle(targetSession.messages)
+    }
+    targetSession.updatedAt = new Date().toISOString()
+
+    const msgIndex = targetSession.messages.length
+    const msg: ChatMessage = reactive({
+      role: 'assistant',
+      text: '',
+      isStreaming: true,
+      mode: 'smart',
+      _smart: {
+        active: true,
+        completed: false,
+        sessionId: null,
+        blocks: [],
+        thinkingSteps: [],
+        thinkingExpanded: true,
+      },
+    })
+    targetSession.messages.push(msg)
+
+    activeSmartMsgIdx.value = msgIndex
+    smartSessionId.value = targetSession.id
+    const gen = ++smartGen
+
+    try {
+      await ensureValidToken()
+      const response = await fetch('/api/smart/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify({
+          question: content,
+          courseId: profile.activeCourseId,
+          chatId: targetSession.id,
+        }),
+      })
+
+      if (!response.ok) {
+        msg.text = `请求失败: HTTP ${response.status}`
+        msg.isStreaming = false
+        msg._smart!.active = false
+        activeSmartMsgIdx.value = -1
+        return
+      }
+
+      await readSmartSSEStream(response, msg)
+    } catch (e: any) {
+      if (gen !== smartGen) return
+      msg.text = e.message || '连接失败'
+      msg.isStreaming = false
+      msg._smart!.active = false
+      activeSmartMsgIdx.value = -1
+    }
+  }
+
+  /** Smart v2：学生回答 */
+  async function sendSmartAnswer(text: string): Promise<void> {
+    const content = text.trim()
+    if (!content) return
+    if (activeSmartMsgIdx.value < 0) {
+      console.warn('[SMART-DIAG] sendSmartAnswer: activeSmartMsgIdx < 0, aborting')
+      return
+    }
+
+    const targetSession = sessions.value.find(s => s.id === smartSessionId.value)
+    if (!targetSession) {
+      console.warn('[SMART-DIAG] sendSmartAnswer: targetSession not found, smartSessionId=', smartSessionId.value)
+      return
+    }
+
+    // 获取之前的 smart session ID
+    const lastSmartMsg = targetSession.messages[activeSmartMsgIdx.value]
+    console.info('[SMART-DIAG] sendSmartAnswer: activeSmartMsgIdx=', activeSmartMsgIdx.value,
+      'lastSmartMsg=', lastSmartMsg ? { role: lastSmartMsg.role, mode: lastSmartMsg.mode, hasSmart: !!lastSmartMsg._smart, smartSessionId: lastSmartMsg._smart?.sessionId } : 'undefined')
+
+    let smartSsid = lastSmartMsg?._smart?.sessionId
+
+    // Fallback: 如果当前消息没有 sessionId，向前搜索任何有 sessionId 的 smart 消息
+    if (!smartSsid) {
+      console.warn('[SMART-DIAG] sendSmartAnswer: lastSmartMsg has no sessionId, searching fallback...')
+      for (let i = targetSession.messages.length - 1; i >= 0; i--) {
+        const m = targetSession.messages[i]
+        if (m?._smart?.sessionId) {
+          smartSsid = m._smart.sessionId
+          console.info('[SMART-DIAG] sendSmartAnswer: found fallback sessionId at msg index', i, '=', smartSsid)
+          break
+        }
+      }
+    }
+
+    if (!smartSsid) {
+      console.error('[SMART-DIAG] sendSmartAnswer: no smartSsid found in any message, aborting')
+      return
+    }
+
+    targetSession.messages.push({ role: 'user', text: content })
+    targetSession.updatedAt = new Date().toISOString()
+
+    const msgIndex = targetSession.messages.length
+    const msg: ChatMessage = reactive({
+      role: 'assistant',
+      text: '',
+      isStreaming: true,
+      mode: 'smart',
+      _smart: {
+        active: true,
+        completed: false,
+        sessionId: smartSsid,
+        blocks: [],
+        thinkingSteps: [],
+      },
+    })
+    targetSession.messages.push(msg)
+
+    activeSmartMsgIdx.value = msgIndex
+    const gen = ++smartGen
+
+    try {
+      await ensureValidToken()
+      const response = await fetch('/api/smart/answer', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify({
+          sessionId: smartSsid,
+          answer: content,
+          chatId: targetSession.id,
+        }),
+      })
+
+      if (!response.ok) {
+        msg.text = `请求失败: HTTP ${response.status}`
+        msg.isStreaming = false
+        msg._smart!.active = false
+        activeSmartMsgIdx.value = -1
+        return
+      }
+
+      await readSmartSSEStream(response, msg)
+    } catch (e: any) {
+      if (gen !== smartGen) return
+      msg.text = e.message || '连接失败'
+      msg.isStreaming = false
+      msg._smart!.active = false
+      activeSmartMsgIdx.value = -1
+    }
+  }
+
+  /** 直接模式：走 DirectAnswer 管线，内嵌渲染 */
+  async function sendDirectAnswerMessage(content: string): Promise<void> {
+    if (!activeSessionId.value) {
+      await createSession()
+      if (!activeSessionId.value) return
+    }
+    if (!activeSession.value) {
+      await initChat()
+      if (!activeSessionId.value) return
+    }
+
+    const targetSession = activeSession.value!
+    targetSession.messages.push({ role: 'user', text: content })
+    if (targetSession.title === '新会话') {
+      targetSession.title = autoTitle(targetSession.messages)
+    }
+    targetSession.updatedAt = new Date().toISOString()
+
+    const msgIndex = targetSession.messages.length
+    targetSession.messages.push({
+      role: 'assistant',
+      text: '',
+      isStreaming: true,
+      _directAnswer: { active: true, completed: false, sessionId: null },
+    })
+
+    activeDirectAnswerMsgIdx.value = msgIndex
+    const gen = ++directAnswerGen
+
+    try {
+      await directAnswerInlineSSE.start(content, profile.activeCourseId || '', 'direct', targetSession.id)
+
+      if (gen !== directAnswerGen) return
+      finalizeDirectAnswer()
+    } catch (err) {
+      if (gen !== directAnswerGen) return
+      console.error('sendDirectAnswerMessage failed:', err)
+      if (targetSession.messages[msgIndex]) {
+        targetSession.messages[msgIndex].text = '直接解答请求失败，请重试。'
+        targetSession.messages[msgIndex].isStreaming = false
+        targetSession.messages[msgIndex]._directAnswer = { active: false, completed: false, sessionId: null }
+      }
+      activeDirectAnswerMsgIdx.value = -1
+      directAnswerStore.reset()
+    }
+  }
+
+  function finalizeDirectAnswer() {
+    const session = activeSession.value
+    if (!session) { activeDirectAnswerMsgIdx.value = -1; directAnswerStore.reset(); return }
+    const msgIdx = activeDirectAnswerMsgIdx.value
+    const msg = session.messages[msgIdx]
+    if (!msg) { activeDirectAnswerMsgIdx.value = -1; directAnswerStore.reset(); return }
+
+    if (directAnswerStore.status === 'done') {
+      // 拼接所有 section 内容作为 text
+      const texts = Array.from(directAnswerStore.sections.values())
+        .map(s => s.content).filter(Boolean)
+      msg.text = texts.join('\n\n') || '(直接解答已完成)'
+      msg.isStreaming = false
+      msg._directAnswer = {
+        active: false,
+        completed: true,
+        sessionId: directAnswerStore.sessionId,
+        snapshot: {
+          sections: JSON.parse(JSON.stringify(Array.from(directAnswerStore.sections.values()))),
+          thoughtContent: directAnswerStore.thoughtContent,
+          metadata: directAnswerStore.metadata,
+          analysis: directAnswerStore.analysis,
+        },
+      }
+    } else if (directAnswerStore.status === 'error') {
+      msg.text = directAnswerInlineSSE.error.value?.message || '直接解答过程中出错'
+      msg.isStreaming = false
+      msg._directAnswer = { active: false, completed: false, sessionId: directAnswerStore.sessionId }
+    }
+
+    activeDirectAnswerMsgIdx.value = -1
+    directAnswerStore.reset()
   }
 
   /** 提交澄清回复 */
@@ -1068,13 +2404,14 @@ export function useChatSSE() {
     freeInput?: string
   }): Promise<void> {
     if (!tutoringStore.sessionId) return
-
-    isStreaming.value = true
+    const gen = ++tutoringGen
 
     try {
       await tutoringSSE.startTutoring({
         question: tutoringQuestion.value,
         sessionId: tutoringStore.sessionId,
+        courseId: profile.activeCourseId,
+        chatId: tutoringSessionId.value,
         clarificationResponse: {
           skipped: response.skipped,
           selectedOptionId: response.selectedOptionId || null,
@@ -1082,14 +2419,22 @@ export function useChatSSE() {
         },
       })
 
+      if (gen !== tutoringGen) return
+
       tutoringRound.value++
 
       if (tutoringStore.status === 'clarifying') {
         return
       }
 
+      // guided 模式：SSE 流在"等待学生作答"点挂起，不调用 finalizeTutoring
+      if (tutoringStore.status === 'guided') {
+        return
+      }
+
       finalizeTutoring()
     } catch (err) {
+      if (gen !== tutoringGen) return
       console.error('sendClarificationResponse failed:', err)
       finalizeTutoring()
     }
@@ -1114,6 +2459,38 @@ export function useChatSSE() {
     }
   }
 
+  /** 提交引导模式作答（聊天内联场景） */
+  async function submitGuidedAnswerInline(
+    stepId: string,
+    action: 'answer' | 'reveal',
+    answer?: string
+  ): Promise<void> {
+    if (!tutoringStore.sessionId) return
+    const gen = ++tutoringGen
+
+    try {
+      await tutoringSSE.submitGuidedAnswer({
+        sessionId: tutoringStore.sessionId,
+        stepId,
+        action,
+        answer: answer || undefined,
+      })
+
+      if (gen !== tutoringGen) return
+
+      // guided 模式继续挂起或已完成
+      if (tutoringStore.status === 'guided') {
+        return
+      }
+
+      finalizeTutoring()
+    } catch (err) {
+      if (gen !== tutoringGen) return
+      console.error('submitGuidedAnswerInline failed:', err)
+      finalizeTutoring()
+    }
+  }
+
   /**
    * Called when VideoLecturePlayer closes — insert record card into chat.
    */
@@ -1122,8 +2499,14 @@ export function useChatSSE() {
     const card = videoStore.lastRecord
     if (!card) return
 
-    const session = activeSession.value
+    const session = sessions.value.find(s => s.id === lectureSessionId.value) || activeSession.value
     if (!session) return
+
+    // 避免重复插入：检查 session 中是否已有同一 lectureId 的记录
+    const alreadyExists = session.messages.some(
+      (m) => (m as any)._videoRecord?.lectureId === card.lectureId
+    )
+    if (alreadyExists) return
 
     // Push video record card message
     session.messages.push({
@@ -1540,16 +2923,37 @@ export function useChatSSE() {
   // ===== SSE reconnection for mobile =====
 
   function setupMobileReconnection() {
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        const session = activeSession.value
-        if (session && session.messages.length > 0) {
-          loadSessionMessages(activeSessionId.value)
+      if (document.visibilityState !== 'visible') return
+      const session = activeSession.value
+      if (!session || session.messages.length === 0) return
+
+      // 正在流式输出时，检查是否卡死（超过30秒无数据视为断连）
+      if (isStreaming.value) {
+        if (Date.now() - lastStreamActivity < 30000) return
+        // 流式卡死：中止旧请求，强制恢复
+        if (streamAbortController) {
+          streamAbortController.abort()
+          streamAbortController = null
         }
+        isStreaming.value = false
       }
+
+      // debounce：避免快速切换前后台触发多次全量重载
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        loadSessionMessages(activeSessionId.value)
+      }, 500)
     }
+
     document.addEventListener('visibilitychange', handleVisibility)
-    return () => document.removeEventListener('visibilitychange', handleVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+    }
   }
 
   // ===== Watch course change =====
@@ -1560,6 +2964,10 @@ export function useChatSSE() {
 
   onUnmounted(() => {
     cleanupGapSources()
+    if (streamAbortController) {
+      streamAbortController.abort()
+      streamAbortController = null
+    }
   })
 
   return {
@@ -1618,9 +3026,27 @@ export function useChatSSE() {
     // Tutoring (图文辅导)
     tutoringStore,
     activeTutoringMsgIdx,
+    tutoringSessionId,
+    isTutoringActive,
     tutoringRound,
     sendTutoringMessage,
     sendClarificationResponse,
     regenerateTutoringSection,
+    submitGuidedAnswerInline,
+
+    // DirectAnswer (直接模式)
+    directAnswerStore,
+    directAnswerInlineSSE,
+    activeDirectAnswerMsgIdx,
+
+    // Smart v2 (智能模式)
+    activeSmartMsgIdx,
+    isSmartActive,
+    sendSmartAnswer,
+
+    // File upload
+    pendingFiles,
+    uploadFile,
+    removePendingFile,
   }
 }

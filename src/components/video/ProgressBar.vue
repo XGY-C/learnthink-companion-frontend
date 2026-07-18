@@ -5,6 +5,8 @@ import type { Scene } from '@/types/scene'
 
 const store = useVideoLectureStore()
 
+const props = defineProps<{ show: boolean }>()
+
 /** 与各场景组件内部的 calcDuration 保持一致的时长计算 */
 function calcSceneDuration(s: Scene): number {
   if (s.duration > 0) return s.duration
@@ -62,14 +64,14 @@ const progressPct = computed(() => {
 
 /** 每个场景在进度条上的位置（基于累计时长占比） */
 const sceneMarkers = computed(() => {
-  const markers: { index: number; leftPct: number; label: string; type: string }[] = []
+  const markers: { index: number; leftPct: number; label: string; type: string; interactive: boolean }[] = []
   if (!totalDuration.value || validScenes.value.length < 2) {
     // fallback: evenly spaced
     return validScenes.value.map((s, i) => {
       const leftPct = validScenes.value.length > 1
         ? (i / (validScenes.value.length - 1)) * 100
         : 50
-      return { index: i, leftPct, label: sceneLabel(s!), type: s!.type }
+      return { index: i, leftPct, label: sceneLabel(s!), type: s!.type, interactive: !!s!.interactive }
     })
   }
   let accumulated = 0
@@ -83,6 +85,7 @@ const sceneMarkers = computed(() => {
       leftPct: ((accumulated + halfDuration) / total) * 100,
       label: sceneLabel(s),
       type: s.type,
+      interactive: !!s.interactive,
     })
     accumulated += calcSceneDuration(s)
   }
@@ -91,14 +94,28 @@ const sceneMarkers = computed(() => {
 
 const hoveredMarker = ref<number | null>(null)
 
+function stripHtml(html: string): string {
+  if (!html) return ''
+  // 使用 DOMParser 安全解码实体（不会执行脚本或加载图片）
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  return (doc.body.textContent || '').replace(/\s+/g, ' ').trim()
+}
+
 function sceneLabel(scene: any): string {
+  let rawHeading = scene.content?.heading || scene.content?.title || ''
+  // HTML 场景从 content.html 中提取 <h1>/<h2> 标题
+  if (!rawHeading && scene.content?.html) {
+    const match = scene.content.html.match(/<h[12][^>]*>(.*?)<\/h[12]>/i)
+    if (match) rawHeading = match[1]
+  }
+  const heading = stripHtml(rawHeading)
+  if (heading) return heading
+  // 无标题时回退到类型标签
   const typeLabels: Record<string, string> = {
     title: '标题', text: '讲解', code: '代码', diagram: '图表',
-    comparison: '对比', summary: '总结', ending: '结束',
+    comparison: '对比', summary: '总结', ending: '结束', html: '场景',
   }
-  const typeLabel = typeLabels[scene.type] || scene.type
-  const heading = scene.content?.heading || scene.content?.title || ''
-  return heading ? `${typeLabel}: ${heading}` : typeLabel
+  return typeLabels[scene.type] || scene.type
 }
 
 function formatTime(ms: number): string {
@@ -114,14 +131,14 @@ function handleMarkerClick(index: number) {
 </script>
 
 <template>
-  <div class="progress-bar-wrapper">
+  <div class="progress-bar-wrapper" :class="{ 'is-hidden': !show }">
     <div class="progress-track">
       <div class="progress-fill" :style="{ width: progressPct + '%' }" />
       <div
         v-for="m in sceneMarkers"
         :key="m.index"
         class="progress-marker"
-        :class="{ 'is-active': m.index <= store.currentSceneIndex, 'is-hovered': hoveredMarker === m.index }"
+        :class="{ 'is-active': m.index <= store.currentSceneIndex, 'is-hovered': hoveredMarker === m.index, 'is-interactive': m.interactive }"
         :style="{ left: m.leftPct + '%' }"
         @mouseenter="hoveredMarker = m.index"
         @mouseleave="hoveredMarker = null"
@@ -144,8 +161,15 @@ function handleMarkerClick(index: number) {
 
 <style scoped>
 .progress-bar-wrapper {
-  padding: 0 20px 4px;
+  padding: 14px 20px 4px;
   flex-shrink: 0;
+  opacity: 1;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.progress-bar-wrapper.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
 }
 .progress-track {
   position: relative;
@@ -166,8 +190,8 @@ function handleMarkerClick(index: number) {
 }
 .progress-marker {
   position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -178,7 +202,7 @@ function handleMarkerClick(index: number) {
   z-index: 2;
 }
 .progress-marker:hover {
-  transform: translate(-50%, -50%) scale(1.5);
+  transform: translateX(-50%) scale(1.5);
   background: #fff;
   border-color: #fff;
   box-shadow: 0 0 10px rgba(255, 255, 255, 0.4);
@@ -192,6 +216,15 @@ function handleMarkerClick(index: number) {
   background: #fff;
   border-color: #fff;
   box-shadow: 0 0 12px rgba(255, 255, 255, 0.5);
+}
+.progress-marker.is-interactive {
+  border-color: var(--lt-accent, #FF8C42);
+  background: rgba(255, 140, 66, 0.3);
+}
+.progress-marker.is-interactive.is-active {
+  background: var(--lt-accent, #FF8C42);
+  border-color: var(--lt-accent, #FF8C42);
+  box-shadow: 0 0 6px rgba(255, 140, 66, 0.5);
 }
 
 .marker-tooltip {

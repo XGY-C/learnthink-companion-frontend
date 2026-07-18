@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue'
 import type { QuizContent, QuestionType, Question } from '@/types'
+import { parseQuiz } from '@/utils/quizExport'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 
 const props = defineProps<{
@@ -14,14 +15,7 @@ defineEmits<{
 }>()
 
 // ---- 解析 content ----
-const quiz = computed<QuizContent | null>(() => {
-  if (!props.content) return null
-  if (typeof props.content === 'string') {
-    try { return JSON.parse(props.content) as QuizContent }
-    catch { return null }
-  }
-  return props.content
-})
+const quiz = computed<QuizContent | null>(() => parseQuiz(props.content))
 
 const questions = computed(() => quiz.value?.questions ?? [])
 
@@ -286,11 +280,7 @@ const correctCount = computed(() => {
       </button>
       <span class="quiz-progress">{{ activeIdx + 1 }} / {{ questions.length }}</span>
       <button class="quiz-action-btn secondary" @click="activeIdx < questions.length - 1 ? goTo(activeIdx + 1) : null" :disabled="activeIdx === questions.length - 1">
-        下一题 →
-      </button>
-      <span class="flex-1" />
-      <button class="quiz-action-btn primary" @click="$emit('open-practice')">
-        在练习模式中打开 →
+        下一题 ->
       </button>
     </div>
   </div>

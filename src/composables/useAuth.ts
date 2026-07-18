@@ -128,7 +128,7 @@ export function useAuth() {
   // ===== 登出 =====
   async function logout(): Promise<void> {
     try {
-      await apiFetch('/auth/logout', { method: 'POST', skipAuth: false })
+      await apiFetch('/auth/logout', { method: 'POST', skipAuth: true })
     } catch {
       // 即使 API 失败也清理本地状态
     }

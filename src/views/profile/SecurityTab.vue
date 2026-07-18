@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAuth } from '@/composables/useAuth'
 import { apiFetch } from '@/utils/api'
-import { Lock } from '@element-plus/icons-vue'
+import { Lock, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
@@ -50,6 +50,11 @@ async function handleChangePassword() {
   } finally {
     changing.value = false
   }
+}
+
+async function handleLogout() {
+  await logout()
+  router.push('/login')
 }
 
 async function handleDeleteAccount() {
@@ -111,7 +116,7 @@ async function handleDeleteAccount() {
     </div>
 
     <!-- 注销账号 -->
-    <div class="rounded-xl border p-5" style="border-color: var(--lt-border); background-color: var(--lt-bg-card);">
+    <div class="rounded-xl border p-5 mb-6" style="border-color: var(--lt-border); background-color: var(--lt-bg-card);">
       <div class="flex items-center gap-2 mb-1">
         <span class="w-6 h-6 rounded flex items-center justify-center" style="background-color: var(--lt-danger);">
           <el-icon :size="12" color="white"><Lock /></el-icon>
@@ -122,6 +127,14 @@ async function handleDeleteAccount() {
         注销后所有数据将被永久删除，无法恢复。
       </p>
       <el-button type="danger" plain @click="handleDeleteAccount">注销账号</el-button>
+    </div>
+
+    <!-- 退出登录 -->
+    <div class="rounded-xl border p-5" style="border-color: var(--lt-border); background-color: var(--lt-bg-card);">
+      <el-button class="w-full" @click="handleLogout">
+        <el-icon :size="16" class="mr-1"><SwitchButton /></el-icon>
+        退出登录
+      </el-button>
     </div>
   </div>
 </template>

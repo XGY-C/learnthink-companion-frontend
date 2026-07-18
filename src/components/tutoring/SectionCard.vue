@@ -7,9 +7,12 @@ import DiagramLightbox from './DiagramLightbox.vue'
 import SectionActions from './SectionActions.vue'
 import FollowUpInput from './FollowUpInput.vue'
 import type { DiagramState } from '@/types/tutoring'
+import type { SectionState } from '@/types/tutoring'
 
 const props = defineProps<{
   sectionId: string
+  section?: SectionState
+  showActions?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -18,7 +21,8 @@ const emit = defineEmits<{
 
 const store = useTutoringStore()
 
-const section = computed(() => store.sections[props.sectionId])
+const section = computed(() => props.section ?? store.sections[props.sectionId])
+const showActions = computed(() => props.showActions !== false)
 const isExpanded = ref(section.value?.expandDefault ?? false)
 const isAutoExpanded = ref(false)
 const showFollowUp = ref(false)
@@ -130,7 +134,7 @@ const cardExpanded = computed(() => isExpanded.value || isStreaming.value)
       </div>
 
       <!-- Section 操作按钮 -->
-      <div v-if="isDone && !isRegenerating" class="section-footer">
+      <div v-if="showActions && isDone && !isRegenerating" class="section-footer">
         <SectionActions
           :sectionId="section.id"
           @action="handleSectionAction"

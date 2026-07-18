@@ -57,3 +57,37 @@ export function depthLabel(depth: string): string {
     default: return depth
   }
 }
+
+export function scopeTagClass(scope: string): string {
+  switch (scope) {
+    case 'core_curriculum': return 'tag-core'
+    case 'supplementary': return 'tag-sup'
+    case 'extracurricular': return 'tag-ext'
+    default: return 'tag-core'
+  }
+}
+
+export function depthTagClass(depth: string): string {
+  switch (depth) {
+    case 'basic': return 'tag-basic'
+    case 'standard': return 'tag-std'
+    case 'deep': return 'tag-deep'
+    default: return 'tag-basic'
+  }
+}
+
+export function formatTimeAgo(dateStr: string): string {
+  const now = Date.now()
+  const then = new Date(dateStr).getTime()
+  const diff = Math.floor((now - then) / 1000)
+  if (diff < 0) return '刚刚'
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+  if (diff < 2592000) return `${Math.floor(diff / 86400)} 天前`
+  return new Date(dateStr).toLocaleDateString('zh-CN')
+}
+
+export function lockModeLabel(mode: string): string {
+  return mode === 'free' ? '自由学习' : '按顺序解锁'
+}

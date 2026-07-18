@@ -2,6 +2,12 @@
 import { computed } from 'vue'
 import { useTutoringStore } from '@/stores/tutoring'
 import SectionCard from './SectionCard.vue'
+import type { SectionState } from '@/types/tutoring'
+
+const props = defineProps<{
+  sections?: SectionState[]
+  readOnly?: boolean
+}>()
 
 const store = useTutoringStore()
 
@@ -9,8 +15,12 @@ const emit = defineEmits<{
   action: [sectionId: string, action: string, instruction?: string]
 }>()
 
-const sectionList = computed(() => store.sectionList)
+const sectionList = computed(() => props.sections?.length ? props.sections : store.sectionList)
 const hasSections = computed(() => sectionList.value.length > 0)
+
+function resolveSection(id: string) {
+  return sectionList.value.find(section => section.id === id)
+}
 </script>
 
 <template>
@@ -21,6 +31,8 @@ const hasSections = computed(() => sectionList.value.length > 0)
         v-for="section in sectionList"
         :key="section.id"
         :sectionId="section.id"
+        :section="resolveSection(section.id)"
+        :showActions="!props.readOnly"
         @action="(sid, action, instruction) => emit('action', sid, action, instruction)"
       />
     </template>

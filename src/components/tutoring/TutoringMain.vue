@@ -1,23 +1,34 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useTutoringStore } from '@/stores/tutoring'
+import { useProfileStore } from '@/stores/profile'
 import { useTutoringSSE } from '@/composables/useTutoringSSE'
-import QuestionInput from './QuestionInput.vue'
+import TutoringInput from './TutoringInput.vue'
 import ClarificationCard from './ClarificationCard.vue'
 import AnalysisBar from './AnalysisBar.vue'
 import ContextAwarenessBar from './ContextAwarenessBar.vue'
 import AnswerContainer from './AnswerContainer.vue'
 import AnswerActionBar from './AnswerActionBar.vue'
+import GuidedDialogue from './GuidedDialogue.vue'
+import type { TutoringMode } from '@/types/tutoring'
 
 const store = useTutoringStore()
 const { startTutoring, regenerateSection } = useTutoringSSE()
 
+const emit = defineEmits<{
+  'send-video': [text: string]
+}>()
+
 const globalQuestion = ref('')
 const clarificationRound = ref(1)
 
-async function handleSend(question: string) {
+async function handleSend(question: string, mode: TutoringMode, isVideo: boolean) {
+  if (isVideo) {
+    emit('send-video', question)
+    return
+  }
   globalQuestion.value = question
-  await startTutoring({ question })
+  await startTutoring({ question, mode })
 }
 
 async function handleClarify(response: {
@@ -66,7 +77,7 @@ const showError = computed(() => store.status === 'error' && !!store.error)
     <ContextAwarenessBar v-if="store.sessionId" />
 
     <div class="mb-6">
-      <QuestionInput :disabled="store.isStreaming" @send="handleSend" />
+      <TutoringInput :disabled="store.isStreaming" @send="handleSend" />
     </div>
 
     <!-- IDLE: welcome -->
@@ -123,8 +134,14 @@ const showError = computed(() => store.status === 'error' && !!store.error)
         <div style="font-size: 13px; color: var(--lt-text-auxiliary); margin-bottom: 8px;">
           ── 还有疑问？继续追问 ──
         </div>
-        <QuestionInput placeholder="继续追问..." @send="handleSend" />
+        <TutoringInput placeholder="继续追问..." @send="handleSend" />
       </div>
+    </div>
+
+    <!-- GUIDED MODE -->
+    <div v-if="store.status === 'guided' || store.guidedSteps.length > 0">
+      <AnalysisBar v-if="store.analysis" class="mb-6" />
+      <GuidedDialogue />
     </div>
 
     <!-- ERROR -->

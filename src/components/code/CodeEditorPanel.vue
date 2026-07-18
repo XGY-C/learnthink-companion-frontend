@@ -8,7 +8,7 @@ import {
   EditorView, keymap, lineNumbers, highlightActiveLine,
   highlightActiveLineGutter, gutter, GutterMarker
 } from '@codemirror/view'
-import { EditorState, Compartment, StateEffect, StateField, RangeSetBuilder } from '@codemirror/state'
+import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language'
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
@@ -62,8 +62,6 @@ const guidedBlanksCompartment = new Compartment()
 const traceLineCompartment = new Compartment()
 const highlighterCompartment = new Compartment()
 
-const LINE_HEIGHT = 22
-
 const RESERVED = new Set([
   'def', 'class', 'if', 'else', 'elif', 'for', 'while', 'return',
   'import', 'from', 'as', 'in', 'not', 'and', 'or', 'is', 'None',
@@ -106,7 +104,13 @@ function lineHighlighter(lines: number[]) {
 
 // ─── Gutter Markers ───
 class CustomGutterMarker extends GutterMarker {
-  constructor(readonly symbol: string, readonly cls: string) { super() }
+  symbol: string
+  cls: string
+  constructor(symbol: string, cls: string) {
+    super()
+    this.symbol = symbol
+    this.cls = cls
+  }
   toDOM() {
     const el = document.createElement('span')
     el.textContent = this.symbol
@@ -128,13 +132,13 @@ function buildGutterExtension(markers: GutterMarkerDef[]): Extension {
   return gutter({
     class: 'cm-custom-gutter',
     lineMarker(view, line) {
-      const m = markerSet.get(line.number)
+      const lineNumber = view.state.doc.lineAt(line.from).number
+      const m = markerSet.get(lineNumber)
       return m ? new CustomGutterMarker(m.symbol, m.cls) : null
     },
-    initialSpan() { return 24 },
     domEventHandlers: {
-      click(view, line, event) {
-        emit('gutter-click', line.number)
+      click(view, line) {
+        emit('gutter-click', view.state.doc.lineAt(line.from).number)
         return true
       }
     }
@@ -142,10 +146,6 @@ function buildGutterExtension(markers: GutterMarkerDef[]): Extension {
 }
 
 // ─── Guided Blanks ───
-const blankMark = Decoration.mark({ class: 'cm-blank-input' })
-const blankCorrect = Decoration.mark({ class: 'cm-blank-correct' })
-const blankWrong = Decoration.mark({ class: 'cm-blank-wrong' })
-
 function buildBlankExtension(blanks: GuidedBlankDef[]): Extension {
   const blankLineSet = new Set(blanks.map(b => b.line))
   const blankAnswers = new Map(blanks.map(b => [b.line, b.answer]))
@@ -163,7 +163,6 @@ function buildBlankExtension(blanks: GuidedBlankDef[]): Extension {
           if (idx !== -1) {
             let endIdx = text.indexOf(')', idx)
             if (endIdx === -1) endIdx = text.length - idx
-            const blankText = text.slice(idx, text.indexOf(' ', idx) !== -1 ? text.indexOf(' ', idx) : text.length)
             const ans = blankAnswers.get(i) || ''
             const isCorrect = text.includes(ans) && !text.includes('__')
             const cls = isCorrect ? 'cm-blank-correct' : 'cm-blank-input'
@@ -208,7 +207,6 @@ function domEventExtensions(): Extension {
       }
       const coords = view.coordsAtPos(word.from)
       if (coords) {
-        const editorRect = view.dom.getBoundingClientRect()
         emit('hover-variable', {
           name: text, from: word.from, to: word.to,
           x: coords.left, y: coords.top - 8,
@@ -289,6 +287,20 @@ watch(() => props.guidedBlanks, (blanks) => {
 watch(() => props.traceActiveLine, (line) => {
   view.value?.dispatch({ effects: traceLineCompartment.reconfigure(buildTraceLineExtension(line ?? null)) })
 })
+
+function scrollToLine(line: number) {
+  const v = view.value
+  if (!v || line < 1) return
+  const doc = v.state.doc
+  if (line > doc.lines) line = doc.lines
+  const lineObj = doc.line(line)
+  v.dispatch({
+    selection: { anchor: lineObj.from },
+    effects: EditorView.scrollIntoView(lineObj.from, { y: 'start', yMargin: 40 }),
+  })
+}
+
+defineExpose({ scrollToLine })
 
 onUnmounted(() => { view.value?.destroy() })
 </script>

@@ -43,7 +43,7 @@ export interface PackResource {
 export function typeLabel(type: string): string {
   const map: Record<string, string> = {
     doc: '讲解文档', mindmap: '思维导图', quiz: '练习题',
-    reading: '拓展阅读', code: '代码案例', video: '讲解视频',
+    reading: '拓展阅读', code: '代码案例', video: '讲解视频', html: '交互文档',
   }
   return map[type] || type
 }
@@ -327,11 +327,12 @@ export function useTaskStream() {
           traceId: data.traceId || `trace_${Date.now()}`,
           agentName: data.agentName,
           agentRole: data.agentRole,
-          phase: data.phase,
-          context: data.context,
-          observation: data.observation,
-          thought: data.thought,
-          decision: data.decision,
+          phase: data.phase || '',
+          pipelineStage: data.pipelineStage || '',
+          context: data.context || '',
+          observation: data.observation || '',
+          thought: data.thought || '',
+          decision: data.decision || '',
           confidenceLevel: data.confidenceLevel || 'high',
           trigger: data.trigger || 'autonomous',
           inResponseTo: data.inResponseTo,
@@ -355,6 +356,32 @@ export function useTaskStream() {
       },
       onChecklistUpdated(data: any) {
         checklist.value = data
+      },
+      onChecklistVideoReady(data: { type: string; title: string }) {
+        if (checklist.value?.items) {
+          const item = checklist.value.items.find((i: any) => i.title === data.title)
+          if (item) {
+            item.status = 'done'
+            checklist.value = { ...checklist.value, items: [...checklist.value.items] }
+          }
+        }
+        const res = resources.value.find(r => r.type === 'video')
+        if (res) {
+          res.status = 'ready'
+        }
+      },
+      onChecklistVideoFailed(data: { type: string; title: string }) {
+        if (checklist.value?.items) {
+          const item = checklist.value.items.find((i: any) => i.title === data.title)
+          if (item) {
+            item.status = 'failed'
+            checklist.value = { ...checklist.value, items: [...checklist.value.items] }
+          }
+        }
+        const res = resources.value.find(r => r.type === 'video')
+        if (res) {
+          res.status = 'failed'
+        }
       },
       onAgentGenerationStarted(data: any) {
         activeAgents.value.push({
@@ -486,6 +513,30 @@ export function useTaskStream() {
     sseDisconnect()
   }
 
+  // ===== Mobile reconnection =====
+  function setupMobileReconnection() {
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') return
+      // 任务未开始或已完成时不重连
+      if (!hasStarted.value || isComplete.value) return
+      if (!taskId.value) return
+
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        manualRefresh()
+      }, 500)
+    }
+
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+    }
+  }
+
   return {
     // State
     taskId,
@@ -519,5 +570,6 @@ export function useTaskStream() {
     initFromRoute,
     cleanup,
     stopPolling,
+    setupMobileReconnection,
   }
 }

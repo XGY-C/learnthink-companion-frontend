@@ -29,7 +29,7 @@ export class ApiError extends Error {
 //  Token 工具
 // ===================================================================
 
-function getToken(): string {
+export function getToken(): string {
   return localStorage.getItem('token') || ''
 }
 

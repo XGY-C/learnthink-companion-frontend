@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, reactive, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatLineRound, Plus, Delete, Fold, Expand, MagicStick } from '@element-plus/icons-vue'
+import { Plus, Delete, Fold, Expand, MagicStick } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useChatSSE } from '@/composables/useChatSSE'
 import type { ChatMessage, Suggestion } from '@/composables/useChatSSE'
-import { useProfileStore } from '@/stores/profile'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
-import { apiFetch } from '@/utils/api'
+import { createTtsPlayer, type TtsSentenceState } from '@/utils/ttsSentence'
 import ThoughtChainTimeline from '@/components/ThoughtChainTimeline.vue'
 import LottieAnimation from '@/components/LottieAnimation.vue'
 import liveChatbotLottie from '@/assets/lottie/live-chatbot.json'
@@ -20,22 +19,23 @@ import { useVideoLectureStore } from '@/stores/videoLecture'
 import ClarificationCard from '@/components/tutoring/ClarificationCard.vue'
 import AnalysisBar from '@/components/tutoring/AnalysisBar.vue'
 import AnswerContainer from '@/components/tutoring/AnswerContainer.vue'
+import GuidedDialogue from '@/components/tutoring/GuidedDialogue.vue'
+import DirectAnswerInline from '@/components/tutoring/DirectAnswerInline.vue'
+import TutoringInput from '@/components/tutoring/TutoringInput.vue'
+import SmartVisualRenderer from '@/components/smart/SmartVisualRenderer.vue'
+import type { TutoringMode } from '@/types/tutoring'
 
 const router = useRouter()
 const chat = useChatSSE()
-const profile = useProfileStore()
 const videoStore = useVideoLectureStore()
 
 /** Mode options for the chat mode toggle — 辅导模式合并了原 tutoring 和 lecture */
 const modes = [
   { value: 'chat' as const, label: '💬 对话' },
-  { value: 'lecture' as const, label: '🎬 辅导' },
+  { value: 'lecture' as const, label: '📖 辅导' },
   { value: 'resource' as const, label: '📝 资源' },
   { value: 'plan' as const, label: '🗺 规划' },
 ]
-
-// ===== Video Lecture Toggle =====
-const isVideoLectureActive = ref(false)
 
 // ===== Profile Panel =====
 const PROFILE_STORAGE_KEY = 'lt-profile-panel'
@@ -120,6 +120,64 @@ function setupNavObserver() {
 
 const messageListRef = ref<HTMLElement | null>(null)
 const inputMessage = ref('')
+const messageTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const isUploading = ref(false)
+const ACCEPTED_TYPES = '.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.html,.htm,.pdf,.docx,.pptx,.xlsx,.xls,.py,.js,.ts,.tsx,.jsx,.vue,.java,.c,.cpp,.h,.hpp,.cs,.go,.rs,.rb,.php,.swift,.kt,.scala,.sh,.sql,.r,.tex,.bat,.ps1,.jpg,.jpeg,.png,.gif,.bmp,.webp,.svg'
+
+function handleFileSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+  if (input.files.length > 50) {
+    ElMessage.warning('每次最多上传 50 个文件')
+    input.value = ''
+    return
+  }
+  const oversized = Array.from(input.files).filter(f => f.size > 100 * 1024 * 1024)
+  if (oversized.length > 0) {
+    ElMessage.warning(`文件 "${oversized[0].name}" 超过 100MB 限制`)
+    input.value = ''
+    return
+  }
+  isUploading.value = true
+  const promises = Array.from(input.files).map(file => chat.uploadFile(file))
+  Promise.allSettled(promises).finally(() => {
+    isUploading.value = false
+    input.value = ''
+  })
+}
+
+function triggerFilePicker() {
+  fileInputRef.value?.click()
+}
+
+function autoResizeMessageTextarea() {
+  nextTick(() => {
+    const el = messageTextareaRef.value
+    if (el) {
+      el.style.height = 'auto'
+      el.style.height = Math.min(el.scrollHeight, 168) + 'px'
+    }
+  })
+}
+
+function getFileExt(name: string): string {
+  const i = name.lastIndexOf('.')
+  return i > 0 ? name.slice(i + 1).toUpperCase() : ''
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + 'B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + 'MB'
+}
+
+function handleMessageKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    handleSendMessage()
+  }
+}
 const showGeneratePanel = ref(false)
 const generateTopic = ref('')
 
@@ -135,7 +193,7 @@ async function handleSuggestionClick(suggestion: Suggestion, msg: ChatMessage) {
   if (suggestion.sendAs.startsWith('__generate_plan__:')) {
     const topic = suggestion.sendAs.slice('__generate_plan__:'.length)
     msg.suggestions = undefined
-    await chat.confirmPlanGeneration(topic)
+    await chat.confirmPlanGeneration(topic, '')
   } else if (suggestion.sendAs.startsWith('__generate__:')) {
     const topic = suggestion.sendAs.slice('__generate__:'.length)
     msg.suggestions = undefined
@@ -176,11 +234,33 @@ async function regenerateMessage(_msg: ChatMessage, idx: number) {
   }
 }
 
-function toggleLike(msg: ChatMessage) {
-  msg._feedback = msg._feedback === 'liked' ? undefined : 'liked'
+async function toggleLike(msg: ChatMessage) {
+  const newFeedback = msg.feedback === 'liked' ? null : 'liked'
+  msg.feedback = newFeedback
+  msg._feedback = newFeedback ?? undefined
+  if (msg.messageId) {
+    try {
+      await fetch(import.meta.env.VITE_API_BASE + `/chat/messages/${msg.messageId}/feedback`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify({ feedback: newFeedback }),
+      })
+    } catch { /* 非阻塞 */ }
+  }
 }
-function toggleDislike(msg: ChatMessage) {
-  msg._feedback = msg._feedback === 'disliked' ? undefined : 'disliked'
+async function toggleDislike(msg: ChatMessage) {
+  const newFeedback = msg.feedback === 'disliked' ? null : 'disliked'
+  msg.feedback = newFeedback
+  msg._feedback = newFeedback ?? undefined
+  if (msg.messageId) {
+    try {
+      await fetch(import.meta.env.VITE_API_BASE + `/chat/messages/${msg.messageId}/feedback`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify({ feedback: newFeedback }),
+      })
+    } catch { /* 非阻塞 */ }
+  }
 }
 async function shareMessage(msg: ChatMessage) {
   try {
@@ -189,86 +269,65 @@ async function shareMessage(msg: ChatMessage) {
   } catch { ElMessage.error('分享失败') }
 }
 
-// ===== TTS (Text-to-Speech) =====
+/** 渲染 mode 标签显示文本 */
+function modeLabel(mode: string): string {
+  switch (mode) {
+    case 'lecture': return '辅导模式'
+    case 'smart': return '智能辅导'
+    case 'resource': return '资源生成'
+    case 'plan': return '学习方案'
+    default: return mode
+  }
+}
+
+// ===== TTS (Text-to-Speech) — sentence-by-sentence streaming =====
 const audioState = reactive({
   playingMsgIdx: -1,
   loading: false,
-  el: null as HTMLAudioElement | null,
 })
 
+let ttsPlayer: { stop: () => void } | null = null
+
 function stopAudio() {
-  if (audioState.el) {
-    audioState.el.pause()
-    audioState.el = null
-  }
+  ttsPlayer?.stop()
+  ttsPlayer = null
   audioState.playingMsgIdx = -1
   audioState.loading = false
 }
 
 async function toggleAudio(msg: ChatMessage, idx: number) {
-  // Stop if already playing this message
   if (audioState.playingMsgIdx === idx) {
     stopAudio()
     return
   }
+  stopAudio()
 
-  // Stop any previous audio
-  if (audioState.el) {
-    audioState.el.pause()
-    audioState.el = null
-  }
-  audioState.playingMsgIdx = -1
-
-  // Helper: create and play audio, returns true on success
-  async function playAudio(url: string): Promise<boolean> {
-    const el = new Audio(url)
-    audioState.el = el
-    el.onended = () => { audioState.el = null; audioState.playingMsgIdx = -1 }
-    try {
-      await el.play()
-      return true
-    } catch {
-      audioState.el = null
-      ElMessage.error('音频播放被浏览器阻止，请点击页面任意位置后再试')
-      return false
+  const player = createTtsPlayer(msg, (s: TtsSentenceState) => {
+    audioState.loading = s.isLoading
+    if (!s.isPlaying && !s.isLoading) {
+      audioState.playingMsgIdx = -1
     }
-  }
+  })
 
-  // Use cached audio URL if available
-  const cachedUrl = (msg as any)._audioUrl
-  if (cachedUrl) {
-    if (await playAudio(cachedUrl)) {
-      audioState.playingMsgIdx = idx
-    }
-    return
-  }
+  ttsPlayer = player
+  audioState.playingMsgIdx = idx
 
-  // Call backend TTS API
-  audioState.loading = true
   try {
-    const res = await apiFetch<{ audioUrl: string }>('/chat/tts', {
-      method: 'POST',
-      body: { text: msg.text },
-    })
-    if (!res.data?.audioUrl) {
-      throw new Error(res.message || '语音合成服务返回为空，请检查阿里云 TTS 配置')
-    }
-    (msg as any)._audioUrl = res.data.audioUrl
-    if (await playAudio(res.data.audioUrl)) {
-      audioState.playingMsgIdx = idx
-    }
+    await player.start()
   } catch (err) {
     console.error('TTS error:', err)
     ElMessage.error(`语音合成失败: ${err instanceof Error ? err.message : '未知错误'}`)
   } finally {
+    ttsPlayer = null
     audioState.loading = false
+    audioState.playingMsgIdx = -1
   }
 }
 
 async function handleDeleteSession(sessionId: string) {
   if (chat.sessions.value.length <= 1) { ElMessage.info('至少保留一个会话'); return }
   try {
-    await ElMessageBox.confirm('确定删除该会话？', '删除确认', {
+    await ElMessageBox.confirm('确定删除该会话？', '', {
       confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning',
     })
   } catch { return }
@@ -282,21 +341,39 @@ function handleSessionClick(sess: any) {
 
 function handleSendMessage() {
   const text = inputMessage.value.trim()
-  if (!text || chat.isStreaming.value) return
-  inputMessage.value = ''
-  if (chat.chatMode.value === 'lecture' && isVideoLectureActive.value) {
-    chat.sendLectureMessage(text)
-  } else if (chat.chatMode.value === 'lecture') {
-    // 辅导模式（未开启视频）→ 图文辅导，内联在对话流中渲染
-    chat.sendTutoringMessage(text)
-  } else {
-    chat.sendMessage(text)
+  if (!text && chat.pendingFiles.value.length === 0) { console.warn('[SMART-DIAG] handleSendMessage: empty text & no files, aborting'); return }
+  if (chat.isStreaming.value) { console.warn('[SMART-DIAG] handleSendMessage: isStreaming=true, aborting'); return }
+  if (chat.isTutoringActive.value) { console.warn('[SMART-DIAG] handleSendMessage: isTutoringActive=true, aborting'); return }
+  // Smart v2 对话中 -> 走 Smart answer
+  console.info('[SMART-DIAG] handleSendMessage: isSmartActive=', chat.isSmartActive.value,
+    'activeSmartMsgIdx=', chat.activeSmartMsgIdx?.value,
+    'activeSessionId=', chat.activeSessionId?.value)
+  if (chat.isSmartActive.value) {
+    inputMessage.value = ''
+    chat.sendSmartAnswer(text)
+    scrollToBottom()
+    return
   }
+  console.warn('[SMART-DIAG] handleSendMessage: isSmartActive=false, falling through to sendMessage')
+  inputMessage.value = ''
+  chat.sendMessage(text)
   scrollToBottom()
 }
 
-function handleVideoLectureClick() {
-  isVideoLectureActive.value = !isVideoLectureActive.value
+function handleTutoringInputSend(text: string, mode: TutoringMode, isVideo: boolean) {
+  if (chat.isStreaming.value || chat.isTutoringActive.value) return
+  // Smart v2 对话中 -> 走 Smart answer（而非 sendTutoringMessage，后者会被 isSmartActive 阻断）
+  if (chat.isSmartActive.value) {
+    chat.sendSmartAnswer(text)
+    scrollToBottom()
+    return
+  }
+  if (isVideo) {
+    chat.sendLectureMessage(text)
+  } else {
+    chat.sendTutoringMessage(text, mode)
+  }
+  scrollToBottom()
 }
 
 async function handleTriggerGenerate() {
@@ -378,6 +455,62 @@ function handleVideoReplay() {
 }
 
 // ===== Tutoring handlers =====
+/** 将 ReAct 思考步骤转为 ThoughtChainTimeline 需要的格式 */
+const tutoringThoughtSteps = computed(() => {
+  return chat.tutoringStore.reactThoughts.map((t) => ({
+    label: `ReAct 第 ${t.iteration} 轮`,
+    icon: 'thought',
+    done: true,
+    phase: 'DECISION' as const,
+    detail: `Action: ${t.action}`,
+    thought: t.thought,
+  }))
+})
+
+const tutoringVisibleSections = computed(() => {
+  const msg = tutoringActiveMessage.value
+  return msg?.role === 'assistant' && msg._tutoring?.completed && msg._tutoring.snapshot?.sections
+    ? msg._tutoring.snapshot.sections
+    : null
+})
+
+const tutoringVisibleAnalysis = computed(() => {
+  const msg = tutoringActiveMessage.value
+  return msg?.role === 'assistant' && msg._tutoring?.completed ? msg._tutoring.snapshot?.analysis ?? null : null
+})
+
+
+
+const tutoringVisibleThoughtSteps = computed(() => {
+  const msg = tutoringActiveMessage.value
+  if (msg?.role === 'assistant' && msg._tutoring?.completed) {
+    return (msg._tutoring.snapshot?.reactThoughts ?? []).map((t) => ({
+      label: `ReAct 第 ${t.iteration} 轮`,
+      icon: 'thought',
+      done: true,
+      phase: 'DECISION' as const,
+      detail: `Action: ${t.action}`,
+      thought: t.thought,
+    }))
+  }
+  return tutoringThoughtSteps.value
+})
+
+const tutoringVisibleStatus = computed(() => {
+  const msg = tutoringActiveMessage.value
+  if (msg?.role === 'assistant' && msg._tutoring?.completed) return 'done'
+  return chat.tutoringStore.status
+})
+
+const tutoringActiveMessage = computed(() => {
+  const session = chat.activeSession.value
+  if (!session) return null
+  if (chat.activeTutoringMsgIdx.value >= 0) {
+    return session.messages[chat.activeTutoringMsgIdx.value] ?? null
+  }
+  return [...session.messages].reverse().find(m => m.role === 'assistant' && m._tutoring?.completed) ?? null
+})
+
 function handleClarifySubmit(response: { skipped: boolean; selectedOptionId?: string; freeInput?: string }) {
   chat.sendClarificationResponse(response)
   scrollToBottom()
@@ -408,21 +541,26 @@ watch([() => chat.activeSession.value?.messages.length, chat.showWelcomePage], (
 // Tutoring: scroll to bottom when content updates
 watch(
   () => chat.tutoringStore.sectionList.map(s => s.content.length).reduce((a, b) => a + b, 0),
-  () => { if (chat.isStreaming.value) scrollToBottom() }
+  () => { if (chat.isStreaming.value || chat.isTutoringActive.value) scrollToBottom() }
 )
 watch(
   () => chat.tutoringStore.status,
   () => { nextTick(() => scrollToBottom()) }
 )
+// 消息数量变化时滚动（用户消息 push / AI 占位 push）
+watch(
+  () => chat.activeSession.value?.messages.length ?? 0,
+  () => { nextTick(() => scrollToBottom()) }
+)
 </script>
 
 <template>
-  <div style="display: flex; height: 100%; background-color: var(--lt-bg-page);">
+  <div style="display: flex; height: 100%;">
     <!-- ===== 会话列表侧栏 ===== -->
     <div class="session-sidebar-wrapper flex-shrink-0 relative" :style="{ width: isSessionListCollapsed ? '0px' : '260px', transition: 'width 0.25s ease', overflow: 'hidden' }">
       <div class="session-sidebar flex flex-col h-full" style="width: 260px; min-width: 260px; background-color: var(--lt-bg-card); border-right: 1px solid var(--lt-border);">
         <div class="px-3 pt-3 pb-2 flex items-center justify-between">
-          <el-button size="default" class="flex-1" style="border-radius: 10px; border: 1px dashed var(--lt-brand-lighter); color: var(--lt-brand); background-color: rgba(43, 111, 255, 0.04); font-weight: 500;" @click="chat.createSession">
+          <el-button size="default" class="flex-1" style="border-radius: 10px; border: 1px dashed var(--lt-brand-lighter); color: var(--lt-brand); background-color: rgba(43, 111, 255, 0.04); font-weight: 500;" @click="inputMessage = ''; chat.createSession()">
             <el-icon class="mr-1"><Plus /></el-icon>新建会话
           </el-button>
           <button class="flex-shrink-0 ml-2 p-1 rounded-md transition-all cursor-pointer" style="color: var(--lt-text-auxiliary); border: none; background: transparent;" @click="isSessionListCollapsed = true">
@@ -441,7 +579,9 @@ watch(
             <div class="flex items-start justify-between">
               <div class="min-w-0 flex-1">
                 <div class="text-sm font-medium truncate flex items-center gap-1" :style="{ color: sess.id === chat.activeSessionId.value ? 'var(--lt-text-primary)' : 'var(--lt-text-secondary)' }">
-                  <span v-if="sess.type === 'tutoring'" class="flex-shrink-0">📖</span>
+                  <span v-if="sess.type === 'lecture'" class="flex-shrink-0">📖</span>
+                  <span v-else-if="sess.type === 'resource'" class="flex-shrink-0">📝</span>
+                  <span v-else-if="sess.type === 'plan'" class="flex-shrink-0">🗺</span>
                   <span v-else class="flex-shrink-0">💬</span>
                   {{ sess.title }}
                 </div>
@@ -475,7 +615,7 @@ watch(
               v-for="m in modes" :key="m.value"
               class="mode-btn"
               :class="{ 'is-active': chat.chatMode.value === m.value }"
-              :disabled="chat.isStreaming.value"
+              :disabled="chat.isStreaming.value || chat.isTutoringActive.value"
               @click="chat.chatMode.value = m.value"
             >
               {{ m.label }}
@@ -534,34 +674,41 @@ watch(
         <div v-else class="px-5 py-4">
           <div
             v-for="(msg, idx) in chat.activeSession.value?.messages ?? []"
-            :key="idx"
+            :key="msg.messageId || idx"
             class="flex"
             :class="msg.role === 'user' ? 'justify-end' : 'justify-center'"
             :style="{ marginBottom: idx === (chat.activeSession.value?.messages.length ?? 1) - 1 ? '0' : (msg.role === 'user' ? '24px' : '40px') }"
           >
             <!-- AI 消息 -->
             <div v-if="msg.role === 'assistant'" class="ai-response-block" style="max-width: 860px; width: 100%;">
+              <!-- 辅导模式标签 -->
+              <div v-if="msg.mode && msg.mode !== 'chat'" class="mode-tag" :class="`mode-tag--${msg.mode}`">
+                {{ modeLabel(msg.mode) }}
+              </div>
               <ThoughtChainTimeline
-                v-if="msg.thinking"
+                v-if="msg.thinking && !(msg._tutoring?.completed || (idx === chat.activeTutoringMsgIdx.value && chat.tutoringStore.status !== 'idle'))"
                 :steps="msg.thinking.steps"
                 :is-streaming="msg.isStreaming"
                 :expanded="msg.thinking.expanded || false"
                 @update:expanded="msg.thinking.expanded = $event"
                 class="mb-3"
               />
-              <div v-if="!(msg as any)._generationCard && !(msg as any)._videoRecord && !(idx === chat.activeTutoringMsgIdx.value && chat.tutoringStore.status !== 'idle')" class="assistant-message-body">
+              <div v-if="!(msg as any)._generationCard && !(msg as any)._videoRecord && !(msg as any)._directAnswer && !(msg as any)._smart && !(idx === chat.activeTutoringMsgIdx.value && chat.tutoringStore.status !== 'idle') && !(msg.role === 'assistant' && msg._tutoring?.completed)" class="assistant-message-body">
                 <MarkdownViewer v-if="!msg.isStreaming" :content="msg.text" :showToc="false" />
                 <pre v-else class="streaming-text whitespace-pre-wrap text-sm leading-relaxed" style="color: var(--lt-text-primary); font-family: inherit; margin: 0;">{{ msg.text }}</pre>
                 <span v-if="msg.isStreaming && msg.text" class="streaming-cursor" />
               </div>
 
-              <!-- 图文辅导内联渲染 -->
-              <div v-if="idx === chat.activeTutoringMsgIdx.value && chat.tutoringStore.status !== 'idle'" class="tutoring-inline">
-                <!-- 规划中 -->
-                <div v-if="chat.tutoringStore.status === 'planning'" class="text-center py-8">
-                  <div style="width: 32px; height: 32px; border: 3px solid var(--lt-border); border-top-color: var(--lt-brand); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px;"></div>
-                  <p style="font-size: 14px; color: var(--lt-text-secondary);">正在分析问题...</p>
-                </div>
+              <!-- ═══ 图文辅导内联渲染 ═══ -->
+              <div v-if="(idx === chat.activeTutoringMsgIdx.value && chat.tutoringStore.status !== 'idle') || msg._tutoring?.completed" class="tutoring-inline">
+                <!-- ReAct 思考过程（可折叠） -->
+                <ThoughtChainTimeline
+                  :steps="tutoringVisibleThoughtSteps"
+                  :is-streaming="tutoringVisibleStatus === 'planning'"
+                  :expanded="msg._tutoring?.snapshot?.expanded ?? false"
+                  @update:expanded="msg._tutoring!.snapshot!.expanded = $event"
+                  class="mb-3"
+                />
 
                 <!-- 澄清卡片 -->
                 <ClarificationCard
@@ -573,16 +720,30 @@ watch(
                 />
 
                 <!-- 分析标签栏 -->
-                <AnalysisBar v-if="chat.tutoringStore.analysis && ['preparing','generating','done'].includes(chat.tutoringStore.status)" class="mb-4" />
+                <AnalysisBar v-if="tutoringVisibleAnalysis && ['preparing','generating','done','guided'].includes(tutoringVisibleStatus)" :analysis="tutoringVisibleAnalysis" class="mb-4" />
 
                 <!-- 准备中 -->
                 <div v-if="chat.tutoringStore.status === 'preparing'" class="text-center py-4">
                   <p style="font-size: 13px; color: var(--lt-text-auxiliary);">正在准备资料...</p>
                 </div>
 
+                <!-- 引导模式对话（活跃中：从 store 渲染，仅当前会话匹配时显示） -->
+                <GuidedDialogue
+                  v-if="chat.isTutoringActive.value && (chat.tutoringStore.status === 'guided' || chat.tutoringStore.guidedSteps.length > 0)"
+                  :inline-submit="chat.submitGuidedAnswerInline"
+                />
+
+                <!-- 引导模式对话（已完成：从快照渲染） -->
+                <GuidedDialogue
+                  v-else-if="msg._tutoring?.completed && msg._tutoring?.subMode === 'guided' && msg._tutoring?.snapshot?.guidedSteps"
+                  :snapshot="msg._tutoring.snapshot"
+                />
+
                 <!-- 解答内容（SectionCards） -->
                 <AnswerContainer
-                  v-if="chat.tutoringStore.sectionList.length > 0"
+                  v-if="(chat.tutoringStore.sectionList.length > 0 || tutoringVisibleSections)"
+                  :sections="tutoringVisibleSections || undefined"
+                  :read-only="!!tutoringVisibleSections"
                   @action="handleSectionAction"
                 />
 
@@ -593,6 +754,52 @@ watch(
                   <el-button v-if="chat.tutoringStore.error?.retryable" type="primary" size="small" @click="handleTutoringRetry" style="margin-top: 12px;">重试</el-button>
                 </div>
               </div>
+
+              <!-- ═══ DirectAnswer 内联渲染 ═══ -->
+              <div v-if="(idx === chat.activeDirectAnswerMsgIdx.value && chat.directAnswerStore.status !== 'idle') || msg._directAnswer?.completed" class="da-inline-wrap">
+                <DirectAnswerInline
+                  :store="chat.directAnswerStore"
+                  :is-completed="!!msg._directAnswer?.completed"
+                  :snapshot="msg._directAnswer?.snapshot ?? null"
+                />
+              </div>
+
+              <!-- ═══ Smart v2 智能模式内联渲染 ═══ -->
+              <div v-if="msg._smart && (msg._smart.active || msg._smart.completed)" class="smart-inline-wrap">
+                <!-- 思考链（可折叠） -->
+                <ThoughtChainTimeline
+                  v-if="msg._smart.thinkingSteps.length > 0"
+                  :steps="msg._smart.thinkingSteps"
+                  :is-streaming="msg.isStreaming"
+                  :expanded="msg._smart.thinkingExpanded || false"
+                  @update:expanded="msg._smart!.thinkingExpanded = $event"
+                  class="mb-3"
+                />
+                <!-- 内容块序列 -- 文字和可视化自然交替 -->
+                <template v-for="(block, bi) in msg._smart.blocks" :key="bi">
+                  <div v-if="block.type === 'text'" class="smart-text-block">
+                    <MarkdownViewer :content="block.content" :showToc="false" />
+                  </div>
+                  <div v-else-if="block.type === 'visual'" class="smart-visual-block">
+                    <SmartVisualRenderer
+                      :render-type="block.renderType"
+                      :code="block.code"
+                      :description="block.description"
+                      :status="block.status"
+                    />
+                  </div>
+                </template>
+                <!-- 流式中的文本 -->
+                <div v-if="msg.isStreaming && msg.text" class="smart-text-block">
+                  <pre class="streaming-text whitespace-pre-wrap text-sm leading-relaxed" style="color: var(--lt-text-primary); font-family: inherit; margin: 0;">{{ msg.text }}</pre>
+                  <span class="streaming-cursor" />
+                </div>
+                <!-- 等待中光标 -->
+                <div v-if="msg.isStreaming && !msg.text && msg._smart.blocks.length === 0" class="smart-loading">
+                  <span class="streaming-cursor" />
+                </div>
+              </div>
+
               <template v-if="(msg as any)._generationCard">
                 <div class="assistant-message-body">
                   <p style="color: var(--lt-text-primary); margin: 0;">{{ msg.text }}</p>
@@ -604,7 +811,7 @@ watch(
               </template>
 
               <!-- 方案确认卡片 — 资源类型 -->
-              <div v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.accepted && !msg._planOffer.dismissed" class="generation-offer-card">
+              <div v-if="msg._planOffer && msg._planOffer.type === 'resource' && !msg._planOffer.dismissed" class="generation-offer-card" :class="{ 'is-accepted': msg._planOffer.accepted }">
                 <div class="offer-header">
                   <div class="offer-header-icon">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -639,7 +846,7 @@ watch(
                       </div>
                       <div class="offer-plan-content">
                         <div class="offer-plan-type">
-                          <span class="font-medium">{{ {doc: '讲解文档', quiz: '练习题', mindmap: '思维导图', code: '代码实操', reading: '拓展阅读', video: '讲解视频'}[item.type] || item.type }}</span>
+                          <span class="font-medium">{{ {doc: '讲解文档', quiz: '练习题', mindmap: '思维导图', code: '代码实操', reading: '拓展阅读', video: '讲解视频', html: '交互文档'}[item.type] || item.type }}</span>
                           <span class="offer-plan-type-count">×1</span>
                         </div>
                         <div class="offer-plan-focus">{{ item.focus }}</div>
@@ -647,11 +854,17 @@ watch(
                     </div>
                   </div>
                 </div>
-                <div class="offer-actions">
+                <div v-if="!msg._planOffer.accepted" class="offer-actions">
                   <button class="offer-btn-primary" :disabled="chat.isGenerating.value" @click="handleAcceptGenerationOffer(msg)">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>确认启动
                   </button>
                   <button class="offer-btn-ghost" @click="chat.dismissGenerationOffer()">继续聊天</button>
+                </div>
+                <div v-else class="offer-actions offer-actions-done">
+                  <span class="offer-done-badge">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    已启动生成
+                  </span>
                 </div>
               </div>
 
@@ -685,10 +898,10 @@ watch(
                 <button class="ai-action-btn" title="重新生成" :disabled="chat.isStreaming.value" @click="regenerateMessage(msg, idx)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                 </button>
-                <button class="ai-action-btn" :class="{ 'is-liked': msg._feedback === 'liked' }" title="喜欢" @click="toggleLike(msg)">
+                <button class="ai-action-btn" :class="{ 'is-liked': msg.feedback === 'liked' || msg._feedback === 'liked' }" title="喜欢" @click="toggleLike(msg)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
                 </button>
-                <button class="ai-action-btn" :class="{ 'is-disliked': msg._feedback === 'disliked' }" title="不喜欢" @click="toggleDislike(msg)">
+                <button class="ai-action-btn" :class="{ 'is-disliked': msg.feedback === 'disliked' || msg._feedback === 'disliked' }" title="不喜欢" @click="toggleDislike(msg)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zM17 2h3a2 2 0 0 0 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
                 </button>
                 <button class="ai-action-btn" title="分享" @click="shareMessage(msg)">
@@ -698,9 +911,9 @@ watch(
                   class="ai-action-btn"
                   :class="{
                     'is-playing': audioState.playingMsgIdx === idx,
-                    'is-loading': audioState.loading && audioState.playingMsgIdx === -1
+                    'is-loading': audioState.loading && audioState.playingMsgIdx === idx
                   }"
-                  :disabled="audioState.loading"
+                  :disabled="audioState.loading && audioState.playingMsgIdx === idx"
                   title="朗读"
                   @click="toggleAudio(msg, idx)"
                 >
@@ -723,7 +936,20 @@ watch(
             </div>
             <!-- 用户消息 -->
             <div v-else :id="'msg-' + idx" class="user-message-block max-w-[72%] px-4 py-3 rounded-xl text-sm leading-relaxed" style="background-color: var(--lt-brand); border-radius: 12px; color: #FFFFFF;">
-              {{ msg.text }}
+              <div>{{ msg.text }}</div>
+              <div v-if="msg._files && msg._files.length > 0" class="user-files-row">
+                <div v-for="(f, fi) in msg._files" :key="fi" class="user-file-chip" :class="{ 'is-image': f.isImage }">
+                  <span v-if="f.isImage" class="ufc-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  </span>
+                  <span v-else class="ufc-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </span>
+                  <span class="ufc-name">{{ f.fileName.length > 25 ? f.fileName.slice(0, 23) + '…' : f.fileName }}</span>
+                  <span v-if="!f.isImage && getFileExt(f.fileName)" class="ufc-ext">{{ getFileExt(f.fileName) }}</span>
+                  <span v-if="f.fileSize" class="ufc-size">{{ formatFileSize(f.fileSize) }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -731,40 +957,67 @@ watch(
 
       <!-- 输入区 -->
       <div class="px-4 py-3 bg-white border-t" style="grid-row: 3; border-color: var(--lt-border);">
-        <div class="flex gap-3">
-          <!-- 讲解模式：视频讲解按钮 -->
-          <Transition name="video-btn">
+        <!-- 辅导模式：集成式输入（模式选择 + 视频 + textarea） -->
+        <TutoringInput
+          v-if="chat.chatMode.value === 'lecture'"
+          :disabled="chat.isStreaming.value || chat.isTutoringActive.value || chat.isGenerating.value"
+          :placeholder="'输入你的问题，获取 AI 辅导解答...'"
+          @send="handleTutoringInputSend"
+        />
+        <!-- 其他模式：textarea 支持 shift+enter 换行 -->
+        <div v-else class="flex gap-3 items-end">
+          <div class="flex-1 message-textarea-wrap">
+            <div v-if="chat.pendingFiles.value.length > 0" class="file-chips-row">
+              <div v-for="(f, fi) in chat.pendingFiles.value" :key="fi" class="file-chip" :class="{ 'is-image': f.isImage }">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span class="file-chip-name">{{ f.fileName.length > 20 ? f.fileName.slice(0, 18) + '…' : f.fileName }}</span>
+                <span v-if="!f.isImage && getFileExt(f.fileName)" class="file-chip-ext">{{ getFileExt(f.fileName) }}</span>
+                <span v-if="f.fileSize" class="file-chip-size">{{ formatFileSize(f.fileSize) }}</span>
+                <button class="file-chip-remove" @click="chat.removePendingFile(f.fileUrl)">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            <textarea
+              ref="messageTextareaRef"
+              v-model="inputMessage"
+              class="message-textarea"
+              :placeholder="chat.isSmartActive.value ? '继续对话，回答 AI 老师的问题...'
+                : chat.chatMode.value === 'resource' ? '描述你想生成的资料内容...'
+                : chat.chatMode.value === 'plan' ? '聊聊你的学习目标和基础...'
+                : '聊聊你的学习情况，我会帮你定制学习方案...'"
+              :disabled="chat.isStreaming.value || chat.isTutoringActive.value || chat.isGenerating.value"
+              rows="1"
+              @input="autoResizeMessageTextarea"
+              @keydown="handleMessageKeydown"
+            ></textarea>
+          </div>
+          <div class="flex items-end gap-2">
             <button
-              v-if="chat.chatMode.value === 'lecture'"
-              class="video-lecture-btn"
-              :class="{ 
-                'is-active': isVideoLectureActive,
-                'is-loading': videoStore.phase === 'loading' || videoStore.phase === 'darkening' 
-              }"
-              :disabled="chat.isStreaming.value || videoStore.phase !== 'idle'"
-              @click="handleVideoLectureClick"
-              :title="isVideoLectureActive ? '关闭视频讲解' : '开启视频讲解'"
+              class="upload-btn"
+              :disabled="chat.isStreaming.value || chat.isTutoringActive.value || isUploading"
+              :title="isUploading ? '上传中...' : '上传文件'"
+              @click="triggerFilePicker"
             >
-              <div class="btn-shine"></div>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" class="btn-icon">
-                <path d="M8 5.14v14l11-7-11-7z"/>
-              </svg>
+              <div class="ds-button__icon ds-button__icon--last-child" v-if="!isUploading">
+                <div class="ds-icon" style="font-size: inherit;">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5.5498 9.75V5H6.9502V9.75C6.9502 10.3299 7.4201 10.7998 8 10.7998C8.5799 10.7998 9.0498 10.3299 9.0498 9.75V4.5C9.0498 2.9536 7.7964 1.7002 6.25 1.7002C4.7036 1.7002 3.4502 2.9536 3.4502 4.5V9.75C3.4502 12.2629 5.4871 14.2998 8 14.2998C10.5129 14.2998 12.5498 12.2629 12.5498 9.75V4H13.9502V9.75C13.9502 13.0361 11.2861 15.7002 8 15.7002C4.71391 15.7002 2.0498 13.0361 2.0498 9.75V4.5C2.04981 2.1804 3.9304 0.299806 6.25 0.299805C8.5696 0.299805 10.4502 2.1804 10.4502 4.5V9.75C10.4502 11.1031 9.3531 12.2002 8 12.2002C6.6469 12.2002 5.5498 11.1031 5.5498 9.75Z" fill="currentColor"></path>
+                  </svg>
+                </div>
+              </div>
+              <span v-else class="upload-spinner"></span>
             </button>
-          </Transition>
-          <el-input
-            v-model="inputMessage"
-            :placeholder="chat.chatMode.value === 'resource' ? '描述你想生成的资料内容...'
-              : chat.chatMode.value === 'plan' ? '聊聊你的学习目标和基础...'
-              : chat.chatMode.value === 'lecture' ? '输入你的问题，获取 AI 辅导解答...'
-              : '聊聊你的学习情况，我会帮你定制学习方案...'"
-            :disabled="chat.isStreaming.value || chat.isGenerating.value"
-            @keyup.enter="handleSendMessage"
-            size="large"
-            class="flex-1"
-          >
-            <template #prefix><el-icon><ChatLineRound /></el-icon></template>
-          </el-input>
-          <el-button type="primary" size="large" :disabled="chat.isStreaming.value || !inputMessage.trim()" @click="handleSendMessage">发送</el-button>
+            <input
+              ref="fileInputRef"
+              type="file"
+              multiple
+              :accept="ACCEPTED_TYPES"
+              style="display:none"
+              @change="handleFileSelect"
+            />
+            <el-button type="primary" size="large" :disabled="chat.isStreaming.value || chat.isTutoringActive.value || (!inputMessage.trim() && chat.pendingFiles.value.length === 0)" @click="handleSendMessage">发送</el-button>
+          </div>
         </div>
       </div>
 
@@ -845,6 +1098,30 @@ watch(
   width: 100%;
 }
 
+/* Smart v2 智能模式内联渲染 */
+.smart-inline-wrap {
+  width: 100%;
+}
+.smart-text-block {
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--lt-text-primary, #1f2937);
+  margin: 8px 0;
+}
+.smart-text-block :deep(.markdown-content) {
+  font-size: 15px;
+  line-height: 1.75;
+}
+.smart-text-block :deep(.markdown-content p) {
+  margin: 10px 0;
+}
+.smart-visual-block {
+  margin: 12px 0;
+}
+.smart-loading {
+  padding: 8px 0;
+}
+
 .assistant-message-body :deep(.markdown-viewer) { display: block; }
 .assistant-message-body :deep(.markdown-content) { font-size: 15px; line-height: 1.75; }
 .assistant-message-body :deep(.markdown-content p) { margin: 10px 0; }
@@ -852,6 +1129,26 @@ watch(
 .assistant-message-body :deep(.markdown-content h2),
 .assistant-message-body :deep(.markdown-content h3) { margin-top: 20px; margin-bottom: 10px; }
 .assistant-message-body :deep(.markdown-content pre) { margin: 12px 0; }
+
+/* Mode tag */
+.mode-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px; border-radius: 12px;
+  font-size: 11px; font-weight: 500;
+  margin-bottom: 8px;
+}
+.mode-tag--lecture {
+  background: rgba(64, 158, 255, 0.12); color: var(--lt-blue);
+}
+.mode-tag--smart {
+  background: rgba(139, 92, 246, 0.12); color: #8b5cf6;
+}
+.mode-tag--resource {
+  background: rgba(103, 194, 58, 0.12); color: var(--lt-green);
+}
+.mode-tag--plan {
+  background: rgba(230, 162, 60, 0.12); color: var(--lt-orange);
+}
 
 .ai-action-bar {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
@@ -1260,6 +1557,24 @@ watch(
   border-color: var(--lt-border-dark);
 }
 
+/* 已确认状态：卡片降级展示，保留方案内容供对照 */
+.generation-offer-card.is-accepted {
+  opacity: 0.72;
+  border-left-color: var(--lt-success);
+  box-shadow: none;
+}
+.offer-actions-done {
+  justify-content: flex-start;
+}
+.offer-done-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lt-success);
+}
+
 /* Video Lecture Button - Premium Design */
 .video-lecture-btn {
   display: inline-flex;
@@ -1391,5 +1706,144 @@ watch(
   transform: translateX(-8px) scale(0.85);
   filter: blur(2px);
 }
-</style>
 
+/* Message textarea */
+.message-textarea-wrap {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--el-input-border-color, var(--lt-border));
+  border-radius: var(--el-input-border-radius, 8px);
+  background: var(--el-input-bg-color, var(--lt-bg-card));
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.message-textarea-wrap:focus-within {
+  border-color: var(--el-input-focus-border-color, var(--lt-brand));
+  box-shadow: 0 0 0 1px var(--el-input-focus-border-color, var(--lt-brand)) inset;
+}
+.message-textarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--lt-text-primary);
+  resize: none;
+  line-height: 1.5;
+  padding: 10px 12px;
+  min-height: 22px;
+  max-height: 168px;
+}
+.message-textarea::placeholder {
+  color: var(--lt-text-placeholder);
+}
+.message-textarea:disabled {
+  cursor: not-allowed;
+}
+
+/* File chips inside textarea container (thin inline row) */
+.file-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 10px 0;
+}
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--lt-bg-page);
+  border: 1px solid var(--lt-border-light);
+  color: var(--lt-text-secondary);
+}
+.file-chip.is-image {
+  background: rgba(43, 111, 255, 0.05);
+  border-color: var(--lt-brand-light-7);
+}
+.file-chip svg {
+  flex-shrink: 0;
+  color: var(--lt-text-auxiliary);
+}
+.file-chip.is-image svg {
+  color: var(--lt-brand);
+}
+.file-chip-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-chip-ext { flex-shrink: 0; padding: 0 4px; border-radius: 3px; background: var(--lt-brand-lightest); color: var(--lt-brand); font-size: 10px; font-weight: 600; letter-spacing: 0.3px; }
+.file-chip-size { flex-shrink: 0; color: var(--lt-text-placeholder); font-size: 10px; }
+.file-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  background: transparent;
+  color: var(--lt-text-placeholder);
+  cursor: pointer;
+  border-radius: 3px;
+  flex-shrink: 0;
+  padding: 0;
+}
+.file-chip-remove:hover {
+  color: var(--lt-danger);
+  background: rgba(255,59,48,0.1);
+}
+
+/* ===== File Upload ===== */
+.upload-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 8px;
+  border: 1px solid var(--lt-border); background: transparent;
+  color: var(--lt-text-auxiliary); cursor: pointer;
+  transition: all var(--lt-transition-base); flex-shrink: 0;
+}
+.upload-btn:hover {
+  border-color: var(--lt-brand-lighter);
+  color: var(--lt-brand);
+  background-color: var(--lt-brand-lightest);
+}
+.upload-btn:disabled {
+  opacity: 0.4; cursor: not-allowed;
+}
+.upload-spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid var(--lt-border);
+  border-top-color: var(--lt-brand);
+  border-radius: 50%;
+  animation: file-upload-spin 0.6s linear infinite;
+}
+@keyframes file-upload-spin {
+  to { transform: rotate(360deg); }
+}
+
+
+
+/* User message file attachments */
+.user-files-row {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+  padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.2);
+}
+.user-file-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 6px; border-radius: 4px;
+  font-size: 11px; line-height: 1.3;
+  background: rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.9); max-width: 160px;
+}
+.user-file-chip.is-image {
+  background: rgba(255,255,255,0.2);
+}
+.ufc-icon { display: flex; flex-shrink: 0; opacity: 0.8; }
+.ufc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ufc-ext { flex-shrink: 0; padding: 0 4px; border-radius: 3px; background: rgba(255,255,255,0.22); color: rgba(255,255,255,0.95); font-size: 10px; font-weight: 600; letter-spacing: 0.3px; }
+.ufc-size { flex-shrink: 0; color: rgba(255,255,255,0.7); font-size: 10px; }
+</style>

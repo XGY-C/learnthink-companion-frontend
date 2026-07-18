@@ -5,8 +5,12 @@ import { useUserStore } from '@/stores/user'
 import { useProfileStore } from '@/stores/profile'
 import { usePushStore } from '@/stores/push'
 import type { CourseInfo } from '@/types'
-import { Search, Fold, Expand, DataBoard, User, MagicStick, Guide, DataLine, DataAnalysis, ArrowDown, SwitchButton, Bell } from '@element-plus/icons-vue'
+import { Search, Fold, Expand, DataBoard, User, Guide, DataAnalysis, ArrowDown, SwitchButton, Bell, EditPen } from '@element-plus/icons-vue'
+import ForumIcon from '@/components/icons/ForumIcon.vue'
+import LibraryIcon from '@/components/icons/LibraryIcon.vue'
+import LayersIcon from '@/components/icons/LayersIcon.vue'
 import { useAuth } from '@/composables/useAuth'
+import { usePushSSE } from '@/composables/usePushSSE'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,6 +18,7 @@ const userStore = useUserStore()
 const profileStore = useProfileStore()
 const pushStore = usePushStore()
 const { logout } = useAuth()
+const { connect: connectPushSSE } = usePushSSE()
 const activeMenu = computed(() => route.path)
 const isCollapsed = ref(false)
 const hideSidebar = computed(() => route.meta.hideSidebar === true)
@@ -22,11 +27,33 @@ const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
 }
 
-function handleCourseCommand(cmd: { type: string; course?: CourseInfo }) {
+async function handleCourseCommand(cmd: { type: string; course?: CourseInfo }) {
   if (cmd.type === 'switch' && cmd.course) {
     profileStore.switchCourse(cmd.course)
   } else if (cmd.type === 'add') {
     router.push('/courses')
+  }
+}
+
+/** 处理通知下拉面板中的通知点击 */
+async function handleNotificationClick(notif: { id: string; refId?: string; refType?: string; isRead: boolean }) {
+  if (!notif.isRead) {
+    await pushStore.markAsRead(notif.id)
+  }
+  if (notif.refType === 'daily') {
+    router.push({ name: 'dashboard', query: { focus: 'recommendations' } })
+  } else if (notif.refId) {
+    if (notif.refType === 'task') {
+      router.push(`/studio/${notif.refId}`)
+    } else {
+      router.push(`/library?packId=${notif.refId}`)
+    }
+  }
+}
+
+function handleDropdownCommand(cmd: unknown) {
+  if (cmd === 'all') {
+    router.push('/notifications')
   }
 }
 
@@ -45,11 +72,13 @@ onMounted(() => {
   if (profileStore.activeCourseId) {
     pushStore.fetchNotifications(profileStore.activeCourseId)
   }
+  // 连接 SSE 实时推送
+  connectPushSSE()
 })
 </script>
 
 <template>
-  <div class="flex h-screen w-full overflow-hidden" style="background-color: var(--lt-bg-page);">
+  <div class="flex h-screen w-full overflow-hidden">
     <!--
       ============================================
       左侧导航（v2.2 浅色版）
@@ -99,7 +128,7 @@ onMounted(() => {
             <template #title>AI 学习助手</template>
           </el-menu-item>
           <el-menu-item index="/studio">
-            <el-icon><MagicStick /></el-icon>
+            <el-icon><LayersIcon /></el-icon>
             <template #title>资源工作室</template>
           </el-menu-item>
           <el-menu-item index="/path">
@@ -107,13 +136,22 @@ onMounted(() => {
             <template #title>学习路径</template>
           </el-menu-item>
           <el-menu-item index="/library">
-            <el-icon><DataLine /></el-icon>
+            <el-icon><LibraryIcon /></el-icon>
             <template #title>资源库</template>
+          </el-menu-item>
+          <el-menu-item index="/practice">
+            <el-icon><EditPen /></el-icon>
+            <template #title>练习中心</template>
+          </el-menu-item>
+          <el-menu-item index="/forum">
+            <el-icon><ForumIcon /></el-icon>
+            <template #title>学习论坛</template>
           </el-menu-item>
           <el-menu-item index="/report">
             <el-icon><DataAnalysis /></el-icon>
             <template #title>学习报告</template>
           </el-menu-item>
+
           <el-menu-item index="/profile">
             <el-icon><User /></el-icon>
             <template #title>个人中心</template>
@@ -194,7 +232,8 @@ onMounted(() => {
                     <span v-if="c.id === profileStore.activeCourseId" class="ml-1 text-blue-500">✓</span>
                   </el-dropdown-item>
                   <el-dropdown-item divided :command="{ type: 'add' }">
-                    ＋ 添加课程
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--lt-ai)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; vertical-align: -2px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    管理课程
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -210,7 +249,11 @@ onMounted(() => {
               class="search-input"
             />
           </div>
-          <el-dropdown trigger="click" @command="(cmd: string) => { if (cmd === 'all') router.push('/notifications') }">
+          <el-dropdown
+            trigger="click"
+            @command="handleDropdownCommand"
+            :popper-options="{ modifiers: [{ name: 'preventOverflow', options: { padding: 8 } }] }"
+          >
             <el-button
               circle
               class="header-icon-btn !border-0 !bg-transparent hover:!bg-gray-100"
@@ -225,7 +268,7 @@ onMounted(() => {
               </span>
             </el-button>
             <template #dropdown>
-              <el-dropdown-menu class="w-80 max-h-96 overflow-y-auto">
+              <el-dropdown-menu class="w-80">
                 <div class="px-3 py-2 border-b" style="border-color: var(--lt-border);">
                   <div class="flex items-center justify-between">
                     <span class="text-sm font-semibold" style="color: var(--lt-text-primary);">通知中心</span>
@@ -241,22 +284,24 @@ onMounted(() => {
                 <div v-if="pushStore.notifications.length === 0" class="px-3 py-6 text-center text-sm" style="color: var(--lt-text-auxiliary);">
                   暂无推送通知
                 </div>
-                <el-dropdown-item
-                  v-for="notif in pushStore.notifications.slice(0, 5)"
-                  :key="notif.id"
-                  :command="notif.refId"
-                  class="!py-2 !px-3"
-                  @click="router.push(notif.refId ? `/library?packId=${notif.refId}` : '/library')"
-                >
-                  <div class="flex flex-col gap-0.5">
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-xs" style="color: var(--lt-warning);">{{ notif.type.startsWith('push_') ? '🎯' : '📝' }}</span>
-                      <span class="text-xs font-medium" style="color: var(--lt-text-primary);">{{ notif.title }}</span>
-                      <span v-if="!notif.isRead" class="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+                <div v-else class="notif-scroll max-h-72 overflow-y-auto">
+                  <el-dropdown-item
+                    v-for="notif in pushStore.notifications"
+                    :key="notif.id"
+                    :command="notif.id"
+                    class="!py-2 !px-3"
+                    @click="handleNotificationClick(notif)"
+                  >
+                    <div class="flex flex-col gap-0.5">
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-xs" style="color: var(--lt-warning);">{{ notif.type.startsWith('push_') ? '🎯' : '📝' }}</span>
+                        <span class="text-xs font-medium" style="color: var(--lt-text-primary);">{{ notif.title }}</span>
+                        <span v-if="!notif.isRead" class="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+                      </div>
+                      <span class="text-xs truncate" style="color: var(--lt-text-auxiliary);">{{ notif.message }}</span>
                     </div>
-                    <span class="text-xs truncate" style="color: var(--lt-text-auxiliary);">{{ notif.message }}</span>
-                  </div>
-                </el-dropdown-item>
+                  </el-dropdown-item>
+                </div>
                 <el-dropdown-item command="all" divided class="text-center">
                   <span class="text-xs" style="color: var(--lt-brand);">查看全部通知</span>
                 </el-dropdown-item>
@@ -283,7 +328,7 @@ onMounted(() => {
       </header>
 
       <!-- 页面内容容器 -->
-      <main class="flex-1 overflow-hidden relative">
+      <main class="flex-1 overflow-y-auto relative">
         <!-- 路由匹配到的具体视图（如画像对话页/工作室页） -->
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in">
@@ -377,5 +422,32 @@ onMounted(() => {
 :deep(.header-icon-btn:hover) {
   color: var(--lt-brand) !important;
   background: var(--lt-brand-lightest) !important;
+}
+</style>
+
+<style>
+/* 通知下拉框滚动条: 默认隐藏, hover 时显示 */
+.notif-scroll {
+  scrollbar-width: none;
+}
+.notif-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.notif-scroll:hover {
+  scrollbar-width: thin;
+}
+.notif-scroll:hover::-webkit-scrollbar {
+  width: 5px;
+}
+.notif-scroll:hover::-webkit-scrollbar-track {
+  background: transparent;
+}
+.notif-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--lt-border);
+  border-radius: 3px;
+}
+.notif-scroll:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--lt-text-disabled);
 }
 </style>

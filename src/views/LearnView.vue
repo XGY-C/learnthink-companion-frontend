@@ -1,27 +1,42 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteUpdate, type RouteLocationNormalized } from 'vue-router'
 import { usePlanStore } from '@/stores/plan'
 import { useActivityStore } from '@/stores/activity'
-import type { Activity, ActivityResource, ActivitySubmitResponse } from '@/types'
+import { useProfileStore } from '@/stores/profile'
+import type { Activity, ActivityResource, ActivitySubmitResponse, QuestionRef } from '@/types'
 import MarkdownViewer from '@/components/MarkdownViewer.vue'
 import MindmapViewer from '@/components/MindmapViewer.vue'
 import CodeLearningViewer from '@/components/code/CodeLearningViewer.vue'
+import HtmlSandboxViewer from '@/components/HtmlSandboxViewer.vue'
 import ResourceNavigator from '@/components/ResourceNavigator.vue'
 import StepCompleteZone from '@/components/learn/StepCompleteZone.vue'
 import QuizFocusModal from '@/components/learn/QuizFocusModal.vue'
 import ActivityCelebration from '@/components/learn/ActivityCelebration.vue'
 import type { NavItem } from '@/components/ResourceNavigator.vue'
-import { ArrowLeft, Clock, List } from '@element-plus/icons-vue'
+import { ArrowLeft, Clock, List, EditPen } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { extractVideoUrl } from '@/utils/media'
+import { apiFetch } from '@/utils/api'
 import FloatingFab from '@/components/tutoring/FloatingFab.vue'
 import TutoringDrawer from '@/components/tutoring/TutoringDrawer.vue'
+import NoteSidebar from '@/components/notes/NoteSidebar.vue'
+import { useNoteStore } from '@/stores/note'
+import { useNotebookStore } from '@/stores/notebook'
+import { useLearningTracker } from '@/composables/useLearningTracker'
 
 const route = useRoute()
 const router = useRouter()
 const planStore = usePlanStore()
 const actStore = useActivityStore()
+const profileStore = useProfileStore()
+
+// 学习心跳追踪
+const { isAway: isLearningAway, resumeTracking } = useLearningTracker({
+  courseId: profileStore.activeCourseId,
+})
+const noteStore = useNoteStore()
+const notebookStore = useNotebookStore()
 
 const activityId = computed(() => route.params.activityId as string)
 const routeModuleId = computed(() => route.query.moduleId as string | undefined)
@@ -29,11 +44,13 @@ const routeModuleId = computed(() => route.query.moduleId as string | undefined)
 // ===== Tutoring entry =====
 const showTutoringDrawer = ref(false)
 const selectedText = ref('')
+const questionRef = ref<QuestionRef | null>(null)
 const showAskAiButton = ref(false)
+const showNoteButton = ref(false)
 const askAiPosition = ref({ x: 0, y: 0 })
+const noteContextSection = ref('')
 
 function onResourceMouseUp() {
-  // Only activate for doc/reading type resources
   const resType = currentResource.value?.planRef.resourceType
   if (resType !== 'doc' && resType !== 'reading') return
 
@@ -48,35 +65,96 @@ function onResourceMouseUp() {
       y: rect.top - 8,
     }
     showAskAiButton.value = true
+    showNoteButton.value = true
   } else {
     showAskAiButton.value = false
+    showNoteButton.value = false
   }
 }
 
 function handleAskAi() {
   showAskAiButton.value = false
+  showNoteButton.value = false
   showTutoringDrawer.value = true
-  // The drawer will pre-fill with selectedText if we pass it
+}
+
+function handleQuestionAskAi(_questionId: string, data: QuestionRef) {
+  questionRef.value = data
+  selectedText.value = ''
+  showTutoringDrawer.value = true
+}
+
+function handleDismissQuestionRef() {
+  questionRef.value = null
 }
 
 function handleFabClick() {
+  if (!showTutoringDrawer.value) {
+    selectedText.value = ''
+    questionRef.value = null
+  }
   showTutoringDrawer.value = !showTutoringDrawer.value
 }
 
-// Hide ask-AI button when clicking elsewhere
+function handleTutoringClose() {
+  showTutoringDrawer.value = false
+  selectedText.value = ''
+  questionRef.value = null
+}
+
+function handleAddNote() {
+  showNoteButton.value = false
+  showAskAiButton.value = false
+  noteContextSection.value = captureSectionTitle()
+  noteStore.openSidebar()
+}
+
+function captureSectionTitle(): string {
+  const container = document.querySelector('.learn-content')
+  if (!container) return ''
+
+  const containerRect = container.getBoundingClientRect()
+  const topThreshold = containerRect.top + 80
+
+  const headings = container.querySelectorAll('h1, h2, h3, h4')
+  if (headings.length === 0) return ''
+
+  let current = ''
+  for (const h of headings) {
+    const rect = h.getBoundingClientRect()
+    if (rect.top <= topThreshold + 20) {
+      current = h.textContent?.trim() || ''
+    } else {
+      break
+    }
+  }
+  return current
+}
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key !== 'n' && e.key !== 'N') return
+  const tag = e.target as HTMLElement
+  if (tag.tagName === 'INPUT' || tag.tagName === 'TEXTAREA' || tag.isContentEditable) return
+  e.preventDefault()
+  noteStore.toggleSidebar()
+}
+
 function onDocumentClick(e: MouseEvent) {
   const target = e.target as HTMLElement
-  if (!target.closest('.ask-ai-btn')) {
+  if (!target.closest('.selection-toolbar') && !target.closest('.ask-ai-btn')) {
     showAskAiButton.value = false
+    showNoteButton.value = false
   }
 }
 
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
+  document.addEventListener('keydown', onGlobalKeydown)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
+  document.removeEventListener('keydown', onGlobalKeydown)
 })
 
 // ===== Navigator toggle =====
@@ -306,7 +384,9 @@ let shortContentInterval: ReturnType<typeof setInterval> | null = null
 
 // ===== Timer =====
 const elapsedSeconds = ref(0)
+const liveResourceTime = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
+let autoSaveTimer: ReturnType<typeof setInterval> | null = null
 
 // ===== Video polling =====
 const videoPolling = ref(false)
@@ -372,6 +452,10 @@ const currentResource = computed(() => loadedResources.value[activeResIndex.valu
 
 const isLastResource = computed(() => activeResIndex.value >= loadedResources.value.length - 1)
 
+const noteSectionOrder = computed(() =>
+  tocHeadings.value.map(h => h.text)
+)
+
 const completedCount = computed(() => {
   let count = 0
   resourceStepState.value.forEach(state => { if (state === 'completed') count++ })
@@ -419,10 +503,10 @@ const remainingMin = computed(() => {
 // ===== Resource type helpers =====
 const TYPE_ICONS: Record<string, string> = {
   doc: '\uD83D\uDCC4', reading: '\uD83D\uDCD6', mindmap: '\uD83E\uDDE0',
-  video: '\uD83C\uDFAC', code: '\uD83D\uDCBB', quiz: '\uD83D\uDCDD',
+  video: '\uD83C\uDFAC', code: '\uD83D\uDCBB', quiz: '\uD83D\uDCDD', html: '\uD83C\uDF10',
 }
 const TYPE_LABELS: Record<string, string> = {
-  doc: '文档', reading: '阅读', mindmap: '思维导图', video: '视频', code: '代码', quiz: '测验',
+  doc: '文档', reading: '阅读', mindmap: '思维导图', video: '视频', code: '代码', quiz: '测验', html: '交互文档',
 }
 
 const RESOURCE_ACCENT_COLORS: Record<string, string> = {
@@ -432,6 +516,7 @@ const RESOURCE_ACCENT_COLORS: Record<string, string> = {
   video: '#FF3B30',
   code: '#5A5A72',
   quiz: '#FF8C42',
+  html: '#7C5CFC',
 }
 
 function typeIcon(type: string): string { return TYPE_ICONS[type] || '\uD83D\uDCC4' }
@@ -499,9 +584,19 @@ async function loadAllResources() {
           loadedResources.value[i].title = typeLabel(r.resourceType)
           continue
         }
-        const expectedIdx = (activity.value?.order || 1) - 1
-        const item = matches.find((m: any) => m.subtopic_index === expectedIdx) || matches[0]
-        console.log(`[ResourceLoad] activityId=${activity.value?.activityId} order=${activity.value?.order} type=${r.resourceType} packId=${r.resourcePackId} expectedIdx=${expectedIdx} matchedTitle="${item?.title}" subtopicIndex=${item?.subtopic_index} totalMatches=${matches.length}`)
+        // 用 activity 在 subPlan 列表中的实际位置匹配 subtopic_index，
+        // 因为 activity.order 由 LLM 生成可能不连续（如 3,4,5,6），
+        // 而 subtopic_index 是在 doPlanDriven 中按列表位置 0,1,2,3 赋值的
+        let actIdx = 0
+        const subPlan = Array.from(planStore.subPlans.values()).find(sp =>
+          sp.activities?.some(a => a.activityId === activity.value?.activityId)
+        )
+        if (subPlan?.activities) {
+          actIdx = subPlan.activities.findIndex(a => a.activityId === activity.value?.activityId)
+          if (actIdx < 0) actIdx = 0
+        }
+        const item = matches.find((m: any) => m.subtopic_index === actIdx) || matches[0]
+        console.log(`[ResourceLoad] activityId=${activity.value?.activityId} order=${activity.value?.order} actIdx=${actIdx} type=${r.resourceType} packId=${r.resourcePackId} matchedTitle="${item?.title}" subtopicIndex=${item?.subtopic_index} totalMatches=${matches.length}`)
         loadedResources.value[i].title = item.title || typeLabel(r.resourceType)
         loadedResources.value[i].qualityScore = item.qualityScore || item.metadata?.quality_score || 0
         loadedResources.value[i].sourcesCount = item.sourcesCount || item.sources?.length || 0
@@ -549,7 +644,7 @@ function extractQuestions(item: any): any[] {
 }
 
 // ===== Resource navigation =====
-function goToResource(idx: number) {
+async function goToResource(idx: number) {
   if (idx === activeResIndex.value) return
   if (shortContentTimer) { clearTimeout(shortContentTimer); shortContentTimer = null }
   if (shortContentInterval) { clearInterval(shortContentInterval); shortContentInterval = null }
@@ -558,6 +653,8 @@ function goToResource(idx: number) {
   transitionGuard.value = true
   transitionMode.value = idx > activeResIndex.value ? 'step-forward' : 'step-back'
   recordTimeSpent()
+  await syncResourceProgress()
+  ensureAutoSave()
   activeResIndex.value = idx
   contentScrollProgress.value = 0
   if (resourceStepState.value.get(idx) !== 'completed') {
@@ -574,10 +671,11 @@ function goToResource(idx: number) {
   }
 }
 
-function advanceToNext() {
+async function advanceToNext() {
   if (shortContentTimer) { clearTimeout(shortContentTimer); shortContentTimer = null }
   recordTimeSpent()
   resourceStepState.value.set(activeResIndex.value, 'completed')
+  await syncResourceProgress()
 
   let next = activeResIndex.value + 1
   while (next < loadedResources.value.length) {
@@ -588,8 +686,7 @@ function advanceToNext() {
   if (next >= loadedResources.value.length) {
     celebrationVisible.value = true
     clearState()
-    if (timer) clearInterval(timer)
-    timer = null
+    clearTimers()
     return
   }
 
@@ -612,9 +709,13 @@ function advanceToNext() {
 
 // ===== Completion detection =====
 function recordTimeSpent() {
-  const existing = resourceTimeSpent.value.get(activeResIndex.value) || 0
+  const idx = activeResIndex.value
+  if (currentResourceStartTime <= 0) return
+  const existing = resourceTimeSpent.value.get(idx) || 0
   const elapsed = Math.floor((Date.now() - currentResourceStartTime) / 1000)
-  resourceTimeSpent.value.set(activeResIndex.value, existing + elapsed)
+  if (elapsed <= 0) return
+  resourceTimeSpent.value.set(idx, existing + elapsed)
+  currentResourceStartTime = Date.now()
 }
 
 async function retryResource(idx: number) {
@@ -748,7 +849,26 @@ function startLearn() {
   actStore.learnStartTime = Date.now()
   timer = setInterval(() => {
     elapsedSeconds.value = Math.floor((Date.now() - actStore.learnStartTime) / 1000)
+    const base = resourceTimeSpent.value.get(activeResIndex.value) || 0
+    const session = currentResourceStartTime > 0 ? Math.floor((Date.now() - currentResourceStartTime) / 1000) : 0
+    liveResourceTime.value = base + session
   }, 1000)
+}
+
+function clearTimers() {
+  if (timer) { clearInterval(timer); timer = null }
+  if (autoSaveTimer) { clearInterval(autoSaveTimer); autoSaveTimer = null }
+}
+
+// 每 30 秒自动保存当前资源进度到后端
+// 在资源激活时通过 goToResource / advanceToNext 触发启动
+let autoSaveStarted = false
+function ensureAutoSave() {
+  if (autoSaveStarted) return
+  autoSaveStarted = true
+  autoSaveTimer = setInterval(() => {
+    syncResourceProgress()
+  }, 30000)
 }
 
 function formatTime(seconds: number): string {
@@ -833,17 +953,92 @@ function clearState() {
   try { localStorage.removeItem(STATE_KEY) } catch { /* ignore */ }
 }
 
-// ===== Lifecycle =====
-onMounted(async () => {
-  window.addEventListener('resize', onResize)
+// ===== Resource status persistence via API =====
+async function restoreResourceStatus(aid?: string, mid?: string) {
+  if (!activity.value) return false
+  const targetAid = aid || activityId.value
+  const targetMid = mid || routeModuleId.value
+  try {
+    const res = await apiFetch<any[]>(`/plan/activities/${targetAid}/resources/status?moduleId=${targetMid}`)
+    if (res.data?.length) {
+      let restored = false
+      for (const item of res.data) {
+        if (item.status) {
+          const idx = loadedResources.value.findIndex(r => r.planRef.resourceType === item.resource_type)
+          if (idx >= 0) {
+            if (item.status === 'completed') {
+              resourceStepState.value.set(idx, 'completed')
+            } else if (item.status === 'in_progress') {
+              resourceStepState.value.set(idx, 'active')
+            }
+            if (item.duration_seconds != null) {
+              resourceTimeSpent.value.set(idx, item.duration_seconds)
+              if (idx === activeResIndex.value) {
+                liveResourceTime.value = item.duration_seconds
+              }
+            }
+            restored = true
+          }
+        }
+      }
+      return restored
+    }
+  } catch { /* fallback to localStorage */ }
+  return false
+}
 
-  if (routeModuleId.value) {
-    const sp = planStore.subPlans.get(routeModuleId.value)
+async function syncResourceProgress() {
+  const idx = activeResIndex.value
+  const res = loadedResources.value[idx]
+  if (!res) return
+  const state = resourceStepState.value.get(idx)
+  if (!state || state === 'pending') return
+  recordTimeSpent()
+  const duration = resourceTimeSpent.value.get(idx) || 0
+  try {
+    await apiFetch(`/plan/activities/${activityId.value}/resources/status?moduleId=${routeModuleId.value}`, {
+      method: 'POST',
+      body: {
+        resource_type: res.planRef.resourceType,
+        status: state === 'completed' ? 'completed' : 'in_progress',
+        duration_seconds: duration,
+      },
+    })
+  } catch { /* silent fail, localStorage as fallback */ }
+}
+
+// ===== Activity loading (shared between mount and route change) =====
+async function loadActivity(to?: RouteLocationNormalized) {
+  clearTimers()
+  stopVideoPolling()
+  cleanupTocObserver()
+  activity.value = null
+  loadedResources.value = []
+  resourceStepState.value = new Map()
+  resourceTimeSpent.value = new Map()
+  activeResIndex.value = 0
+  liveResourceTime.value = 0
+  autoSaveStarted = false
+
+  const currentRoute = to || route
+  const aid = currentRoute.params.activityId as string
+  const mid = currentRoute.query.moduleId as string | undefined
+
+  // 确保 plan 数据已加载（刷新页面时 planStore 为空）
+  if (planStore.subPlans.size === 0) {
+    const courseId = profileStore.activeCourseId
+    if (courseId) {
+      await planStore.fetchPlan(courseId)
+    }
+  }
+
+  if (mid) {
+    const sp = planStore.subPlans.get(mid)
     if (sp) {
-      const a = sp.activities.find(act => act.activityId === activityId.value)
+      const a = sp.activities.find(act => act.activityId === aid)
       if (a) {
         activity.value = a
-        moduleTitle.value = planStore.moduleList.find(m => m.moduleId === routeModuleId.value)?.title || ''
+        moduleTitle.value = planStore.moduleList.find(m => m.moduleId === mid)?.title || ''
       }
     }
   }
@@ -851,7 +1046,7 @@ onMounted(async () => {
     for (const m of planStore.moduleList) {
       const sp = planStore.subPlans.get(m.moduleId)
       if (sp) {
-        const a = sp.activities.find(act => act.activityId === activityId.value)
+        const a = sp.activities.find(act => act.activityId === aid)
         if (a) {
           activity.value = a
           moduleTitle.value = m.title
@@ -870,7 +1065,9 @@ onMounted(async () => {
   actStore.learnStartTime = Date.now()
   await loadAllResources()
 
-  const restored = restoreState()
+  noteStore.resetNotes()
+
+  const restored = await restoreResourceStatus(aid, mid) || restoreState()
   if (!restored) {
     activeResIndex.value = 0
     for (let i = 0; i < loadedResources.value.length; i++) {
@@ -880,21 +1077,42 @@ onMounted(async () => {
 
   currentResourceStartTime = Date.now()
   startLearn()
+  ensureAutoSave()
+
   if (currentResource.value?.planRef.resourceType === 'video' && !currentResource.value?.videoUrl) {
     startVideoPolling()
   }
   nextTick(() => {
     checkShortContent()
     if (showToc.value) setupTocObserver()
+    notebookStore.ensureLoaded(profileStore.activeCourseId)
   })
+}
+
+// ===== Lifecycle =====
+onMounted(async () => {
+  window.addEventListener('resize', onResize)
+  await loadActivity()
+})
+
+// 同一组件内路由参数变化时重新加载（如 /learn/a1 → /learn/a2）
+// 此时 route 还是旧值，必须用 to 参数
+onBeforeRouteUpdate(async (to, from) => {
+  if (to.params.activityId !== from.params.activityId) {
+    await loadActivity(to)
+  }
 })
 
 onUnmounted(() => {
   saveState()
+  syncResourceProgress()
   stopVideoPolling()
   cleanupTocObserver()
-  if (timer) clearInterval(timer)
+  clearTimers()
   window.removeEventListener('resize', onResize)
+  noteStore.resetNotes()
+  noteStore.closeSidebar()
+  notebookStore.reset()
 })
 </script>
 
@@ -918,6 +1136,15 @@ onUnmounted(() => {
           <el-tag v-if="activity" size="small" effect="plain" :disable-transitions="true">
             {{ activity.type === 'learn' ? '学习' : '拓展' }}
           </el-tag>
+          <template v-if="currentResource">
+            <span>·</span>
+            <span class="topbar-res-title">{{ currentResource.title }}</span>
+            <span
+              class="topbar-res-type"
+              :style="{ color: RESOURCE_ACCENT_COLORS[currentResource.planRef.resourceType] || '#2B6FFF' }"
+            >{{ typeIcon(currentResource.planRef.resourceType) }} {{ typeLabel(currentResource.planRef.resourceType) }}</span>
+            <span v-if="currentResource.estimatedMin" class="topbar-res-duration">· {{ currentResource.estimatedMin }}分钟</span>
+          </template>
         </div>
       </div>
       <div class="flex items-center gap-4">
@@ -939,9 +1166,19 @@ onUnmounted(() => {
         >
           <el-icon><List /></el-icon>
         </el-button>
+        <el-button
+          text size="small"
+          :style="{ color: noteStore.sidebarOpen ? 'var(--lt-orange)' : 'var(--lt-text-auxiliary)' }"
+          title="笔记本"
+          @click="noteStore.toggleSidebar()"
+        >
+          <el-icon><EditPen /></el-icon>
+          笔记
+          <span v-if="noteStore.availableCount" class="topbar-badge">{{ noteStore.availableCount }}</span>
+        </el-button>
         <span class="text-sm font-mono" style="color: var(--lt-text-auxiliary);">
           <el-icon><Clock /></el-icon>
-          {{ formatTime(elapsedSeconds) }}
+          {{ formatTime(liveResourceTime) }}
         </span>
       </div>
     </div>
@@ -973,18 +1210,6 @@ onUnmounted(() => {
             :key="activeResIndex"
             class="resource-step"
           >
-            <!-- Resource Title + Info -->
-            <div v-if="currentResource.planRef.resourceType !== 'quiz'" class="resource-immersive-header">
-              <h2 class="resource-immersive-title">{{ currentResource.title }}</h2>
-              <div class="resource-immersive-info">
-                <span class="resource-immersive-type"
-                  :style="{ color: RESOURCE_ACCENT_COLORS[currentResource.planRef.resourceType] || '#2B6FFF' }"
-                >{{ typeIcon(currentResource.planRef.resourceType) }} {{ typeLabel(currentResource.planRef.resourceType) }}</span>
-                <span v-if="currentResource.estimatedMin" class="resource-immersive-duration">· 约{{ currentResource.estimatedMin }}分钟</span>
-              </div>
-              <div class="resource-immersive-divider"></div>
-            </div>
-
             <!-- Resource Body -->
             <div class="resource-section-body">
               <!-- Generating placeholder -->
@@ -1053,6 +1278,7 @@ onUnmounted(() => {
                 teleport-bar
                 @complete="onQuizComplete"
                 @back-to-path="clearState(); router.push('/path')"
+                @ask-ai="handleQuestionAskAi"
               />
 
               <!-- code -->
@@ -1064,6 +1290,11 @@ onUnmounted(() => {
                   :sources-count="currentResource.sourcesCount"
                 />
               </template>
+
+              <!-- html 交互文档 -->
+              <div v-else-if="currentResource.planRef.resourceType === 'html'" class="resource-html">
+                <HtmlSandboxViewer :content="currentResource.content || ''" :title="currentResource.title" />
+              </div>
 
               <!-- doc / reading with TOC sidebar -->
               <div v-else class="resource-doc-layout" @mouseup="onResourceMouseUp">
@@ -1182,47 +1413,96 @@ onUnmounted(() => {
       @select="onNavigatorSelect"
     />
 
-    <!-- Ask AI floating button (entry 2) -->
-    <button
-      v-if="showAskAiButton"
-      class="ask-ai-btn"
+    <!-- Selection toolbar -->
+    <div
+      v-if="showAskAiButton || showNoteButton"
+      class="selection-toolbar"
       :style="{ left: askAiPosition.x + 'px', top: askAiPosition.y + 'px' }"
-      @click.stop="handleAskAi"
     >
-      💬 问 AI
-    </button>
+      <button class="st-btn" @click.stop="handleAskAi">💬 问 AI</button>
+      <button class="st-btn st-btn-note" @click.stop="handleAddNote">📝 记笔记</button>
+    </div>
 
     <!-- Tutoring drawer (entry 3) -->
     <TutoringDrawer
       :visible="showTutoringDrawer"
-      @close="showTutoringDrawer = false"
+      :initial-question="selectedText"
+      :question-ref="questionRef"
+      :course-id="profileStore.activeCourseId"
+      @close="handleTutoringClose"
+      @dismiss-question-ref="handleDismissQuestionRef"
     />
 
     <!-- Floating FAB (entry 3) -->
     <FloatingFab @click="handleFabClick" />
 
+    <!-- Note Sidebar -->
+    <NoteSidebar
+      :course-id="profileStore.activeCourseId"
+      :resource-pack-id="currentResource?.planRef.resourcePackId || undefined"
+      :resource-title="currentResource?.title"
+      :section-title="noteContextSection"
+      :section-order="noteSectionOrder"
+    />
+
+    <!-- 离开提示遮罩 -->
+    <Transition name="fade">
+      <div v-if="isLearningAway" class="learning-away-overlay">
+        <div class="learning-away-card">
+          <p class="text-lg font-semibold mb-2">你已离开一会儿了</p>
+          <p class="text-sm mb-4" style="color: var(--lt-text-auxiliary);">学习计时已暂停</p>
+          <el-button type="primary" @click="resumeTracking">继续学习</el-button>
+        </div>
+      </div>
+    </Transition>
+
   </div>
 </template>
 
 <style scoped>
-/* Ask AI floating button */
-.ask-ai-btn {
+/* Selection toolbar (Ask AI + Note) */
+.selection-toolbar {
   position: fixed;
   transform: translate(-50%, -100%);
-  background: var(--lt-brand);
-  color: #fff;
-  border: none;
+  display: flex;
+  gap: 4px;
+  background: var(--lt-bg-card);
+  border: 1px solid var(--lt-border);
   border-radius: 8px;
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 4px 16px var(--lt-shadow-blue);
+  padding: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   z-index: 200;
-  white-space: nowrap;
-  transition: opacity 0.15s;
 }
-.ask-ai-btn:hover { background: var(--lt-brand-dark); }
+.st-btn {
+  padding: 5px 12px;
+  font-size: 13px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  font-weight: 500;
+  background: var(--lt-bg-page);
+  color: var(--lt-text-primary);
+}
+.st-btn:hover { background: var(--lt-brand-lightest); }
+.st-btn-note { color: var(--lt-orange); }
+.st-btn-note:hover { background: #fff5e6; }
+
+.topbar-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 8px;
+  background: var(--lt-orange);
+  color: #fff;
+  line-height: 1;
+}
 
 .learn-root {
   height: 100%;
@@ -1305,6 +1585,17 @@ onUnmounted(() => {
   min-width: 28px;
 }
 
+.topbar-res-title {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--lt-text-primary);
+}
+.topbar-res-type { font-size: 12px; font-weight: 600; }
+.topbar-res-duration { font-size: 12px; color: var(--lt-text-auxiliary); white-space: nowrap; }
+
 /* ── Content area ── */
 .learn-content {
   flex: 1;
@@ -1364,6 +1655,13 @@ onUnmounted(() => {
 
 .resource-section-body {
   padding: 0;
+}
+.resource-html {
+  width: 100vw;
+  margin-left: calc(-50vw + 50%);
+  margin-right: calc(-50vw + 50%);
+  margin-top: -32px;
+  max-width: none;
 }
 
 .resource-placeholder {
@@ -1807,6 +2105,13 @@ onUnmounted(() => {
     padding: 0;
   }
 
+  .resource-html {
+    width: 100vw;
+    margin-left: calc(-50vw + 50%);
+    margin-right: calc(-50vw + 50%);
+    margin-top: -20px;
+  }
+
   .toc-bar {
     padding: 0 16px;
     margin-top: 6px;
@@ -1837,4 +2142,19 @@ onUnmounted(() => {
   .step-back-leave-to { transform: translateX(24px) scale(0.98); }
 
 }
+
+/* 离开提示遮罩 */
+.learning-away-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2000; backdrop-filter: blur(4px);
+}
+.learning-away-card {
+  background: var(--lt-bg-card); border-radius: 16px;
+  padding: 32px 48px; text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+}
+.fade-enter-active, .fade-leave-active { transition: opacity 0.25s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

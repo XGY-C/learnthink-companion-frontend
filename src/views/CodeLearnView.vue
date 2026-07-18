@@ -76,9 +76,8 @@
             :visible="selectionMenu.visible"
             :x="selectionMenu.x"
             :y="selectionMenu.y"
-            @explain="onSelectionExplain"
-            @find-similar="onSelectionFindSimilar"
-            @ask="onSelectionAsk"
+            @smart-explain="onSelectionSmartExplain"
+            @ask-ai="onSelectionAskAi"
           />
 
           <!-- Toolbar -->
@@ -153,11 +152,30 @@
         <div v-if="currentHint?.codeSnippet" class="hint-code"><pre>{{ currentHint.codeSnippet }}</pre></div>
       </div>
     </Teleport>
+
+    <TutoringDrawer
+      :visible="showTutoringDrawer"
+      :initial-question="tutoringInitQuestion"
+      :quoted-text="tutoringQuotedText"
+      @close="handleTutoringClose"
+    />
+    <FloatingFab @click="handleFabClick" />
+
+    <!-- 离开提示遮罩 -->
+    <Transition name="fade">
+      <div v-if="isLearningAway" class="learning-away-overlay">
+        <div class="learning-away-card">
+          <p class="text-lg font-semibold mb-2">你已离开一会儿了</p>
+          <p class="text-sm mb-4" style="color: var(--lt-text-auxiliary);">学习计时已暂停</p>
+          <el-button type="primary" @click="resumeTracking">继续学习</el-button>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { CaretRight } from '@element-plus/icons-vue'
@@ -167,6 +185,8 @@ import CodeEditorPanel from '@/components/code/CodeEditorPanel.vue'
 import type { GutterMarkerDef, GuidedBlankDef } from '@/components/code/CodeEditorPanel.vue'
 import CodeOutputEnhanced from '@/components/code/CodeOutputEnhanced.vue'
 import SelectionFloatingMenu from '@/components/code/SelectionFloatingMenu.vue'
+import TutoringDrawer from '@/components/tutoring/TutoringDrawer.vue'
+import FloatingFab from '@/components/tutoring/FloatingFab.vue'
 import VariableHoverCard from '@/components/code/VariableHoverCard.vue'
 import CodeContextPanel from '@/components/code/CodeContextPanel.vue'
 import { runCode } from '@/utils/codeRunner'
@@ -175,8 +195,16 @@ import type {
   VariableInfo, TraceStep, FoldableRegion, StepHint
 } from '@/types/code'
 import type { CodeRunResult } from '@/types'
+import { useProfileStore } from '@/stores/profile'
+import { useLearningTracker } from '@/composables/useLearningTracker'
 
 const router = useRouter()
+const profileStore = useProfileStore()
+
+// 学习心跳追踪
+const { isAway: isLearningAway, resumeTracking } = useLearningTracker({
+  courseId: profileStore.activeCourseId,
+})
 
 const LINE_H = 22
 
@@ -292,6 +320,11 @@ const hoverY = ref(0)
 // Selection menu
 const selectionMenu = reactive({ visible: false, x: 0, y: 0, text: '' })
 let selectionTimer: ReturnType<typeof setTimeout> | null = null
+
+// Tutoring drawer
+const showTutoringDrawer = ref(false)
+const tutoringQuotedText = ref('')
+const tutoringInitQuestion = ref('')
 
 // Tutor
 const tutorMessages = ref<{ role: string; content: string }[]>([
@@ -507,18 +540,32 @@ function onSelectionChange(info: { text: string; from: number; to: number; x: nu
   }, 200)
 }
 
-function onSelectionExplain() {
+function onSelectionSmartExplain() {
+  const code = selectionMenu.text
   selectionMenu.visible = false
-  currentConcept.value = {
-    context: '选区代码',
-    name: '代码分析',
-    description: selectionMenu.text || '选中代码的解释...',
-  }
+  tutoringQuotedText.value = ''
+  tutoringInitQuestion.value = `请解释以下代码：\n\`\`\`\n${code}\n\`\`\``
+  showTutoringDrawer.value = true
 }
-function onSelectionFindSimilar() { selectionMenu.visible = false }
-function onSelectionAsk() {
+function onSelectionAskAi() {
   selectionMenu.visible = false
-  tutorMessages.value.push({ role: 'user', content: selectionMenu.text || '这段代码有什么问题吗？' })
+  tutoringQuotedText.value = selectionMenu.text
+  tutoringInitQuestion.value = ''
+  showTutoringDrawer.value = true
+}
+
+function handleFabClick() {
+  if (!showTutoringDrawer.value) {
+    tutoringQuotedText.value = ''
+    tutoringInitQuestion.value = ''
+  }
+  showTutoringDrawer.value = !showTutoringDrawer.value
+}
+
+function handleTutoringClose() {
+  showTutoringDrawer.value = false
+  tutoringQuotedText.value = ''
+  tutoringInitQuestion.value = ''
 }
 
 // ─── Editor Gutter Click ───
@@ -717,7 +764,7 @@ onUnmounted(() => {
 /* Left: Code Main Area */
 .code-main-area {
   flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px;
-  padding: 12px 0 12px 16px; overflow: hidden; transition: flex 0.3s;
+  padding: 12px 0 12px 16px; overflow-y: auto; transition: flex 0.3s;
 }
 .code-main-area.trajectory-mode { flex: 0 0 60%; }
 .code-main-area.edit-mode { flex: 0 0 75%; }
@@ -771,4 +818,19 @@ onUnmounted(() => {
 .hint-content { font-size: 13px; color: var(--lt-text-primary); line-height: 1.6; }
 .hint-code { margin-top: 8px; padding: 6px 10px; background: #1e1e2e; border-radius: var(--lt-radius-sm); }
 .hint-code pre { margin: 0; font-family: var(--lt-font-mono); font-size: 12px; color: #d4d4d4; }
+
+/* 离开提示遮罩 */
+.learning-away-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 3000; backdrop-filter: blur(4px);
+}
+.learning-away-card {
+  background: var(--lt-bg-card); border-radius: 16px;
+  padding: 32px 48px; text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+}
+.fade-enter-active, .fade-leave-active { transition: opacity 0.25s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

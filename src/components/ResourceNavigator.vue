@@ -124,6 +124,7 @@ const TYPE_ICONS: Record<string, string> = {
   video: '\uD83C\uDFAC',
   code: '\uD83D\uDCBB',
   quiz: '\uD83D\uDCDD',
+  html: '\uD83C\uDF10',
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -133,6 +134,7 @@ const TYPE_LABELS: Record<string, string> = {
   video: '视频',
   code: '代码',
   quiz: '测验',
+  html: '交互文档',
 }
 
 function typeIcon(type: string): string {

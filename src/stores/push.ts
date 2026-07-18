@@ -2,9 +2,11 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ScoredPack, RecommendationResponse, AppNotification, PushEvent } from '@/types'
 import { apiFetch } from '@/utils/api'
+import { useNotificationStore } from '@/stores/notification'
+import { ElMessage } from 'element-plus'
 
 /**
- * 精准推送 Store — 管理 Dashboard 推荐和推送通知
+ * 精准推送 Store - 管理 Dashboard 推荐和推送通知
  */
 export const usePushStore = defineStore('push', () => {
   // ===== Dashboard 推荐 =====
@@ -55,6 +57,7 @@ export const usePushStore = defineStore('push', () => {
       }
     } catch (e) {
       console.warn('Failed to fetch push notifications:', e)
+      ElMessage.warning('通知加载失败，请稍后重试')
     } finally {
       notificationsLoading.value = false
     }
@@ -82,10 +85,23 @@ export const usePushStore = defineStore('push', () => {
     if (notifications.value.length > 50) {
       notifications.value = notifications.value.slice(0, 50)
     }
+
+    // 弹出 Toast 通知
+    const notificationStore = useNotificationStore()
+    const isDaily = event.refType === 'daily'
+    notificationStore.push({
+      type: 'success',
+      title: event.title,
+      message: event.message,
+      packId: !isDaily && event.refType !== 'task' ? event.refId : undefined,
+      taskId: !isDaily && event.refType === 'task' ? event.refId : undefined,
+      dailyRefType: isDaily ? 'daily' : undefined,
+    })
   }
 
   /** 标记单条通知已读 */
   async function markAsRead(notificationId: string) {
+    console.log('markAsRead start', notificationId)
     try {
       await apiFetch(`/resources/recommendations/notifications/${notificationId}/read`, {
         method: 'PUT',
@@ -95,8 +111,10 @@ export const usePushStore = defineStore('push', () => {
         notifications.value[idx] = { ...notifications.value[idx], isRead: true }
         if (unreadCount.value > 0) unreadCount.value--
       }
+      console.log('markAsRead done', notificationId)
     } catch (e) {
-      console.warn('Failed to mark notification as read:', e)
+      console.warn('markAsRead failed', notificationId, e)
+      ElMessage.warning('标记已读失败')
     }
   }
 
@@ -108,6 +126,45 @@ export const usePushStore = defineStore('push', () => {
       unreadCount.value = 0
     } catch (e) {
       console.warn('Failed to mark all notifications as read:', e)
+      ElMessage.warning('操作失败，请稍后重试')
+    }
+  }
+
+  /** 删除单条通知 */
+  async function deleteNotification(notificationId: string) {
+    try {
+      await apiFetch(`/resources/recommendations/notifications/${notificationId}`, {
+        method: 'DELETE',
+      })
+      const idx = notifications.value.findIndex(n => n.id === notificationId)
+      if (idx >= 0) {
+        if (!notifications.value[idx].isRead && unreadCount.value > 0) {
+          unreadCount.value--
+        }
+        notifications.value.splice(idx, 1)
+      }
+    } catch (e) {
+      console.warn('Failed to delete notification:', e)
+      ElMessage.warning('删除失败')
+    }
+  }
+
+  /** 记录推荐反馈 */
+  async function recordFeedback(params: {
+    courseId: string
+    packId: string
+    action: string
+    source?: string
+    notificationId?: string
+    scoreJson?: string
+  }) {
+    try {
+      await apiFetch('/resources/recommendations/feedback', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      })
+    } catch (e) {
+      console.warn('Failed to record feedback:', e)
     }
   }
 
@@ -130,6 +187,8 @@ export const usePushStore = defineStore('push', () => {
     onPushEvent,
     markAsRead,
     markAllAsRead,
+    deleteNotification,
+    recordFeedback,
     clearRecommendations,
   }
 })
